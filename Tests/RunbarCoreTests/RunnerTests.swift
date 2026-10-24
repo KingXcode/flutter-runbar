@@ -19,6 +19,30 @@ final class RunnerTests: XCTestCase {
         XCTAssertNotNil(session.endedAt); XCTAssertNotNil(session.duration)
         XCTAssertEqual(try Data(contentsOf: store.directory(session.id).appendingPathComponent("output.raw")), Data("你好\nstderr\n".utf8))
     }
+    func testSmallOutputIsDeliveredBeforeProcessExits() throws {
+        let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+        let finished = expectation(description: "finished")
+        let launchedAt = Date()
+        var firstOutputDelay: TimeInterval?
+        var result: RunSession?
+        let runner = ProcessRunner(store: store) { event in
+            switch event {
+            case .output(let text):
+                if text.contains("ready"), firstOutputDelay == nil {
+                    firstOutputDelay = Date().timeIntervalSince(launchedAt)
+                }
+            case .finished(let session): result = session; finished.fulfill()
+            case .failure(let message): XCTFail(message)
+            default: break
+            }
+        }
+        runner.run(project: Project(path: store.root.path), preset: CommandPreset(command: "printf ready; sleep 3; printf done"), extraPath: "/usr/bin:/bin", shell: "/bin/sh")
+        wait(for: [finished], timeout: 10)
+        XCTAssertLessThan(try XCTUnwrap(firstOutputDelay), 1.5, "Short output must not wait for a full buffer or EOF")
+        let session = try XCTUnwrap(result)
+        XCTAssertEqual(session.status, .succeeded)
+        XCTAssertEqual(try Data(contentsOf: store.directory(session.id).appendingPathComponent("output.raw")), Data("readydone".utf8))
+    }
     func testMissingShellIsTerminalFailure() throws {
         let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
         let finished = expectation(description: "failed start")

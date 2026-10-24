@@ -1,0 +1,484 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
+		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
+		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
+		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
+		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterRunbarApp.swift; sourceTree = "<group>"; };
+		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
+		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
+		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
+		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
+		93EF2065DD5AA9968FE3FF8B /* Flutter Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Flutter Runbar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
+		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
+		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
+		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
+		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		16030357D28652FF245108AC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		49F345D6E984CFFA0AA42441 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
+			isa = PBXGroup;
+			children = (
+				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
+				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
+			);
+			path = RunbarCoreTests;
+			sourceTree = "<group>";
+		};
+		3D807E313C430C635BCA2CF1 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				D2BD235544BC4D93D198B57A /* flutter-runbar */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		6E46135F8D7D378CB421F75C /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				AF3C5D6C143F2EE52CA4BF57 /* FlutterRunbar */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		87BF212ED71F5E022BBD09EB /* scripts */ = {
+			isa = PBXGroup;
+			children = (
+				58E6091811E17D6C163ED7CB /* build-app.sh */,
+				B637E5526FA142797BA3D836 /* capture-preview.sh */,
+				8BA286984BB626AF54E8C607 /* process-tests.c */,
+				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
+				BEC4844EA1FB283BAA93DA69 /* test-process.sh */,
+			);
+			path = scripts;
+			sourceTree = "<group>";
+		};
+		9C78DA381C463E93DF22D6F5 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		AACE5E493712C470DE29553A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				93EF2065DD5AA9968FE3FF8B /* Flutter Runbar.app */,
+				87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AF3C5D6C143F2EE52CA4BF57 /* FlutterRunbar */ = {
+			isa = PBXGroup;
+			children = (
+				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
+			);
+			path = FlutterRunbar;
+			sourceTree = "<group>";
+		};
+		E75D9717D2FB3E952923DB50 = {
+			isa = PBXGroup;
+			children = (
+				1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */,
+				CE552C978360C0B9FEED0C40 /* README.md */,
+				3D807E313C430C635BCA2CF1 /* Packages */,
+				87BF212ED71F5E022BBD09EB /* scripts */,
+				6E46135F8D7D378CB421F75C /* Sources */,
+				9C78DA381C463E93DF22D6F5 /* Tests */,
+				AACE5E493712C470DE29553A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		03E1196E87EFD4CE9015F1B9 /* RunbarCoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD53674A38BDB5D14C752B01 /* Build configuration list for PBXNativeTarget "RunbarCoreTests" */;
+			buildPhases = (
+				F753576CA5F86FB27CF56D42 /* Sources */,
+				49F345D6E984CFFA0AA42441 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RunbarCoreTests;
+			packageProductDependencies = (
+				00F11F8B14F56EE3FC71ABC5 /* RunbarCore */,
+			);
+			productName = RunbarCoreTests;
+			productReference = 87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CEAE80F2C3266BFBEEC9F559 /* FlutterRunbar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1BC8E6E0F3EDE6F29FAE8846 /* Build configuration list for PBXNativeTarget "FlutterRunbar" */;
+			buildPhases = (
+				F2EAF89CB7608CCF1264F9BE /* Sources */,
+				16030357D28652FF245108AC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FlutterRunbar;
+			packageProductDependencies = (
+				1B09A9BEC3631911D658F3A4 /* RunbarCore */,
+			);
+			productName = FlutterRunbar;
+			productReference = 93EF2065DD5AA9968FE3FF8B /* Flutter Runbar.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1147C723EC96899A06E53BA9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					03E1196E87EFD4CE9015F1B9 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					CEAE80F2C3266BFBEEC9F559 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = BFD2E073D002EB63550E8C1D /* Build configuration list for PBXProject "FlutterRunbar" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E75D9717D2FB3E952923DB50;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				51DC198F39B1EA04C1487E25 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AACE5E493712C470DE29553A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CEAE80F2C3266BFBEEC9F559 /* FlutterRunbar */,
+				03E1196E87EFD4CE9015F1B9 /* RunbarCoreTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F2EAF89CB7608CCF1264F9BE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F753576CA5F86FB27CF56D42 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				638995230949F6C246161705 /* CoreTests.swift in Sources */,
+				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		47EF6E224A2740DD4A4189A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.kingxcode.flutter-runbar.tests";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		566C39C4656DF0616719370E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = FlutterRunbar;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.kingxcode.flutter-runbar";
+				PRODUCT_MODULE_NAME = FlutterRunbar;
+				PRODUCT_NAME = "Flutter Runbar";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		6CBBEA6AB736BC12AC888322 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = FlutterRunbar;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.kingxcode.flutter-runbar";
+				PRODUCT_MODULE_NAME = FlutterRunbar;
+				PRODUCT_NAME = "Flutter Runbar";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		98F7606DFFD6C22467026455 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B503CDA74287856360E13220 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.kingxcode.flutter-runbar.tests";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		F13F53FBFCAB9A25F991920C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1BC8E6E0F3EDE6F29FAE8846 /* Build configuration list for PBXNativeTarget "FlutterRunbar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6CBBEA6AB736BC12AC888322 /* Debug */,
+				566C39C4656DF0616719370E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BFD2E073D002EB63550E8C1D /* Build configuration list for PBXProject "FlutterRunbar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F13F53FBFCAB9A25F991920C /* Debug */,
+				98F7606DFFD6C22467026455 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DD53674A38BDB5D14C752B01 /* Build configuration list for PBXNativeTarget "RunbarCoreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B503CDA74287856360E13220 /* Debug */,
+				47EF6E224A2740DD4A4189A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		51DC198F39B1EA04C1487E25 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		00F11F8B14F56EE3FC71ABC5 /* RunbarCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RunbarCore;
+		};
+		1B09A9BEC3631911D658F3A4 /* RunbarCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RunbarCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1147C723EC96899A06E53BA9 /* Project object */;
+}

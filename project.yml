@@ -1,0 +1,88 @@
+name: FlutterRunbar
+fileGroups:
+  - README.md
+  - project.yml
+  - scripts
+options:
+  minimumXcodeGenVersion: 2.46.0
+  xcodeVersion: "26.0"
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+packages:
+  RunbarModules:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+targets:
+  FlutterRunbar:
+    type: application
+    productName: Flutter Runbar
+    platform: macOS
+    sources:
+      - Sources/FlutterRunbar
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Flutter Runbar
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_NAME: Flutter Runbar
+        EXECUTABLE_NAME: FlutterRunbar
+        PRODUCT_MODULE_NAME: FlutterRunbar
+        PRODUCT_BUNDLE_IDENTIFIER: dev.kingxcode.flutter-runbar
+        ENABLE_APP_SANDBOX: false
+        ENABLE_HARDENED_RUNTIME: true
+        COMBINE_HIDPI_IMAGES: true
+    dependencies:
+      - package: RunbarModules
+        product: RunbarCore
+  RunbarCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/RunbarCoreTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.kingxcode.flutter-runbar.tests
+        GENERATE_INFOPLIST_FILE: true
+    dependencies:
+      - package: RunbarModules
+        product: RunbarCore
+schemes:
+  FlutterRunbar:
+    build:
+      targets:
+        FlutterRunbar: all
+    run:
+      config: Debug
+      environmentVariables:
+        OS_ACTIVITY_MODE: disable
+        IDELogRedirectionPolicy: oslogToStdio
+    test:
+      config: Debug
+      environmentVariables:
+        OS_ACTIVITY_MODE: default
+      targets:
+        - RunbarCoreTests
+    profile:
+      config: Release
+      environmentVariables:
+        OS_ACTIVITY_MODE: default
+    analyze:
+      config: Debug
+    archive:
+      config: Release

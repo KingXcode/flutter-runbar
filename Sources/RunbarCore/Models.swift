@@ -15,7 +15,7 @@ public struct Project: Codable, Identifiable, Equatable {
 }
 public struct Configuration: Codable {
     public var projects: [Project] = []
-    public var extraPath: String = "\(NSHomeDirectory())/.pub-cache/bin:/opt/homebrew/bin:/usr/local/bin"
+    public var extraPath: String = CommandEnvironment.extraPath("")
     public init() {}
 }
 public enum RunStatus: String, Codable { case running, succeeded, failed, stopped, interrupted }

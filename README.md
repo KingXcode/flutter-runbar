@@ -25,7 +25,16 @@ macOS 26+ 的原生 SwiftUI 菜单栏 Flutter 开发辅助工具。独立新项�
 
 ## 构建
 
-用 Xcode 打开 `Package.swift`，选择 `FlutterRunbar` 可执行产品，运行到本机。也可以：
+用 Xcode 打开 `FlutterRunbar.xcodeproj`，选择 **FlutterRunbar** Scheme 和 **My Mac**：
+
+- `⌘R`：编译并运行应用，入口在系统菜单栏。
+- `⌘U`：运行 `RunbarCoreTests` 单元测试。
+- `Product > Archive`：使用 Release 配置归档，在 Organizer 查看归档和导出选项。
+- 版本号和构建号在应用 Target 的 General 中修改；证书与开发团队在 Signing & Capabilities 中配置。
+
+工程默认使用本机 ad hoc 签名，无需开发者账号。正式分发时需设置自己的 Team、Developer ID 签名与公证。应用需要执行用户命令和访问项目目录，因此未启用 App Sandbox。
+
+命令行测试、打包：
 
 ```sh
 swift test
@@ -36,15 +45,23 @@ open 'dist/Flutter Runbar.app'
 
 构建脚本生成可放进 Applications 的 `.app`，仅使用本机 ad hoc 签名，不是 Developer ID 签名，未公证。跨机器分发可能遇到 Gatekeeper；不要关闭系统安全功能。正式分发需单独配置合法签名与公证。当前构建只生成所在机器架构的应用。
 
+`FlutterRunbar.xcodeproj`、共享 Scheme 和 `Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 执行 `xcodegen generate`。如果直接在 Xcode 修改工程设置，应同步修改 `project.yml`，避免重新生成时覆盖设置。
+
+### Xcode 控制台系统日志
+
+共享 Scheme 的 `Run > Arguments > Environment Variables` 默认启用 `OS_ACTIVITY_MODE=disable` 与 `IDELogRedirectionPolicy=oslogToStdio`，用于减少 macOS App Intents / `com.apple.linkd.autoShortcut` 等系统服务日志。它会抑制调试进程的统一系统日志，不是只过滤某一个错误；需要排查系统框架时取消勾选这两个变量即可恢复。普通 stdout/stderr 和应用保存的命令原始日志仍正常工作。测试和 Profile 使用默认日志模式，Release 归档不会写入这些运行环境变量。系统服务连接问题本身不由这项设置修复。
+
+日志模式说明参考 [WebKit 官方调试文档](https://webkit.org/debugging-webkit/#logging)。
+
 ## 使用
 
 1. 从菜单栏打开管理窗口，点击「添加项目」。项目目录可包含空格或中文。
 2. 选择或编辑命令。支持 zsh 引号、管道与环境变量赋值，例如 `fvm flutter run -d macos`。
 3. 点击「运行」。查看运行输出和开始时间。DevTools 出现后点击「打开」或「复制」。
 4. 点击「停止」。界面等待最多约 6 秒的正常升级阶段，并继续排空输出，再保存最终退出结果。
-5. 从左侧选择运行记录，点击「本地日志」查看全部文件。
+5. 点击左侧运行记录可选中高亮并查看输出，再次点击同一条取消选中，右侧恢复默认空白。取消查看不停止命令；任务结束也不会改变当前选中状态。选中记录后点击「本地日志」查看全部文件。
 
-命令由 `/bin/zsh -l -c` 执行，工作目录通过进程 API 设置，不拼接 `cd`。额外 PATH 默认包括 `~/.pub-cache/bin` 的展开路径、`/opt/homebrew/bin`、`/usr/local/bin`；可在「PATH 设置」添加 FVM 实际所在目录。登录 zsh 会读取你自己的登录配置；本应用不安装 SDK、不修改 shell 文件。PATH 只影响新运行。
+命令由 `/bin/zsh -l -c` 执行，工作目录通过进程 API 设置，不拼接 `cd`。每次运行会在自定义 PATH 后补充 `~/.pub-cache/bin`、`~/fvm/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，已有配置也会生效；自定义路径中的 `~/` 会展开为用户主目录。可在「PATH 设置」添加其他 SDK 或 FVM 实际所在目录，自定义路径优先。登录 zsh 会读取你自己的登录配置；本应用不安装 SDK、不修改 shell 文件。PATH 只影响新运行。
 
 只保存你信任的命令。它拥有当前用户的系统权限，应用没有启用 App Sandbox。输出或日志内容永远不会被执行。stdin 接到 `/dev/null`，当前版本没有交互式终端、Flutter 热重载键盘输入或 PTY；需要交互的操作请使用终端。不要配置 `&`、`nohup`、`setsid` 或其他后台化 / 脱离进程组的命令：主动脱离进程组的进程不能由本应用可靠管理。
 
@@ -72,6 +89,9 @@ open 'dist/Flutter Runbar.app'
 
 ## 工程结构
 
+- `FlutterRunbar.xcodeproj`：标准 macOS App Target、XCTest Target 和共享 Scheme。
+- `Resources/Info.plist`：应用名称、版本变量和菜单栏应用配置。
+- `project.yml`：可重新生成 Xcode 工程的 XcodeGen 配置。
 - `RunbarCore`：配置/运行模型、原始日志、增量解析、运行生命周期，可由 XCTest 单独测试。
 - `RunbarProcess`：`posix_spawn`、独立进程组、信号、waitpid；避免在多线程 GUI 中使用 fork 后复杂逻辑。
 - `FlutterRunbar`：SwiftUI MenuBarExtra / NavigationSplitView，AppKit 目录选择、退出确认、原生文本视图。
@@ -85,6 +105,6 @@ open 'dist/Flutter Runbar.app'
 - https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 - https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
 
-创建时的 Linux 环境没有 Swift 编译器，也不能执行 SwiftUI/AppKit。此环境只运行 C 进程层测试和脚本静态检查；Swift 测试、macOS 编译及图形交互必须在 macOS 或经授权的 CI 上验证。不要把源代码准备完成理解为已通过原生验证。
+最初在 Linux 环境创建，后续已在本机 macOS / Xcode 环境执行 Swift 测试、C 进程集成测试和原生应用构建。Xcode 工程的测试与 Release Archive 也需在 macOS 上验证；CI 使用上述标准 macOS runner。
 
 建议原生验收：从 Finder 启动应用（非终端环境）、FVM PATH、真实 Flutter 项目含空格路径、重复运行/停止、两种流的大量输出、中文/Emoji、命令失败、无换行 DevTools、退出取消/确认、磁盘不可写、日志恢复及多条历史记录切换。

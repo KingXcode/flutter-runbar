@@ -2,6 +2,17 @@ import XCTest
 @testable import RunbarCore
 
 final class CoreTests: XCTestCase {
+    func testCommandPathIncludesFVMForExistingConfiguration() {
+        let home = "/Users/a developer"
+        let legacyPath = "\(home)/.pub-cache/bin:/opt/homebrew/bin:/usr/local/bin"
+        let paths = CommandEnvironment.extraPath(legacyPath, homeDirectory: home).split(separator: ":").map(String.init)
+        XCTAssertEqual(paths, ["\(home)/.pub-cache/bin", "/opt/homebrew/bin", "/usr/local/bin", "\(home)/fvm/bin"])
+    }
+    func testCommandPathExpandsHomeAndPreservesCustomPriority() {
+        let home = "/Users/a developer"
+        let paths = CommandEnvironment.extraPath("~/custom tools/bin:~/fvm/bin:/opt/homebrew/bin", homeDirectory: home).split(separator: ":").map(String.init)
+        XCTAssertEqual(paths, ["\(home)/custom tools/bin", "\(home)/fvm/bin", "/opt/homebrew/bin", "\(home)/.pub-cache/bin", "/usr/local/bin"])
+    }
     func testUTF8AndANSISplitAtEveryByte() {
         var parser = OutputParser()
         let input = "你好\u{1b}[31m Flutter \u{1b}[0m🚀\n"

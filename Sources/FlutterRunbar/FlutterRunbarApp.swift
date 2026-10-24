@@ -114,22 +114,29 @@ final class AppModel: ObservableObject {
     }
     func run() {
         guard !busy, let project, let preset, let runner else { return }
-        guard persist() else { return }; busy = true; stopping = false; logText = ""; runner.run(project: project, preset: preset, extraPath: config.extraPath)
+        guard persist() else { return }; busy = true; stopping = false; selectedSession = nil; logText = ""; runner.run(project: project, preset: preset, extraPath: config.extraPath)
     }
     func stop() { guard busy else { return }; stopping = true; runner?.stop() }
+    func toggleSession(_ session: RunSession) {
+        selectedSession = selectedSession == session.id ? nil : session.id
+        loadLog()
+    }
     func handle(_ event: ProcessRunner.Event) {
         switch event {
         case .started(let value): running = value; history.insert(value, at: 0); selectedSession = value.id
         case .output(let text):
-            if selectedSession == running?.id {
+            if let running, selectedSession == running.id {
                 logText += text
                 if logText.utf8.count > 200_000 { logText = "[实时视图已截断；完整输出仍保存在本地]\n" + String(decoding: logText.utf8.suffix(100_000), as: UTF8.self) }
             }
         case .updated(let value): running = value; replace(value)
         case .finished(let value):
-            replace(value); selectedSession = value.id; running = nil; busy = false; stopping = false
+            // A launch failure has no .started event, so select its error record.
+            // Otherwise keep the user's current selection, including no selection.
+            if running == nil { selectedSession = value.id }
+            replace(value); running = nil; busy = false; stopping = false
             if let problem = value.error { error = problem }
-            loadLog()
+            if selectedSession == value.id { loadLog() }
             if quitWhenFinished { NSApp.reply(toApplicationShouldTerminate: true) }
         case .failure(let message): error = message
         case .rejected(let message):
@@ -140,7 +147,8 @@ final class AppModel: ObservableObject {
         if let i = history.firstIndex(where: { $0.id == value.id }) { history[i] = value } else { history.insert(value, at: 0) }
     }
     func loadLog() {
-        guard let id = selectedSession, let store else { logText = ""; return }
+        logText = ""
+        guard let id = selectedSession, let store else { return }
         do { logText = try store.tail(id) } catch { self.error = "读取日志失败：\(error.localizedDescription)" }
     }
     func showFiles() { guard let id = selectedSession, let store else { return }; NSWorkspace.shared.open(store.directory(id)) }
@@ -185,13 +193,23 @@ struct ManagerView: View {
                 }
                 Section("运行记录") {
                     ForEach(model.history) { session in
-                        Button { model.selectedSession = session.id; model.loadLog() } label: {
+                        Button { model.toggleSession(session) } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(URL(fileURLWithPath: session.projectPath).lastPathComponent).font(.headline)
                                 Text(session.startedAt, format: .dateTime.month().day().hour().minute().second()).font(.caption)
                                 Text(statusLabel(session.status)).font(.caption).foregroundStyle(session.status == .failed ? .red : .secondary)
-                            }.padding(.vertical, 3)
-                        }.buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(model.selectedSession == session.id ? Color.accentColor.opacity(0.2) : Color.clear)
+                        )
+                        .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
+                        .help(model.selectedSession == session.id ? "再次点击取消选中" : "查看运行记录")
                     }
                 }
             }.navigationSplitViewColumnWidth(min: 200, ideal: 230)

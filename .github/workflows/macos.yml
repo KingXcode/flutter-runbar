@@ -26,7 +26,7 @@ jobs:
           xcrun --sdk macosx --show-sdk-version
       - name: Core and process tests
         run: |
-          swift test
+          xcodebuild -project FlutterRunbar.xcodeproj -scheme FlutterRunbar -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGN_IDENTITY=- test
           bash scripts/test-process.sh
       - name: Build app bundle
         run: bash scripts/build-app.sh

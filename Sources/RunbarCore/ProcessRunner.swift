@@ -56,7 +56,7 @@ public final class ProcessRunner: @unchecked Sendable {
             try store.save(next)
             log = try RunLog(directory: store.directory(next.id))
             var child: pid_t = 0; var output: Int32 = -1
-            let error = rb_spawn(shell, preset.command, project.path, extraPath, &child, &output)
+            let error = rb_spawn(shell, preset.command, project.path, CommandEnvironment.extraPath(extraPath), &child, &output)
             guard error == 0 else { throw RunbarError.message("启动失败：\(String(cString: strerror(error)))") }
             pid = child; session = next; pipeEnded = false; stopped = false
             parser = OutputParser(); start = .now(); stopTime = nil; stopStage = 0
@@ -68,15 +68,27 @@ public final class ProcessRunner: @unchecked Sendable {
             // A single pipe merges stdout/stderr in OS arrival order. Do not claim
             // source-stream identity or exact originating timestamps.
             DispatchQueue.global(qos: .utility).async { [weak self] in
-                let handle = FileHandle(fileDescriptor: output, closeOnDealloc: true)
-                do {
-                    while let data = try handle.read(upToCount: 16_384), !data.isEmpty {
+                defer {
+                    close(output)
+                    self?.queue.async { self?.pipeEnded = true }
+                }
+                var buffer = [UInt8](repeating: 0, count: 16_384)
+                while true {
+                    // POSIX read returns currently available pipe bytes. Foundation's
+                    // read(upToCount:) can wait to fill the requested size on macOS.
+                    let count = buffer.withUnsafeMutableBytes { read(output, $0.baseAddress, $0.count) }
+                    if count > 0 {
+                        let data = Data(buffer.prefix(count))
                         // Backpressure bounds RAM; raw output is never truncated.
                         self?.queue.sync { self?.receive(data) }
+                    } else if count == 0 {
+                        break
+                    } else if errno != EINTR {
+                        let message = String(cString: strerror(errno))
+                        self?.queue.sync { self?.loggingFailed("读取输出失败：\(message)") }
+                        break
                     }
-                } catch { self?.queue.sync { self?.loggingFailed("读取输出失败：\(error.localizedDescription)") } }
-                try? handle.close()
-                self?.queue.async { self?.pipeEnded = true }
+                }
             }
         } catch {
             next.status = .failed; next.endedAt = Date(); next.error = error.localizedDescription
