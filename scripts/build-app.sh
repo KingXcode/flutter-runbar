@@ -3,7 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname -s)" != Darwin ]]; then echo 'macOS 26 + Xcode 26 required' >&2; exit 1; fi
 export MACOSX_DEPLOYMENT_TARGET=26.0
-swift build -c release
+if [[ "${BUILD_SCREENSHOT_PREVIEW:-0}" == 1 ]]; then
+  swift build -c release -Xswiftc -DSCREENSHOT_PREVIEW
+else
+  swift build -c release
+fi
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP="$PWD/dist/Flutter Runbar.app"
 mkdir -p "$APP/Contents/MacOS"

@@ -61,6 +61,12 @@ final class AppModel: ObservableObject {
             selectedProject = config.projects.first?.id; selectedPreset = config.projects.first?.presets.first?.id
             runner = ProcessRunner(store: store) { [weak self] event in self?.handle(event) }
             if !store.warnings.isEmpty { error = store.warnings.joined(separator: "\n") }
+            #if SCREENSHOT_PREVIEW
+            // Only the explicit screenshot build selects fixture history automatically.
+            // No command is launched by this path.
+            selectedSession = history.first?.id
+            loadLog()
+            #endif
         } catch { self.error = "初始化失败，请检查本地数据权限：\(error.localizedDescription)" }
     }
     var project: Project? { config.projects.first { $0.id == selectedProject } }
@@ -217,6 +223,17 @@ struct ManagerView: View {
                 Text("stdout / stderr 按接收顺序合并；完整原始字节与分块时间索引保存在本地。不会上传日志，也不会自动打开链接。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(20)
+            #if SCREENSHOT_PREVIEW
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    for window in NSApp.windows where window.frame.width > 600 {
+                        window.title = "Flutter Runbar · 演示数据（非真实运行）"
+                        window.makeKeyAndOrderFront(nil)
+                    }
+                }
+            }
+            #endif
         }
         .sheet(isPresented: $editing) {
             VStack(alignment: .leading, spacing: 16) {

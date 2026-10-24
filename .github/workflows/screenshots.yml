@@ -1,0 +1,33 @@
+name: Capture fictional UI preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ui-preview
+  cancel-in-progress: true
+jobs:
+  capture:
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: '26.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build screenshot-only app
+        env:
+          BUILD_SCREENSHOT_PREVIEW: '1'
+        run: bash scripts/build-app.sh
+      - name: Capture real app window with fictional data
+        run: bash scripts/capture-preview.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: FlutterRunbar-UI-preview
+          path: |
+            screenshots/*.png
+            screenshots/provenance.txt
+          retention-days: 3
