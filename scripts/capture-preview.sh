@@ -11,6 +11,10 @@ TEXT
 python3 scripts/seed-screenshot-fixture.py
 open -n 'dist/Flutter Runbar.app'
 sleep 6
+if ! pgrep -x FlutterRunbar >/dev/null; then
+  echo 'Screenshot application process is not running.' >&2
+  exit 1
+fi
 cat > screenshots/find-window.swift <<'SWIFT'
 import Foundation
 import CoreGraphics
@@ -25,6 +29,8 @@ for info in windows {
     print(id)
     exit(0)
 }
+let owners = Set(windows.compactMap { $0[kCGWindowOwnerName as String] as? String }).sorted()
+fputs("Visible window owners: \(owners.joined(separator: ", "))\n", stderr)
 fputs("No visible Flutter Runbar management window. GUI capture unavailable.\n", stderr)
 exit(1)
 SWIFT

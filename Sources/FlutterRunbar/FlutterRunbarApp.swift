@@ -23,6 +23,24 @@ struct FlutterRunbarApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    #if SCREENSHOT_PREVIEW
+    private var previewWindow: NSWindow?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // A menu-bar agent may not instantiate its Window scene automatically.
+        // Host the exact production ManagerView explicitly for screenshot builds.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false
+        )
+        window.title = "Flutter Runbar · 演示数据（非真实运行）"
+        window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared))
+        window.center()
+        previewWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    #endif
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let model = AppModel.shared
         guard model.busy else { return .terminateNow }
