@@ -180,6 +180,18 @@ struct ManagerView: View {
     @State private var presetName = ""
     @State private var command = ""
     @State private var pathSettings = false
+    @State private var collapsedHistoryProjects = Set<String>()
+    private var historyGroups: [ProjectHistoryGroup] {
+        Dictionary(grouping: model.history, by: \.projectPath)
+            .map { path, sessions in
+                ProjectHistoryGroup(path: path, sessions: sessions.sorted { $0.startedAt > $1.startedAt })
+            }
+            .sorted {
+                let left = $0.sessions.first?.startedAt ?? .distantPast
+                let right = $1.sessions.first?.startedAt ?? .distantPast
+                return left == right ? $0.path < $1.path : left > right
+            }
+    }
     var body: some View {
         NavigationSplitView {
             List {
@@ -192,27 +204,52 @@ struct ManagerView: View {
                     Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
                 }
                 Section("运行记录") {
-                    ForEach(model.history) { session in
-                        Button { model.toggleSession(session) } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(URL(fileURLWithPath: session.projectPath).lastPathComponent).font(.headline)
-                                Text(session.startedAt, format: .dateTime.month().day().hour().minute().second()).font(.caption)
-                                Text(statusLabel(session.status)).font(.caption).foregroundStyle(session.status == .failed ? .red : .secondary)
+                    ForEach(historyGroups) { group in
+                        DisclosureGroup(isExpanded: Binding(
+                            get: { !collapsedHistoryProjects.contains(group.path) },
+                            set: { expanded in
+                                if expanded { collapsedHistoryProjects.remove(group.path) }
+                                else { collapsedHistoryProjects.insert(group.path) }
                             }
-                            .padding(.vertical, 3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                        )) {
+                            ForEach(group.sessions) { session in
+                                Button { model.toggleSession(session) } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(session.command)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .lineLimit(1).truncationMode(.middle)
+                                        Text(session.startedAt, format: .dateTime.month().day().hour().minute().second()).font(.caption)
+                                        Text(statusLabel(session.status)).font(.caption).foregroundStyle(session.status == .failed ? .red : .secondary)
+                                    }
+                                    .padding(.vertical, 3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .listRowBackground(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(model.selectedSession == session.id ? Color.accentColor.opacity(0.2) : Color.clear)
+                                )
+                                .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
+                                .help(session.command + (model.selectedSession == session.id ? "\n再次点击取消选中" : "\n查看运行记录"))
+                            }
+                        } label: {
+                            HStack {
+                                Label(URL(fileURLWithPath: group.path).lastPathComponent, systemImage: "folder")
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Text(group.sessions.count, format: .number).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .help(group.path)
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(model.selectedSession == session.id ? Color.accentColor.opacity(0.2) : Color.clear)
-                        )
-                        .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
-                        .help(model.selectedSession == session.id ? "再次点击取消选中" : "查看运行记录")
                     }
                 }
             }.navigationSplitViewColumnWidth(min: 200, ideal: 230)
+                .onChange(of: model.selectedSession) { _, id in
+                    if let session = model.history.first(where: { $0.id == id }) {
+                        collapsedHistoryProjects.remove(session.projectPath)
+                    }
+                }
         } detail: {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -295,6 +332,12 @@ struct ManagerView: View {
             Button("知道了") { model.error = nil }
         } message: { Text(model.error ?? "") }
     }
+}
+
+private struct ProjectHistoryGroup: Identifiable {
+    let path: String
+    let sessions: [RunSession]
+    var id: String { path }
 }
 
 private func statusLabel(_ status: RunStatus) -> String {
