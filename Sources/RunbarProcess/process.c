@@ -33,7 +33,12 @@ int rb_spawn(const char *shell, const char *command, const char *directory,
     error = posix_spawnattr_init(&attributes);
     if (error) { posix_spawn_file_actions_destroy(&actions); close(output[0]); close(output[1]); return error; }
 #define CHECK(call) do { if (!error) error = (call); } while (0)
+#ifdef __APPLE__
+    // macOS 26 implements the standardized API; the _np spelling is deprecated.
+    CHECK(posix_spawn_file_actions_addchdir(&actions, directory));
+#else
     CHECK(posix_spawn_file_actions_addchdir_np(&actions, directory));
+#endif
     CHECK(posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO));
     CHECK(posix_spawn_file_actions_adddup2(&actions, output[1], STDERR_FILENO));
     CHECK(posix_spawn_file_actions_addclose(&actions, output[0]));
