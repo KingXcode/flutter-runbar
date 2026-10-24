@@ -1,0 +1,39 @@
+name: macOS 26 build and tests
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: '26.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Core and process tests
+        run: |
+          swift test
+          bash scripts/test-process.sh
+      - name: Build app bundle
+        run: bash scripts/build-app.sh
+      - name: Archive
+        run: ditto -c -k --keepParent 'dist/Flutter Runbar.app' dist/FlutterRunbar-macOS26-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlutterRunbar-macOS26-arm64
+          path: dist/FlutterRunbar-macOS26-arm64.zip
+          retention-days: 3
