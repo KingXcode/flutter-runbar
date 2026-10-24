@@ -44,6 +44,24 @@ int main(void) {
     assert(kill(unrelated, 0) == 0);
     rb_signal(unrelated, SIGKILL); drain(unrelated_fd, NULL, 0); rb_wait(unrelated, &code);
     puts("PASS escalation stops owned child tree, unrelated group survives");
+    assert(rb_spawn("/bin/sh", "exit 0", directory, "/usr/bin:/bin", &pid, &fd) == 0);
+    drain(fd, NULL, 0);
+    siginfo_t info = {0};
+    assert(waitid(P_PID, (id_t)pid, &info, WEXITED | WNOWAIT) == 0);
+    int signal_error = rb_signal(pid, SIGTERM);
+    assert(signal_error == 0 || signal_error == ESRCH);
+    signal_error = rb_signal(pid, SIGKILL);
+    assert(signal_error == 0 || signal_error == ESRCH);
+    assert(rb_wait(pid, &code) == 0 && code == 0);
+    puts("PASS repeated stop signals after exit do not report permission errors");
+    assert(rb_spawn("/bin/sh", "trap '' INT TERM; sleep 30 >/dev/null 2>&1 & exit 0", directory, "/usr/bin:/bin", &pid, &fd) == 0);
+    drain(fd, NULL, 0);
+    assert(waitid(P_PID, (id_t)pid, &info, WEXITED | WNOWAIT) == 0);
+    assert(rb_signal(pid, SIGINT) == 0);
+    assert(rb_signal(pid, SIGTERM) == 0);
+    assert(rb_signal(pid, SIGKILL) == 0);
+    assert(rb_wait(pid, &code) == 0 && code == 0);
+    puts("PASS exited leader still permits escalation for redirected descendants");
     pid_t closed_stdio_test = fork(); assert(closed_stdio_test >= 0);
     if (closed_stdio_test == 0) {
         close(0); close(1); close(2);

@@ -9,7 +9,33 @@
 #include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#ifdef __APPLE__
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#endif
 extern char **environ;
+
+#ifdef __APPLE__
+static int group_has_no_live_processes(pid_t pgid) {
+    int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid};
+    size_t size = 0;
+    if (sysctl(name, 4, NULL, &size, NULL, 0) < 0) return 0;
+    if (size == 0) return 1;
+    struct kinfo_proc *processes = malloc(size);
+    if (!processes) return 0;
+    // A failed or incomplete snapshot must preserve the original signal error.
+    if (sysctl(name, 4, processes, &size, NULL, 0) < 0) {
+        free(processes); return 0;
+    }
+    int no_live_processes = 1;
+    for (size_t i = 0; i < size / sizeof(*processes); ++i) {
+        if (processes[i].kp_proc.p_stat != SZOMB) {
+            no_live_processes = 0; break;
+        }
+    }
+    free(processes); return no_live_processes;
+}
+#endif
 
 int rb_spawn(const char *shell, const char *command, const char *directory,
              const char *path, pid_t *pid, int *output_fd) {
@@ -61,7 +87,15 @@ int rb_spawn(const char *shell, const char *command, const char *directory,
 }
 int rb_signal(pid_t pid, int sig) {
     if (pid <= 1) return EINVAL;
-    return kill(-pid, sig) == 0 ? 0 : errno;
+    if (kill(-pid, sig) == 0) return 0;
+    int error = errno;
+#ifdef __APPLE__
+    // Darwin returns EPERM for a group containing only unreaped zombies.
+    // Keep the leader unreaped to reserve its PID, but treat that group as gone.
+    // Do not hide genuine permission errors while any live member remains.
+    if (error == EPERM && group_has_no_live_processes(pid)) return ESRCH;
+#endif
+    return error;
 }
 int rb_wait(pid_t pid, int *exit_code) {
     int status; pid_t result;

@@ -37,6 +37,7 @@ final class RunnerTests: XCTestCase {
         runner = ProcessRunner(store: store) { event in
             switch event {
             case .started: runner.stop()
+            case .failure(let message): XCTFail("Stopping an owned process must not report an error: \(message)")
             case .finished(let session): XCTAssertEqual(session.status, .stopped); finished.fulfill()
             default: break
             }
