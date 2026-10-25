@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewWindow: NSWindow?
     private var previewMenuWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let flag = ProcessInfo.processInfo.arguments.firstIndex(of: "--capture-real-menu"),
+           ProcessInfo.processInfo.arguments.indices.contains(flag + 1) {
+            let folder = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[flag + 1], isDirectory: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.captureActualMenu(in: folder) }
+            return
+        }
         // A menu-bar agent may not instantiate its Window scene automatically.
         // Host the exact production ManagerView explicitly for screenshot builds.
         let window = NSWindow(
@@ -49,6 +55,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuWindow.contentView = NSHostingView(rootView: MenuContent(model: AppModel.shared))
         previewMenuWindow = menuWindow
         menuWindow.makeKeyAndOrderFront(nil)
+    }
+    private func captureActualMenu(in folder: URL) {
+        func statusButtons(in view: NSView) -> [NSStatusBarButton] {
+            var found = (view as? NSStatusBarButton).map { [$0] } ?? []
+            for child in view.subviews { found += statusButtons(in: child) }
+            return found
+        }
+        func report(_ text: String, success: Bool) {
+            let name = success ? "actual-menu-ready.txt" : "actual-menu-blocked.txt"
+            try? text.write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        // Public app-owned view hierarchy only: no private selectors/KVC,
+        // Accessibility APIs, global input injection, or TCC changes.
+        let buttons = NSApp.windows.flatMap { window in
+            window.contentView.map { statusButtons(in: $0) } ?? []
+        }
+        guard buttons.count == 1, let button = buttons.first, button.isEnabled else {
+            report("Could not uniquely locate this app's public NSStatusBarButton (found \(buttons.count)). No permission or security changes attempted.", success: false)
+            return
+        }
+        for window in NSApp.windows where window.frame.width > 400 { window.orderOut(nil) }
+        button.performClick(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            // In this mode no preview host is created. A visible app-owned panel
+            // of the menu's width therefore verifies the actual MenuBarExtra opened.
+            let panels = NSApp.windows.filter { $0.isVisible && $0.frame.width >= 600 && $0.frame.width < 800 && $0.frame.height > 100 }
+            guard panels.count == 1 else {
+                report("Status-item action invoked, but actual MenuBarExtra panel was not uniquely visible (found \(panels.count)). No substitute window was created.", success: false)
+                return
+            }
+            report("Opened the app's actual MenuBarExtra through its own NSStatusBarButton.performClick. Fictional data; no command executed. No preview host or permission changes.", success: true)
+        }
     }
     #endif
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
