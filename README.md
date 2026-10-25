@@ -94,3 +94,11 @@ open 'dist/Flutter Runbar.app'
 
 
 主界面将项目导航、当前项目的命令控制、历史记录和输出日志分开显示。状态标签同时使用文字与图标，配色跟随 macOS 浅色/深色模式；紧凑菜单栏布局保持不变。日志区的本地文件路径和 Finder 按钮始终绑定当前选中的运行记录。
+
+### 常用命令模板
+
+主界面命令旁的「+」可选择 15 个模板，再点「填入下方编辑区」：macOS / Chrome 运行、获取依赖、检查依赖更新、清理构建缓存、代码检查、测试、Dart 格式化、设备列表、环境诊断，以及 macOS / Web / APK / App Bundle / iOS（不签名）构建。默认使用 FVM，也可取消勾选改用 PATH 中的 Flutter / Dart。模板说明会展示文件修改、清理、SDK 和签名要求。
+
+模板仅填入可编辑草稿，保存后才加入当前项目，且仍需手动点击运行。不会自动执行、安装 SDK、上传构建或向已有项目批量添加配置。原有命令及选择保持不变；保存时拒绝当前项目中相同的命令文本（忽略首尾空白），不重写 shell 引号或参数。格式化会修改源文件；清理会删除生成目录。运行前请检查模板说明和实际命令。
+
+命令参考：[Flutter CLI](https://docs.flutter.dev/reference/flutter-cli)、[Dart format](https://dart.dev/tools/dart-format)、[FVM 使用](https://fvm.app/documentation/getting-started/faq)、[Android 构建](https://docs.flutter.dev/deployment/android)、[iOS 构建](https://docs.flutter.dev/deployment/ios)、[Web 构建](https://docs.flutter.dev/deployment/web)。

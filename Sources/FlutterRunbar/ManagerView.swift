@@ -6,8 +6,12 @@ struct ManagerView: View {
     @ObservedObject var model: AppModel
     @State private var editing = false
     @State private var editingID: UUID?
+    @State private var editingProjectID: UUID?
     @State private var presetName = ""
     @State private var command = ""
+    @State private var templateID = CommandTemplate.all[0].id
+    @State private var useFVM = true
+    @State private var editorError: String?
     @State private var pathSettings = false
     @State private var metadataHeight: CGFloat = 0
 
@@ -69,13 +73,39 @@ struct ManagerView: View {
             #endif
         }
         .sheet(isPresented: $editing) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
                 Text(editingID == nil ? "添加命令" : "编辑命令").font(.title2)
+                if editingID == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Picker("常用模板", selection: $templateID) {
+                                ForEach(CommandTemplate.all) { template in Text(template.name).tag(template.id) }
+                            }
+                            Toggle("使用 FVM", isOn: $useFVM).fixedSize()
+                        }
+                        if let template = CommandTemplate.all.first(where: { $0.id == templateID }) {
+                            Text(template.command(useFVM: useFVM)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            Text(template.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Button("填入下方编辑区") {
+                                presetName = template.name
+                                command = template.command(useFVM: useFVM)
+                            }.help("替换下方草稿，不保存也不执行；可继续编辑")
+                        }
+                        Text(useFVM ? "需已安装 FVM 并为项目配置 Flutter SDK。" : "使用 PATH 中的 flutter / dart；请确认两者属于预期 SDK。")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Divider()
+                    }
+                }
                 TextField("名称", text: $presetName)
                 TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
                 Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
                     .font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { model.savePreset(name: presetName, command: command, id: editingID); editing = false }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+                if let editorError { Text(editorError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: editingID == nil ? 420 : 280)
+                HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { if model.savePreset(name: presetName, command: command, id: editingID, projectID: editingProjectID) { editing = false } else { editorError = model.error ?? "项目正在运行或不可用，暂时无法保存。"; model.error = nil } }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
             }.padding(24).frame(width: 520)
         }
         .sheet(isPresented: $pathSettings) {
@@ -116,11 +146,11 @@ struct ManagerView: View {
                     Picker("运行配置", selection: $model.selectedPreset) {
                         ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.labelsHidden().frame(minWidth: 110, maxWidth: 160).disabled(model.selectedState.isBusy)
-                    Button { editingID = nil; presetName = "新命令"; command = "fvm flutter run -d macos"; editing = true } label: { Image(systemName: "plus") }
-                        .disabled(model.selectedState.isBusy).help("添加命令").accessibilityLabel("添加命令")
+                    Button { editorError = nil; editingProjectID = project.id; editingID = nil; presetName = ""; command = ""; templateID = "pub-get"; useFVM = true; editing = true } label: { Image(systemName: "plus") }
+                        .disabled(model.selectedState.isBusy).help("添加常用模板或自定义命令").accessibilityLabel("添加命令或常用模板")
                     Button {
                         guard let preset = model.preset else { return }
-                        editingID = preset.id; presetName = preset.name; command = preset.command; editing = true
+                        editorError = nil; editingProjectID = project.id; editingID = preset.id; presetName = preset.name; command = preset.command; editing = true
                     } label: { Image(systemName: "pencil") }
                         .disabled(model.preset == nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
                     Text(model.preset?.command ?? "尚未配置命令")

@@ -207,16 +207,15 @@ final class AppModel: ObservableObject {
               config.projects[index].presets.contains(where: { $0.id == presetID }) else { return }
         config.projects[index].selectedPresetID = presetID; persist()
     }
-    func savePreset(name: String, command: String, id: UUID?) {
-        guard let index = config.projects.firstIndex(where: { $0.id == selectedProject }),
-              !state(for: config.projects[index].id).isBusy else { return }
-        if let id, let p = config.projects[index].presets.firstIndex(where: { $0.id == id }) {
-            config.projects[index].presets[p].name = name; config.projects[index].presets[p].command = command
-        } else {
-            let preset = CommandPreset(name: name, command: command)
-            config.projects[index].presets.append(preset); config.projects[index].selectedPresetID = preset.id
-        }
-        persist()
+    func savePreset(name: String, command: String, id: UUID?, projectID: UUID?) -> Bool {
+        guard let index = config.projects.firstIndex(where: { $0.id == projectID }),
+              !state(for: config.projects[index].id).isBusy else { return false }
+        let original = config.projects[index]
+        do {
+            try config.projects[index].savePreset(name: name, command: command, id: id)
+            guard persist() else { config.projects[index] = original; return false }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     func run(projectID: UUID) {
         #if SCREENSHOT_PREVIEW
