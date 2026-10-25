@@ -19,8 +19,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Flutter Runbar</string>
 <key>CFBundleDisplayName</key><string>Flutter Runbar</string>
 <key>CFBundleIdentifier</key><string>dev.kingxcode.flutter-runbar</string>
-<key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>CFBundleExecutable</key><string>FlutterRunbar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>

@@ -8,10 +8,11 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
+#include <pthread.h>
 #include <sys/wait.h>
 extern char **environ;
 
-int rb_spawn(const char *shell, const char *command, const char *directory,
+static int rb_spawn_unlocked(const char *shell, const char *command, const char *directory,
              const char *path, pid_t *pid, int *output_fd) {
     int output[2];
     if (pipe(output) < 0) return errno;
@@ -76,4 +77,16 @@ int rb_poll(pid_t pid, int *exit_code) {
     if (result < 0) return errno == EINTR ? 0 : -errno;
     *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     return 1;
+}
+
+// pipe()+FD_CLOEXEC is not atomic on every supported platform. Serialize the entire
+// setup/spawn/close window so concurrent runners cannot inherit each other's pipe.
+static pthread_mutex_t spawn_mutex = PTHREAD_MUTEX_INITIALIZER;
+int rb_spawn(const char *shell, const char *command, const char *directory,
+             const char *path, pid_t *pid, int *output_fd) {
+    int error = pthread_mutex_lock(&spawn_mutex);
+    if (error) return error;
+    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd);
+    pthread_mutex_unlock(&spawn_mutex);
+    return result;
 }

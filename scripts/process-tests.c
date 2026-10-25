@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <pthread.h>
+#include <time.h>
 
 static size_t drain(int fd, char *capture, size_t capacity) {
     char bytes[4096]; size_t total = 0; ssize_t count;
@@ -18,6 +20,21 @@ static size_t drain(int fd, char *capture, size_t capacity) {
     assert(count == 0); close(fd);
     if (capture && total < capacity) capture[total] = 0;
     return total;
+}
+struct parallel_job { const char *directory; int slow; double elapsed; };
+static void *parallel_spawn(void *argument) {
+    struct parallel_job *job = argument;
+    struct timespec begin, end; clock_gettime(CLOCK_MONOTONIC, &begin);
+    pid_t child; int fd, code; char output[32];
+    const char *command = job->slow ? "sleep 3; printf long" : "printf short";
+    assert(rb_spawn("/bin/sh", command, job->directory, "/usr/bin:/bin", &child, &fd) == 0);
+    size_t count = drain(fd, output, sizeof(output));
+    assert(rb_wait(child, &code) == 0 && code == 0);
+    assert(count == (job->slow ? 4 : 5));
+    assert(strcmp(output, job->slow ? "long" : "short") == 0);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    job->elapsed = (double)(end.tv_sec - begin.tv_sec) + (double)(end.tv_nsec - begin.tv_nsec) / 1e9;
+    return NULL;
 }
 int main(void) {
     char directory[] = "/tmp/runbar test.XXXXXX"; assert(mkdtemp(directory));
@@ -56,6 +73,17 @@ int main(void) {
     int closed_status; assert(waitpid(closed_stdio_test, &closed_status, 0) == closed_stdio_test);
     assert(WIFEXITED(closed_status) && WEXITSTATUS(closed_status) == 0);
     puts("PASS launch with all inherited standard descriptors closed");
+    pthread_t threads[24]; struct parallel_job jobs[24];
+    for (int i = 0; i < 24; ++i) {
+        jobs[i] = (struct parallel_job){directory, i % 2, 0};
+        assert(pthread_create(&threads[i], NULL, parallel_spawn, &jobs[i]) == 0);
+    }
+    for (int i = 0; i < 24; ++i) {
+        assert(pthread_join(threads[i], NULL) == 0);
+        // Short runs must receive EOF independently of the unrelated 3s runs.
+        if (!jobs[i].slow) assert(jobs[i].elapsed < 2.5);
+    }
+    puts("PASS 24 parallel launches: isolated output and independent short-run EOF");
     assert(rb_signal(0, SIGKILL) == EINVAL);
     rmdir(directory); return 0;
 }

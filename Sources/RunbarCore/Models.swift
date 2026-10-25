@@ -10,6 +10,9 @@ public struct Project: Codable, Identifiable, Equatable {
     public var id = UUID()
     public var path: String
     public var presets: [CommandPreset] = [CommandPreset()]
+    // Optional preserves decoding of configurations written before per-project selection.
+    public var selectedPresetID: UUID?
+    public var selectedPreset: CommandPreset? { presets.first { $0.id == selectedPresetID } ?? presets.first }
     public var name: String { URL(fileURLWithPath: path).lastPathComponent }
     public init(path: String) { self.path = path }
 }

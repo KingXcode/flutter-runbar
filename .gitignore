@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.xcuserstate
 xcuserdata/
+
+screenshots/
+__pycache__/
