@@ -56,4 +56,25 @@ final class RunnerTests: XCTestCase {
         wait(for: [rejected], timeout: 3)
         XCTAssertEqual(try store.sessions().count, 0)
     }
+    func testShortOutputArrivesBeforeProcessExit() throws {
+        let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+        let live = expectation(description: "short output delivered while child still sleeps")
+        let finished = expectation(description: "child finishes")
+        var sawLive = false
+        var didFinish = false
+        let runner = ProcessRunner(store: store) { event in
+            switch event {
+            case .output(let text):
+                if text.contains("LIVE") && !sawLive {
+                    sawLive = true; XCTAssertFalse(didFinish); live.fulfill()
+                }
+            case .finished: didFinish = true; finished.fulfill()
+            default: break
+            }
+        }
+        runner.run(project: Project(path: store.root.path), preset: CommandPreset(command: "printf 'LIVE\\n'; sleep 5"), extraPath: "/usr/bin:/bin", shell: "/bin/sh")
+        wait(for: [live], timeout: 3)
+        wait(for: [finished], timeout: 8)
+    }
+
 }

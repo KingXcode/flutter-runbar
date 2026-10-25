@@ -70,7 +70,21 @@ public final class ProcessRunner: @unchecked Sendable {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let handle = FileHandle(fileDescriptor: output, closeOnDealloc: true)
                 do {
-                    while let data = try handle.read(upToCount: 16_384), !data.isEmpty {
+                    var buffer = [UInt8](repeating: 0, count: 16_384)
+                    while true {
+                        // One POSIX read returns currently available pipe bytes.
+                        // FileHandle.read(upToCount:) can wait to fill its requested
+                        // count on macOS, hiding short live output until EOF.
+                        let (count, readError) = buffer.withUnsafeMutableBytes { bytes in
+                            let count = read(output, bytes.baseAddress, bytes.count)
+                            return (count, errno)
+                        }
+                        if count == 0 { break }
+                        if count < 0 {
+                            if readError == EINTR { continue }
+                            throw RunbarError.message(String(cString: strerror(readError)))
+                        }
+                        let data = Data(buffer.prefix(count))
                         // Backpressure bounds RAM; raw output is never truncated.
                         self?.queue.sync { self?.receive(data) }
                     }
