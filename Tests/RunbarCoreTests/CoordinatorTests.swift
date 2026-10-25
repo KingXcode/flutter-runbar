@@ -13,6 +13,23 @@ private final class FakeProjectDriver: ProjectCommandRunning {
 
 final class CoordinatorTests: XCTestCase {
     @MainActor
+    func testBuiltInCannotCreateShellDriverEvenWithCommandText() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(root: root)
+        var calls = 0
+        let coordinator = ProjectRunCoordinator(store: store) { _, send in
+            calls += 1; return FakeProjectDriver(send)
+        }
+        var preset = CommandPreset.sandboxReset
+        preset.command = "echo must-not-execute"
+        XCTAssertFalse(coordinator.start(project: Project(path: root.path), preset: preset, extraPath: ""))
+        XCTAssertEqual(calls, 0)
+        XCTAssertFalse(coordinator.isBusy)
+        XCTAssertTrue(try store.sessions().isEmpty)
+    }
+
+    @MainActor
     func testConcurrentProjectsOwnSessionsURLsAndStops() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

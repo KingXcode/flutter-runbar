@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
         #else
         let model = AppModel.shared
+        guard model.nativeActionProjectID == nil else { return .terminateCancel }
         guard model.busy else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "命令仍在运行"
@@ -143,6 +144,7 @@ final class AppModel: ObservableObject {
     @Published var selectedSession: UUID?
     @Published var logText = ""
     @Published var error: String?
+    @Published var nativeActionProjectID: UUID?
     var quitWhenFinished = false
     private var quitReplySent = false
     private var store: SessionStore?
@@ -204,7 +206,7 @@ final class AppModel: ObservableObject {
     func choosePreset(_ presetID: UUID?, for projectID: UUID) {
         guard !state(for: projectID).isBusy,
               let index = config.projects.firstIndex(where: { $0.id == projectID }),
-              config.projects[index].presets.contains(where: { $0.id == presetID }) else { return }
+              config.projects[index].availablePresets.contains(where: { $0.id == presetID }) else { return }
         config.projects[index].selectedPresetID = presetID; persist()
     }
     func savePreset(name: String, command: String, id: UUID?, projectID: UUID?) -> Bool {
@@ -222,18 +224,99 @@ final class AppModel: ObservableObject {
         error = "演示模式不会执行命令。"
         return
         #else
-        guard !quitWhenFinished, !state(for: projectID).isBusy,
+        guard !quitWhenFinished, nativeActionProjectID == nil, !state(for: projectID).isBusy,
               let project = config.projects.first(where: { $0.id == projectID }),
               let preset = project.selectedPreset, let coordinator else { return }
         guard persist() else { return }
-        coordinator.start(project: project, preset: preset, extraPath: config.extraPath)
+        if preset.builtInAction == .resetMacOSSandbox {
+            resetSandbox(project: project)
+        } else {
+            coordinator.start(project: project, preset: preset, extraPath: config.extraPath)
+        }
         #endif
+    }
+    private func resetSandbox(project: Project) {
+        guard let store else { error = "本地存储不可用，未执行清理。"; return }
+        // A single native flow blocks reentrant run buttons while AppKit runs modal loops.
+        nativeActionProjectID = project.id
+        var state = ProjectRunState(); state.phase = .starting
+        state.command = "[内置] 清空 macOS App 沙盒"
+        projectRuns[project.id] = state
+        defer { projectRuns[project.id] = ProjectRunState(); nativeActionProjectID = nil }
+        var session = RunSession(projectPath: project.path, command: state.command!)
+        var log: RunLog?
+        var didTrash = false
+        func append(_ text: String) throws {
+            try log?.append(Data((text + "\n").utf8))
+            if selectedSession == session.id { logText = (try? store.tail(session.id)) ?? logText }
+        }
+        do {
+            try store.save(session)
+            log = try RunLog(directory: store.directory(session.id))
+            state.session = session; projectRuns[project.id] = state
+            replace(session)
+            if selectedProject == project.id { selectedSession = session.id; logText = "" }
+            try append("内置操作，不执行 shell。仅在核实 App、容器和明确确认后移到废纸篓。")
+            let service = SandboxResetService()
+            let candidates = try service.discoverApplications(projectPath: project.path)
+            guard !candidates.isEmpty else { throw RunbarError.message("未找到 macOS 构建产物，请先构建或运行该项目。") }
+            let application: URL
+            if candidates.count == 1 {
+                application = candidates[0]
+            } else {
+                NSApp.activate(ignoringOtherApps: true)
+                let chooser = NSAlert()
+                chooser.messageText = "选择此项目的 macOS App"
+                chooser.informativeText = "发现多个构建配置，请明确选择；不会自动猜测 Debug / Release 或 flavor。"
+                chooser.addButton(withTitle: "取消")
+                chooser.addButton(withTitle: "检查所选 App")
+                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 460, height: 26))
+                picker.addItems(withTitles: candidates.map { $0.deletingLastPathComponent().lastPathComponent + "/" + $0.lastPathComponent })
+                chooser.accessoryView = picker
+                guard chooser.runModal() == .alertSecondButtonReturn else { throw SandboxResetError.cancelled }
+                guard candidates.indices.contains(picker.indexOfSelectedItem) else { throw SandboxResetError.cancelled }
+                application = candidates[picker.indexOfSelectedItem]
+            }
+            let plan = try service.inspect(projectPath: project.path, applicationURL: application)
+            try append("App：\(plan.applicationURL.path)\nBundle ID：\(plan.bundleIdentifier)\n整个容器：\(plan.containerURL.path)")
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "清空整个 macOS App 沙盒？"
+            alert.informativeText = "App：\(plan.applicationURL.path)\nBundle ID：\(plan.bundleIdentifier)\n完整容器：\(plan.containerURL.path)\n\n将整个容器移到废纸篓，包括 Documents、Library、tmp 和容器元数据。相同 Bundle ID 的其他安装副本也会受影响。\n不清理外部链接目标、App Group、钥匙串或云端数据。请停止 IDE/Runbar 运行任务并退出 App。系统拒绝访问时将停止，不强制删除。"
+            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: "移到废纸篓")
+            // First/default button is deliberately non-destructive.
+            guard alert.runModal() == .alertSecondButtonReturn else { throw SandboxResetError.cancelled }
+            try append("用户已确认；重新检查 App、运行状态及容器身份。")
+            let destination = try service.reset(plan, approved: true)
+            didTrash = true
+            session.status = .succeeded
+            try append("已将整个容器移到废纸篓。" + (destination.map { " 位置：\($0.path)" } ?? ""))
+            try append("未删除外部共享数据。下次启动通常重新创建容器；若需恢复，先退出应用再从废纸篓放回。")
+        } catch SandboxResetError.cancelled {
+            session.status = .cancelled
+            try? append("已取消；没有清理任何沙盒数据。")
+        } catch {
+            session.status = .failed
+            session.error = didTrash ? "容器已移到废纸篓，但记录结果失败：\(error.localizedDescription)" : error.localizedDescription
+            try? append("未完成：\(session.error!)")
+            self.error = session.error
+        }
+        session.endedAt = Date()
+        session.duration = session.endedAt!.timeIntervalSince(session.startedAt)
+        // Native actions have no shell exit code; status and text express the result.
+        do { try log?.close(); try store.save(session) }
+        catch { self.error = "\(didTrash ? "容器已移到废纸篓；" : "")保存操作记录失败：\(error.localizedDescription)" }
+        replace(session)
+        if selectedProject == project.id { selectedSession = session.id; loadLog() }
     }
     func run() { if let id = selectedProject { run(projectID: id) } }
     func stop(projectID: UUID) {
         #if SCREENSHOT_PREVIEW
         projectRuns[projectID] = ProjectRunState()
         #else
+        guard nativeActionProjectID != projectID else { return }
         coordinator?.stop(projectID: projectID)
         #endif
     }
@@ -405,15 +488,15 @@ private struct ProjectMenuRow: View {
                     set: { model.choosePreset($0, for: project.id) }
                 )) {
                     if project.presets.isEmpty { Text("未配置命令").tag(Optional<UUID>.none) }
-                    ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
+                    ForEach(project.availablePresets) { preset in Text(preset.name).tag(Optional(preset.id)) }
                 }.labelsHidden().frame(width: 128).disabled(state.isBusy || model.quitWhenFinished)
                     .accessibilityLabel("\(project.name)的命令")
-                    .help(state.command ?? project.selectedPreset?.command ?? "请在主界面添加命令")
+                    .help(state.command ?? project.selectedPreset?.displayCommand ?? "请在主界面添加命令")
                 Button("运行") { model.run(projectID: project.id) }
-                    .disabled(state.isBusy || project.selectedPreset == nil || model.quitWhenFinished)
+                    .disabled(state.isBusy || project.selectedPreset == nil || model.quitWhenFinished || model.nativeActionProjectID != nil)
                     .accessibilityLabel("运行\(project.name)")
                 Button("停止") { model.stop(projectID: project.id) }
-                    .disabled(!state.isBusy || state.phase == .stopping)
+                    .disabled(!state.isBusy || state.phase == .stopping || model.nativeActionProjectID == project.id)
                     .accessibilityLabel("停止\(project.name)")
             }.controlSize(.small)
             ForEach(state.liveDevToolsURLs, id: \.self) { value in

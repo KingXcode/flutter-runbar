@@ -48,4 +48,21 @@ final class CommandTemplateTests: XCTestCase {
         XCTAssertEqual(decoded.selectedPreset?.id, project.presets[0].id)
         XCTAssertEqual(Project(path: "/new").presets.count, 1)
     }
+    func testBuiltInIsTypedSelectableAndPreservesLegacyShellPresets() throws {
+        var project = Project(path: "/fixture")
+        let shellID = project.presets[0].id
+        XCTAssertEqual(project.availablePresets.count, 2)
+        XCTAssertEqual(project.selectedPreset?.id, shellID)
+        project.selectedPresetID = CommandPreset.sandboxReset.id
+        let restored = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(project))
+        XCTAssertEqual(restored.selectedPreset?.builtInAction, .resetMacOSSandbox)
+        XCTAssertEqual(restored.presets.count, 1)
+        XCTAssertEqual(restored.presets[0].id, shellID)
+        XCTAssertTrue(CommandPreset.sandboxReset.command.isEmpty)
+        XCTAssertThrowsError(try project.savePreset(name: "unsafe", command: "echo no", id: CommandPreset.sandboxReset.id))
+        let legacy = "{\"id\":\"00000000-0000-4000-8000-000000000001\",\"name\":\"Old\",\"command\":\"echo old\"}"
+        let decoded = try JSONDecoder().decode(CommandPreset.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.builtInAction)
+        XCTAssertEqual(decoded.command, "echo old")
+    }
 }

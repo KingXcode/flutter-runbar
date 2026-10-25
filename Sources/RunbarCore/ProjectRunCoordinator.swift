@@ -70,6 +70,9 @@ public final class ProjectRunCoordinator {
     }
     @discardableResult
     public func start(project: Project, preset: CommandPreset, extraPath: String) -> Bool {
+        guard preset.builtInAction == nil else {
+            onEvent?(.failure(project.id, "内置操作不能作为 shell 命令运行。")); return false
+        }
         guard !state(for: project.id).isBusy else { return false }
         guard !preset.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             onEvent?(.failure(project.id, "命令不能为空。")); return false

@@ -102,3 +102,17 @@ open 'dist/Flutter Runbar.app'
 模板仅填入可编辑草稿，保存后才加入当前项目，且仍需手动点击运行。不会自动执行、安装 SDK、上传构建或向已有项目批量添加配置。原有命令及选择保持不变；保存时拒绝当前项目中相同的命令文本（忽略首尾空白），不重写 shell 引号或参数。格式化会修改源文件；清理会删除生成目录。运行前请检查模板说明和实际命令。
 
 命令参考：[Flutter CLI](https://docs.flutter.dev/reference/flutter-cli)、[Dart format](https://dart.dev/tools/dart-format)、[FVM 使用](https://fvm.app/documentation/getting-started/faq)、[Android 构建](https://docs.flutter.dev/deployment/android)、[iOS 构建](https://docs.flutter.dev/deployment/ios)、[Web 构建](https://docs.flutter.dev/deployment/web)。
+
+
+### 清空 macOS App 沙盒（内置操作）
+
+每个项目的命令列表（主界面与菜单栏）都有「清空 macOS App 沙盒」。这是原生操作，不拼接 shell、不添加 FVM 前缀，也不能编辑成命令字符串。旧自定义命令和当前选择不变。
+
+- 先停止项目运行并退出目标 App。只发现该项目 `build/macos/Build/Products/<配置>/*.app` 的实际构建产物；多个候选时明确选择，不猜测 Debug / Release 或 flavor。尚未构建时先构建，不扫描其他项目或 Applications。
+- 读取实际 App Bundle ID、验证签名及 App Sandbox entitlement，再核验当前用户的容器归属、路径及身份。未启用沙盒、无容器、符号链接重定向或无法核验时停止。
+- 确认框列出 App 完整路径、Bundle ID 和整个 `~/Library/Containers/<Bundle ID>`，默认取消。确认后重新检查 App 已退出、容器归属与身份，然后使用系统废纸篓 API 移动整个容器，包含 Documents、Library、tmp 和容器元数据；不是只清缓存。
+- 相同 Bundle ID 的其他安装副本也会受影响。不会递归跟随容器内链接清除外部文件；不清理 App Groups、钥匙串、iCloud 或其他容器外数据。
+- macOS 的容器保护可能拒绝访问或移动，届时显示原始错误并停止，不使用 sudo、永久删除或更改系统权限。请停止 IDE 自动重启任务；跨进程启动无法由此工具原子锁住。
+- 操作结果保存在本地历史与日志中，取消显示「已取消」，不是成功。原生操作没有 shell 退出码。移到废纸篓不等于彻底恢复出厂；下次启动通常重建容器。恢复前先退出 App，再在 Finder 中从废纸篓放回。
+
+验证时只使用临时测试容器和替身签名/运行/废纸篓服务，不操作真实应用数据。真实 macOS 容器访问和恢复行为仍需在用户明确同意的测试 App 上验收。

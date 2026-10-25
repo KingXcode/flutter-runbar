@@ -38,6 +38,7 @@ extension Project {
             throw RunbarError.message("该项目已保存相同命令，请选择已有配置，或修改后再保存。")
         }
         if let id {
+            guard id != CommandPreset.sandboxReset.id else { throw RunbarError.message("内置操作不能编辑为 shell 命令。") }
             guard let index = presets.firstIndex(where: { $0.id == id }) else { throw RunbarError.message("原命令已不存在，请重新选择。") }
             presets[index].name = name
             presets[index].command = command

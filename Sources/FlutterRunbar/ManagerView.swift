@@ -144,7 +144,8 @@ struct ManagerView: View {
                 HStack(spacing: 6) {
                     Text("命令").font(.caption).foregroundStyle(.secondary).fixedSize()
                     Picker("运行配置", selection: $model.selectedPreset) {
-                        ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
+                        if project.presets.isEmpty { Text("选择命令").tag(Optional<UUID>.none) }
+                        ForEach(project.availablePresets) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.labelsHidden().frame(minWidth: 110, maxWidth: 160).disabled(model.selectedState.isBusy)
                     Button { editorError = nil; editingProjectID = project.id; editingID = nil; presetName = ""; command = ""; templateID = "pub-get"; useFVM = true; editing = true } label: { Image(systemName: "plus") }
                         .disabled(model.selectedState.isBusy).help("添加常用模板或自定义命令").accessibilityLabel("添加命令或常用模板")
@@ -152,20 +153,20 @@ struct ManagerView: View {
                         guard let preset = model.preset else { return }
                         editorError = nil; editingProjectID = project.id; editingID = preset.id; presetName = preset.name; command = preset.command; editing = true
                     } label: { Image(systemName: "pencil") }
-                        .disabled(model.preset == nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
-                    Text(model.preset?.command ?? "尚未配置命令")
+                        .disabled(model.preset == nil || model.preset?.builtInAction != nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
+                    Text(model.preset?.displayCommand ?? "尚未配置命令")
                         .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                         .textSelection(.enabled).frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 7).padding(.vertical, 4)
                         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5)))
-                        .help(model.preset?.command ?? "")
-                        .accessibilityLabel("当前命令 \(model.preset?.command ?? "尚未配置命令")")
+                        .help(model.preset?.displayCommand ?? "")
+                        .accessibilityLabel("当前命令 \(model.preset?.displayCommand ?? "尚未配置命令")")
                     Button(model.selectedState.isBusy ? (model.selectedState.phase == .stopping ? "正在停止…" : "停止当前运行") : "运行", systemImage: model.selectedState.isBusy ? "stop.fill" : "play.fill") {
                         model.selectedState.isBusy ? model.stop() : model.run()
                     }.buttonStyle(.borderedProminent).fixedSize()
                         .tint(model.selectedState.isBusy ? .orange : .accentColor)
-                        .disabled(model.selectedState.phase == .stopping || (!model.selectedState.isBusy && model.preset == nil) || model.quitWhenFinished)
+                        .disabled(model.nativeActionProjectID != nil || model.selectedState.phase == .stopping || (!model.selectedState.isBusy && model.preset == nil) || model.quitWhenFinished)
                 }.controlSize(.small)
             }
         }.padding(.horizontal, 12).padding(.vertical, 10)
@@ -352,6 +353,7 @@ private struct SessionBadge: View {
         case .succeeded: return ("已完成", "checkmark.circle.fill", .green)
         case .failed: return ("失败", "exclamationmark.circle.fill", .red)
         case .stopped: return ("已停止", "stop.circle", .secondary)
+        case .cancelled: return ("已取消", "xmark.circle", .secondary)
         case .interrupted: return ("已中断", "exclamationmark.triangle", .orange)
         }
     }
