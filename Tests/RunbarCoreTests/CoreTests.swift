@@ -87,4 +87,35 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: damaged.appendingPathComponent("session.json").path))
     }
 
+    func testOutputFileResolvesExactSelectedSession() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(root: root)
+        let a = RunSession(projectPath: "/tmp/Project A", command: "echo A")
+        let b = RunSession(projectPath: "/tmp/Project B", command: "echo B")
+        try store.save(a); try store.save(b)
+        let logA = try RunLog(directory: store.directory(a.id))
+        let logB = try RunLog(directory: store.directory(b.id))
+        try logA.append(Data("A".utf8)); try logB.append(Data("B".utf8))
+        // Live files and historical (closed) files resolve by selected UUID alike.
+        XCTAssertEqual(try store.outputFile(for: a.id), store.directory(a.id).appendingPathComponent("output.raw"))
+        try logA.close(); try logB.close()
+        XCTAssertEqual(try Data(contentsOf: store.outputFile(for: b.id)), Data("B".utf8))
+        XCTAssertEqual(try Data(contentsOf: store.outputFile(for: a.id)), Data("A".utf8))
+        XCTAssertNotEqual(try store.outputFile(for: a.id), try store.outputFile(for: b.id))
+    }
+
+    func testOutputFileRejectsMissingFileAndDirectoryWithoutCreatingData() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(root: root)
+        let session = RunSession(projectPath: "/tmp", command: "true")
+        XCTAssertThrowsError(try store.outputFile(for: session.id))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.directory(session.id).path))
+        try store.save(session)
+        let directory = store.directory(session.id).appendingPathComponent("output.raw")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try store.outputFile(for: session.id))
+    }
+
 }

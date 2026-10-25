@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewWindow: NSWindow?
     private var previewMenuWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
+            NSApp.appearance = NSAppearance(named: arguments[theme + 1] == "dark" ? .darkAqua : .aqua)
+        }
         if let flag = ProcessInfo.processInfo.arguments.firstIndex(of: "--capture-real-menu"),
            ProcessInfo.processInfo.arguments.indices.contains(flag + 1) {
             let folder = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[flag + 1], isDirectory: true)
@@ -36,8 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // A menu-bar agent may not instantiate its Window scene automatically.
         // Host the exact production ManagerView explicitly for screenshot builds.
+        let smallPreview = arguments.contains("--screenshot-small-window")
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: smallPreview ? 880 : 1100, height: smallPreview ? 620 : 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
@@ -47,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if arguments.contains("--screenshot-main-only") { return }
         let menuWindow = NSWindow(contentRect: NSRect(x: 40, y: 60, width: MenuLayout.width, height: MenuLayout.maximumListHeight + 100),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
         menuWindow.title = "菜单栏项目列表 · 演示数据（非真实运行）"
@@ -147,6 +153,9 @@ final class AppModel: ObservableObject {
             selectedSession = history.first?.id
             loadLog()
             if let first = config.projects.first, var example = history.first {
+                // This synthetic live run is distinct from the completed history
+                // selected for log preview; no fake live output file is created.
+                example.id = UUID(uuidString: "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD")!
                 example.status = .running; example.endedAt = nil; example.exitCode = nil
                 var preview = ProjectRunState(); preview.phase = .running
                 preview.session = example; preview.command = example.command
@@ -260,6 +269,19 @@ final class AppModel: ObservableObject {
         if let live = coordinator?.liveLog(for: id) { logText = live; return }
         do { logText = try store.tail(id) }
         catch { logText = ""; self.error = "读取日志失败：\(error.localizedDescription)" }
+    }
+    var selectedOutputFile: URL? {
+        guard let id = selectedSession, let store else { return nil }
+        return try? store.outputFile(for: id)
+    }
+    var selectedOutputPath: String? {
+        guard let id = selectedSession, let store else { return nil }
+        return store.directory(id).appendingPathComponent("output.raw").path
+    }
+    func revealSelectedOutput() {
+        guard let id = selectedSession, let store else { return }
+        do { NSWorkspace.shared.activateFileViewerSelecting([try store.outputFile(for: id)]) }
+        catch { self.error = error.localizedDescription }
     }
     func showFiles() { guard let id = selectedSession, let store else { return }; NSWorkspace.shared.open(store.directory(id)) }
     func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
@@ -402,152 +424,3 @@ private func phaseLabel(_ phase: ProjectRunPhase) -> String {
     switch phase { case .idle: return "未运行"; case .starting: return "正在启动…"; case .running: return "运行中"; case .stopping: return "正在停止…" }
 }
 
-struct ManagerView: View {
-    @ObservedObject var model: AppModel
-    @State private var editing = false
-    @State private var editingID: UUID?
-    @State private var presetName = ""
-    @State private var command = ""
-    @State private var pathSettings = false
-    var body: some View {
-        NavigationSplitView {
-            List {
-                Section("项目") {
-                    ForEach(model.config.projects) { project in
-                        Button { model.select(project) } label: {
-                            HStack(alignment: .top, spacing: 6) {
-                                Image(systemName: model.selectedProject == project.id ? "folder.fill" : "folder")
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(project.name).lineLimit(1).truncationMode(.middle)
-                                    Text(project.path).font(.caption2).foregroundStyle(.secondary)
-                                        .lineLimit(1).truncationMode(.middle)
-                                        .accessibilityLabel("项目目录 \(project.path)")
-                                }
-                            }.help(project.path)
-                        }.buttonStyle(.plain)
-                    }
-                    Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
-                }
-                Section("运行记录") {
-                    ForEach(model.history) { session in
-                        Button { model.selectedSession = session.id; model.selectedProject = model.config.projects.first(where: { $0.path == session.projectPath })?.id; model.loadLog() } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(URL(fileURLWithPath: session.projectPath).lastPathComponent).font(.headline)
-                                Text(session.startedAt, format: .dateTime.month().day().hour().minute().second()).font(.caption)
-                                Text(statusLabel(session.status)).font(.caption).foregroundStyle(session.status == .failed ? .red : .secondary)
-                            }.padding(.vertical, 3)
-                        }.buttonStyle(.plain)
-                    }
-                }
-            }.navigationSplitViewColumnWidth(min: 200, ideal: 230)
-        } detail: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(model.project?.name ?? "先添加 Flutter 项目").font(.title2.bold())
-                        Text(model.project?.path ?? "命令与日志仅保存在本机")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            .textSelection(.enabled).help(model.project?.path ?? "命令与日志仅保存在本机")
-                            .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "命令与日志仅保存在本机")
-                    }
-                    Spacer()
-                    Button("PATH 设置", systemImage: "gearshape") { pathSettings = true }
-                }
-                if let project = model.project {
-                    HStack {
-                        Picker("命令", selection: $model.selectedPreset) {
-                            ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                        }.disabled(model.selectedState.isBusy)
-                        Button("添加") { editingID = nil; presetName = "新命令"; command = "fvm flutter run -d macos"; editing = true }.disabled(model.selectedState.isBusy)
-                        Button("编辑") { guard let preset = model.preset else { return }; editingID = preset.id; presetName = preset.name; command = preset.command; editing = true }.disabled(model.preset == nil || model.selectedState.isBusy)
-                        Button(model.selectedState.isBusy ? (model.selectedState.phase == .stopping ? "正在停止…" : "停止") : "运行", systemImage: model.selectedState.isBusy ? "stop.fill" : "play.fill") { model.selectedState.isBusy ? model.stop() : model.run() }
-                            .buttonStyle(.borderedProminent).disabled(model.selectedState.phase == .stopping || (!model.selectedState.isBusy && model.preset == nil) || model.quitWhenFinished)
-                    }
-                    Text(model.preset?.command ?? "").font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                }
-                Divider()
-                if let session = model.session {
-                    HStack {
-                        Text("日志：\(URL(fileURLWithPath: session.projectPath).lastPathComponent)").font(.caption).lineLimit(1)
-                        Text(statusLabel(session.status)).font(.headline)
-                        Text("开始 \(session.startedAt.formatted(date: .omitted, time: .standard))").font(.caption)
-                        if let end = session.endedAt { Text("结束 \(end.formatted(date: .omitted, time: .standard))").font(.caption) }
-                        if let code = session.exitCode { Text("退出码 \(code)").font(.caption) }
-                        Spacer(); Button("本地日志", systemImage: "folder") { model.showFiles() }
-                    }
-                    Text(session.command).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                    if let message = session.error { Text(message).foregroundStyle(.red).textSelection(.enabled) }
-                    ForEach(session.devToolsURLs, id: \.self) { url in
-                        HStack {
-                            Text("DevTools").font(.caption.bold())
-                            Text(url).font(.caption).lineLimit(1).textSelection(.enabled)
-                            Button("打开") { if let id = model.liveProjectID(for: session.id) { model.openLiveURL(url, projectID: id) } }.disabled(model.liveProjectID(for: session.id) == nil)
-                            Button("复制") { model.copy(url) }
-                        }
-                    }
-                }
-                LogView(text: model.logText).frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text("stdout / stderr 按接收顺序合并；完整原始字节与分块时间索引保存在本地。不会上传日志，也不会自动打开链接。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(20)
-            #if SCREENSHOT_PREVIEW
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    NSApp.activate(ignoringOtherApps: true)
-                    for window in NSApp.windows where window.frame.width > 800 {
-                        window.title = "Flutter Runbar · 演示数据（非真实运行）"
-                        window.makeKeyAndOrderFront(nil)
-                    }
-                }
-            }
-            #endif
-        }
-        .sheet(isPresented: $editing) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(editingID == nil ? "添加命令" : "编辑命令").font(.title2)
-                TextField("名称", text: $presetName)
-                TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
-                Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { model.savePreset(name: presetName, command: command, id: editingID); editing = false }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-            }.padding(24).frame(width: 520)
-        }
-        .sheet(isPresented: $pathSettings) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("命令环境").font(.title2)
-                Text("额外 PATH（冒号分隔；使用完整路径，不要使用 ~）")
-                TextField("PATH", text: $model.config.extraPath)
-                Text("这些目录会添加到登录 zsh 的 PATH 前面。默认包含 pub-cache 和 Homebrew；可添加你的 FVM 可执行文件目录。不安装 SDK、不修改 shell 配置。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("保存") { model.persist(); pathSettings = false }
-            }.padding(24).frame(width: 560)
-        }
-        .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("知道了") { model.error = nil }
-        } message: { Text(model.error ?? "") }
-    }
-}
-
-private func statusLabel(_ status: RunStatus) -> String {
-    switch status { case .running: return "运行中"; case .succeeded: return "已完成"; case .failed: return "失败"; case .stopped: return "已停止"; case .interrupted: return "异常中断" }
-}
-
-/// Native selectable log view avoids creating a SwiftUI view per output line.
-struct LogView: NSViewRepresentable {
-    var text: String
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
-        let view = NSTextView(); view.isEditable = false; view.isSelectable = true
-        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.backgroundColor = .textBackgroundColor; view.textContainerInset = NSSize(width: 10, height: 10)
-        view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
-        scroll.documentView = view; return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
-        let atBottom = scroll.documentVisibleRect.maxY >= view.bounds.maxY - 40
-        view.string = text
-        if atBottom { view.scrollToEndOfDocument(nil) }
-    }
-}

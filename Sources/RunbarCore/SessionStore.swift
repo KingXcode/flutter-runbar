@@ -39,6 +39,15 @@ public final class SessionStore {
             try save(session)
         }
     }
+    /// Resolve the exact selected session's persisted output, never a global latest run.
+    public func outputFile(for sessionID: UUID) throws -> URL {
+        let url = directory(sessionID).appendingPathComponent("output.raw")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            throw RunbarError.message("这次运行的日志文件不存在或尚未创建。")
+        }
+        return url
+    }
     public func tail(_ id: UUID, limit: Int = 200_000) throws -> String {
         guard limit > 0 else { return "" }
         let handle = try FileHandle(forReadingFrom: directory(id).appendingPathComponent("output.raw")); defer { try? handle.close() }
