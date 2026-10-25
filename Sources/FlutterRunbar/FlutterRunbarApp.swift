@@ -47,7 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered, defer: false
         )
         window.title = "Flutter Runbar · 演示数据（非真实运行）"
-        window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared))
+        // Match the production Window scene's content minimums, including after
+        // NavigationSplitView installs its taller unified toolbar.
+        window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared).frame(minWidth: 880, minHeight: 620))
         window.center()
         previewWindow = window
         window.makeKeyAndOrderFront(nil)

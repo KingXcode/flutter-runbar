@@ -50,6 +50,7 @@ with open(sys.argv[1]) as handle:
 print(sys.argv[2], "AppKit window metrics:", metrics)
 if sys.argv[2] == "light-small":
     assert abs(metrics["contentWidth"] - 880) <= 1, "Small-window content did not fit requested 880pt width"
+    assert metrics["contentHeight"] >= 620, "Small-window content did not preserve the production 620pt minimum"
 PYMETRICS
   cat "$METRICS" >> screenshots/provenance.txt
   WINDOW_ID="$(swift screenshots/find-main-for-pid.swift "$APP_PID")"

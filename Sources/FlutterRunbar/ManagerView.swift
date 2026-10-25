@@ -52,7 +52,7 @@ struct ManagerView: View {
                 projectHeader
                 Divider()
                 HSplitView {
-                    historyPane.frame(minWidth: 150, idealWidth: 170, maxWidth: 190)
+                    historyPane.frame(minWidth: 150, idealWidth: 170, maxWidth: 180)
                     logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }.background(Color(nsColor: .windowBackgroundColor))
