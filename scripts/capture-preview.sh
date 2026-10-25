@@ -27,7 +27,7 @@ for info in windows {
           owner.contains("Flutter"),
           let bounds = info[kCGWindowBounds as String] as? [String: Any],
           let width = bounds["Width"] as? Double,
-          captureMenu ? (width >= 600 && width < 800) : width > 800,
+          captureMenu ? (width >= 450 && width < 600) : width > 800,
           let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
           let id = info[kCGWindowNumber as String] as? Int else { continue }
     print(id)

@@ -47,14 +47,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        let menuWindow = NSWindow(contentRect: NSRect(x: 40, y: 60, width: 640, height: 450),
+        let menuWindow = NSWindow(contentRect: NSRect(x: 40, y: 60, width: MenuLayout.width, height: MenuLayout.maximumListHeight + 100),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
         menuWindow.title = "菜单栏项目列表 · 演示数据（非真实运行）"
         // Same MenuContent used by MenuBarExtra; screenshot host only, not a claim
         // that this titlebar or window chrome belongs to the actual popup.
-        menuWindow.contentView = NSHostingView(rootView: MenuContent(model: AppModel.shared))
+        let menuView = NSHostingView(rootView: MenuContent(model: AppModel.shared).fixedSize(horizontal: false, vertical: true))
+        menuWindow.contentView = menuView
         previewMenuWindow = menuWindow
         menuWindow.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            menuView.layoutSubtreeIfNeeded()
+            menuWindow.setContentSize(NSSize(width: MenuLayout.width, height: max(100, menuView.fittingSize.height)))
+        }
     }
     private func captureActualMenu(in folder: URL) {
         func statusButtons(in view: NSView) -> [NSStatusBarButton] {
@@ -80,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             // In this mode no preview host is created. A visible app-owned panel
             // of the menu's width therefore verifies the actual MenuBarExtra opened.
-            let panels = NSApp.windows.filter { $0.isVisible && $0.frame.width >= 600 && $0.frame.width < 800 && $0.frame.height > 100 }
+            let panels = NSApp.windows.filter { $0.isVisible && $0.frame.width >= MenuLayout.width - 10 && $0.frame.width < MenuLayout.width + 80 && $0.frame.height > 100 }
             guard panels.count == 1 else {
                 report("Status-item action invoked, but actual MenuBarExtra panel was not uniquely visible (found \(panels.count)). No substitute window was created.", success: false)
                 return
@@ -267,40 +272,56 @@ final class AppModel: ObservableObject {
     }
 }
 
+private enum MenuLayout {
+    static let width: CGFloat = 480
+    static let maximumListHeight: CGFloat = 320
+}
+
+private struct MenuListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct MenuContent: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @State private var listHeight: CGFloat = 0
+    private var initialListHeight: CGFloat {
+        CGFloat(model.config.projects.count) * 48 + CGFloat(model.projectRuns.values.reduce(0) { $0 + $1.liveDevToolsURLs.count }) * 18
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Flutter Runbar", systemImage: "terminal").font(.headline)
+                Label("Flutter Runbar", systemImage: "terminal").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("打开主界面") { openWindow(id: "manager"); NSApp.activate(ignoringOtherApps: true) }
                     .accessibilityHint("打开项目、命令和运行日志管理窗口")
-            }.padding(14)
+            }.padding(.horizontal, 10).padding(.vertical, 7)
             Divider()
             if model.config.projects.isEmpty {
-                VStack(spacing: 8) {
-                    Text("还没有项目").font(.headline)
-                    Text("在主界面添加 Flutter 项目后，会在这里显示。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity).padding(28)
+                Text("还没有项目，请先在主界面添加。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    VStack(spacing: 0) {
                         ForEach(model.config.projects) { project in
                             ProjectMenuRow(model: model, project: project)
-                            Divider().padding(.horizontal, 14)
+                            Divider().padding(.horizontal, 10)
                         }
-                    }
-                }.frame(height: min(440, CGFloat(model.config.projects.count) * 118))
+                    }.background(GeometryReader { geometry in
+                        Color.clear.preference(key: MenuListHeightKey.self, value: geometry.size.height)
+                    })
+                }.frame(height: min(MenuLayout.maximumListHeight, listHeight > 0 ? listHeight : initialListHeight))
+                    .onPreferenceChange(MenuListHeightKey.self) { listHeight = $0 }
             }
             if let error = model.error {
-                HStack(alignment: .top) {
-                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(3).textSelection(.enabled)
+                HStack(alignment: .top, spacing: 6) {
+                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
                     Spacer()
-                    Button("关闭提示") { model.error = nil }.font(.caption)
-                }.padding(12)
+                    Button { model.error = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).accessibilityLabel("关闭提示")
+                }.padding(.horizontal, 10).padding(.vertical, 5)
                 Divider()
             }
             HStack {
@@ -308,8 +329,8 @@ struct MenuContent: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("退出") { NSApp.terminate(nil) }
-            }.padding(12)
-        }.frame(width: 640)
+            }.padding(.horizontal, 10).padding(.vertical, 5)
+        }.controlSize(.small).frame(width: MenuLayout.width)
     }
 }
 
@@ -317,21 +338,39 @@ private struct ProjectMenuRow: View {
     @ObservedObject var model: AppModel
     let project: Project
     private var state: ProjectRunState { model.state(for: project.id) }
+    private var stateIcon: String {
+        switch state.phase {
+        case .idle: return "circle"
+        case .starting: return "ellipsis"
+        case .running: return "play.fill"
+        case .stopping: return "stop.fill"
+        }
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(project.name).font(.headline).lineLimit(1).truncationMode(.middle)
-                        .help(project.path).accessibilityLabel("项目 \(project.name)")
-                    Text(phaseLabel(state.phase)).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Image(systemName: stateIcon).font(.system(size: 8))
+                            .foregroundStyle(state.phase == .running ? .green : .secondary)
+                            .frame(width: 8).accessibilityHidden(true)
+                        Text(project.name).font(.system(size: 12, weight: .medium))
+                            .lineLimit(1).truncationMode(.middle)
+                    }.accessibilityElement(children: .ignore)
+                        .accessibilityLabel("项目 \(project.name)")
+                        .accessibilityValue(phaseLabel(state.phase))
+                    Text(project.path).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(project.path)
+                        .accessibilityLabel("项目目录 \(project.path)")
                 }.frame(maxWidth: .infinity, alignment: .leading)
+                    .help("\(project.path)\n\(phaseLabel(state.phase))")
                 Picker("命令", selection: Binding(
                     get: { project.selectedPreset?.id },
                     set: { model.choosePreset($0, for: project.id) }
                 )) {
                     if project.presets.isEmpty { Text("未配置命令").tag(Optional<UUID>.none) }
                     ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                }.labelsHidden().frame(width: 200).disabled(state.isBusy || model.quitWhenFinished)
+                }.labelsHidden().frame(width: 128).disabled(state.isBusy || model.quitWhenFinished)
                     .accessibilityLabel("\(project.name)的命令")
                     .help(state.command ?? project.selectedPreset?.command ?? "请在主界面添加命令")
                 Button("运行") { model.run(projectID: project.id) }
@@ -343,22 +382,19 @@ private struct ProjectMenuRow: View {
             }.controlSize(.small)
             ForEach(state.liveDevToolsURLs, id: \.self) { value in
                 Button { model.openLiveURL(value, projectID: project.id) } label: {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "link")
-                        Text(value).font(.system(.caption, design: .monospaced))
-                            .lineLimit(2).truncationMode(.middle).multilineTextAlignment(.leading)
+                    HStack(spacing: 4) {
+                        Image(systemName: "link").font(.system(size: 10))
+                        Text(value).font(.system(size: 10, design: .monospaced))
+                            .lineLimit(1).truncationMode(.middle)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).foregroundStyle(.blue).help(value)
                     .accessibilityLabel("打开\(project.name)的 DevTools")
                     .accessibilityValue(value)
             }
-            if state.phase == .running && state.liveDevToolsURLs.isEmpty {
-                Text("等待 DevTools 地址…").font(.caption).foregroundStyle(.secondary)
-            }
             if let message = state.error {
-                Text(message).font(.caption).foregroundStyle(.red).lineLimit(2).help(message)
+                Text(message).font(.caption).foregroundStyle(.red).lineLimit(1).help(message)
             }
-        }.padding(14)
+        }.padding(.horizontal, 10).padding(.vertical, 6)
     }
 }
 
@@ -379,7 +415,15 @@ struct ManagerView: View {
                 Section("项目") {
                     ForEach(model.config.projects) { project in
                         Button { model.select(project) } label: {
-                            Label(project.name, systemImage: model.selectedProject == project.id ? "folder.fill" : "folder")
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: model.selectedProject == project.id ? "folder.fill" : "folder")
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(project.name).lineLimit(1).truncationMode(.middle)
+                                    Text(project.path).font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                        .accessibilityLabel("项目目录 \(project.path)")
+                                }
+                            }.help(project.path)
                         }.buttonStyle(.plain)
                     }
                     Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
@@ -401,7 +445,10 @@ struct ManagerView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(model.project?.name ?? "先添加 Flutter 项目").font(.title2.bold())
-                        Text(model.project?.path ?? "命令与日志仅保存在本机").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(model.project?.path ?? "命令与日志仅保存在本机")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            .textSelection(.enabled).help(model.project?.path ?? "命令与日志仅保存在本机")
+                            .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "命令与日志仅保存在本机")
                     }
                     Spacer()
                     Button("PATH 设置", systemImage: "gearshape") { pathSettings = true }
