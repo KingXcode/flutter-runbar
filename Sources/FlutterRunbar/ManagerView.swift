@@ -94,14 +94,14 @@ struct ManagerView: View {
     }
 
     private var projectHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(model.project?.name ?? "选择一个 Flutter 项目")
-                        .font(.system(size: 20, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                        .font(.system(size: 16, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                         .help(model.project?.name ?? "")
                     Text(model.project?.path ?? "从左侧添加项目，管理命令与本地运行日志。")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         .help(model.project?.path ?? "")
                         .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "尚未选择项目")
@@ -111,11 +111,11 @@ struct ManagerView: View {
                     .help("命令环境与 PATH 设置").accessibilityLabel("PATH 设置")
             }
             if let project = model.project {
-                HStack(spacing: 8) {
-                    Text("运行配置").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text("命令").font(.caption).foregroundStyle(.secondary).fixedSize()
                     Picker("运行配置", selection: $model.selectedPreset) {
                         ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                    }.labelsHidden().frame(minWidth: 120, maxWidth: 240).disabled(model.selectedState.isBusy)
+                    }.labelsHidden().frame(minWidth: 110, maxWidth: 160).disabled(model.selectedState.isBusy)
                     Button { editingID = nil; presetName = "新命令"; command = "fvm flutter run -d macos"; editing = true } label: { Image(systemName: "plus") }
                         .disabled(model.selectedState.isBusy).help("添加命令").accessibilityLabel("添加命令")
                     Button {
@@ -123,21 +123,22 @@ struct ManagerView: View {
                         editingID = preset.id; presetName = preset.name; command = preset.command; editing = true
                     } label: { Image(systemName: "pencil") }
                         .disabled(model.preset == nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
-                    Spacer(minLength: 4)
+                    Text(model.preset?.command ?? "尚未配置命令")
+                        .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled).frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 7).padding(.vertical, 4)
+                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor).opacity(0.5)))
+                        .help(model.preset?.command ?? "")
+                        .accessibilityLabel("当前命令 \(model.preset?.command ?? "尚未配置命令")")
                     Button(model.selectedState.isBusy ? (model.selectedState.phase == .stopping ? "正在停止…" : "停止当前运行") : "运行", systemImage: model.selectedState.isBusy ? "stop.fill" : "play.fill") {
                         model.selectedState.isBusy ? model.stop() : model.run()
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.borderedProminent).fixedSize()
                         .tint(model.selectedState.isBusy ? .orange : .accentColor)
                         .disabled(model.selectedState.phase == .stopping || (!model.selectedState.isBusy && model.preset == nil) || model.quitWhenFinished)
                 }.controlSize(.small)
-                Text(model.preset?.command ?? "尚未配置命令")
-                    .font(.system(size: 12, design: .monospaced)).lineLimit(2).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor).opacity(0.5)))
-                    .help(model.preset?.command ?? "")
             }
-        }.padding(16)
+        }.padding(.horizontal, 12).padding(.vertical, 10)
     }
 
     private var historyPane: some View {
@@ -146,7 +147,7 @@ struct ManagerView: View {
                 Label("运行记录", systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 4)
                 Text("\(model.history.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            }.padding(.horizontal, 12).padding(.vertical, 12)
+            }.padding(.horizontal, 12).padding(.vertical, 8)
             if model.history.isEmpty {
                 VStack(spacing: 6) {
                     Text("还没有运行记录").font(.caption)
@@ -228,7 +229,7 @@ struct ManagerView: View {
                 Image(systemName: "lock.shield")
                 Text("仅保存在本机 · 视图显示尾部，文件保留完整输出")
             }.font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(14)
+        }.padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 14)
     }
 
     private func sessionMetadata(_ session: RunSession) -> some View {
