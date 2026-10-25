@@ -17,6 +17,7 @@ for info in windows {
           let height = bounds["Height"] as? Double, height >= 580,
           let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
           let id = info[kCGWindowNumber as String] as? Int else { continue }
+    fputs("Actual native window frame: \(Int(width)) x \(Int(height)) points (includes title bar).\n", stderr)
     print(id); exit(0)
 }
 fputs("No visible management window for the exact preview child process.\n", stderr)
@@ -33,14 +34,24 @@ cleanup() {
 trap cleanup EXIT
 for variant in light dark light-small; do
   theme="$variant"
+  METRICS="$PWD/screenshots/main-window-$variant-metrics.json"
   if [[ "$variant" == light-small ]]; then
     theme=light
-    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-small-window &
+    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-small-window --screenshot-metrics "$METRICS" &
   else
-    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only &
+    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-metrics "$METRICS" &
   fi
   APP_PID=$!
   sleep 6
+  python3 - "$METRICS" "$variant" <<'PYMETRICS'
+import json, sys
+with open(sys.argv[1]) as handle:
+    metrics = json.load(handle)
+print(sys.argv[2], "AppKit window metrics:", metrics)
+if sys.argv[2] == "light-small":
+    assert abs(metrics["contentWidth"] - 880) <= 1, "Small-window content did not fit requested 880pt width"
+PYMETRICS
+  cat "$METRICS" >> screenshots/provenance.txt
   WINDOW_ID="$(swift screenshots/find-main-for-pid.swift "$APP_PID")"
   screencapture -x -l "$WINDOW_ID" "screenshots/main-window-$variant.png"
   sips -g pixelWidth -g pixelHeight "screenshots/main-window-$variant.png"

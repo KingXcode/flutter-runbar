@@ -52,6 +52,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if let flag = arguments.firstIndex(of: "--screenshot-metrics"), arguments.indices.contains(flag + 1) {
+            let destination = URL(fileURLWithPath: arguments[flag + 1])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                let content = window.contentLayoutRect
+                let metrics: [String: Double] = [
+                    "frameWidth": Double(window.frame.width), "frameHeight": Double(window.frame.height),
+                    "contentWidth": Double(content.width), "contentHeight": Double(content.height)
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys]) {
+                    try? data.write(to: destination, options: .atomic)
+                }
+            }
+        }
         if arguments.contains("--screenshot-main-only") { return }
         let menuWindow = NSWindow(contentRect: NSRect(x: 40, y: 60, width: MenuLayout.width, height: MenuLayout.maximumListHeight + 100),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)

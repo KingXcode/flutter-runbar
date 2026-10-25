@@ -46,13 +46,13 @@ struct ManagerView: View {
                 Divider()
                 Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-            }.navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+            }.navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             VStack(spacing: 0) {
                 projectHeader
                 Divider()
                 HSplitView {
-                    historyPane.frame(minWidth: 150, idealWidth: 185, maxWidth: 230)
+                    historyPane.frame(minWidth: 150, idealWidth: 170, maxWidth: 190)
                     logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }.background(Color(nsColor: .windowBackgroundColor))
