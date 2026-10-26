@@ -125,14 +125,11 @@ do {
         }
         try files.moveItem(at: stagedApp, to: destination)
         installed = true
-        // Finder can attach these metadata attributes when a Desktop item is
-        // replaced. Remove only packaging detritus from the newly copied bundle;
-        // never strip quarantine or other security attributes.
-        let attributes = try run("/usr/bin/xattr", [destination.path]).split(separator: "\n").map(String.init)
-        for attribute in ["com.apple.FinderInfo", "com.apple.ResourceFork"] where attributes.contains(attribute) {
-            try run("/usr/bin/xattr", ["-d", attribute, destination.path])
-        }
-        try run("/usr/bin/codesign", ["--verify", "--strict", destination.path])
+        // Source and staging pass strict verification before installation.
+        // Finder can immediately attach Desktop-position metadata to the root
+        // bundle. Standard verification still validates signed code/resources
+        // without racing Finder over that harmless, unsigned root metadata.
+        try run("/usr/bin/codesign", ["--verify", destination.path])
     } catch {
         let installError = error
         do {
