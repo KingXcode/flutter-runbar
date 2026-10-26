@@ -68,7 +68,7 @@ struct ManagerView: View {
                 projectHeader
                 Divider()
                 HSplitView {
-                    historyPane.frame(minWidth: 150, idealWidth: 170, maxWidth: 180)
+                    historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300)
                     logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }.background(Color(nsColor: .windowBackgroundColor))
@@ -123,9 +123,9 @@ struct ManagerView: View {
         .sheet(isPresented: $pathSettings) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("命令环境").font(.title2)
-                Text("额外 PATH（冒号分隔；使用完整路径，不要使用 ~）")
+                Text("额外 PATH（冒号分隔；支持完整路径和 ~/）")
                 TextField("PATH", text: $model.config.extraPath)
-                Text("这些目录会添加到登录 zsh 的 PATH 前面。默认包含 pub-cache 和 Homebrew；可添加你的 FVM 可执行文件目录。不安装 SDK、不修改 shell 配置。")
+                Text("自定义目录优先，并自动补充 ~/.pub-cache/bin、~/fvm/bin 和 Homebrew 路径；可添加其他 FVM 安装目录。不安装 SDK、不修改 shell 配置。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("保存") { model.persist(); pathSettings = false }
             }.padding(24).frame(width: 560)
@@ -199,26 +199,34 @@ struct ManagerView: View {
                 }.padding(16)
                 Spacer()
             } else {
-                List {
-                    ForEach(historyGroups) { group in
-                        DisclosureGroup(isExpanded: Binding(
-                            get: { !collapsedHistoryProjects.contains(group.path) },
-                            set: { expanded in
-                                if expanded { collapsedHistoryProjects.remove(group.path) }
-                                else { collapsedHistoryProjects.insert(group.path) }
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(historyGroups) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button {
+                                    if collapsedHistoryProjects.contains(group.path) { collapsedHistoryProjects.remove(group.path) }
+                                    else { collapsedHistoryProjects.insert(group.path) }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: collapsedHistoryProjects.contains(group.path) ? "chevron.right" : "chevron.down")
+                                            .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                                        Label(URL(fileURLWithPath: group.path).lastPathComponent, systemImage: "folder")
+                                            .font(.system(size: 11, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                                        Spacer(minLength: 0)
+                                        Text(group.sessions.count, format: .number).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 6).padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).help(group.path)
+                                .accessibilityValue(collapsedHistoryProjects.contains(group.path) ? "已折叠" : "已展开")
+                                if !collapsedHistoryProjects.contains(group.path) {
+                                    ForEach(group.sessions) { session in historyRow(session) }
+                                }
                             }
-                        )) {
-                            ForEach(group.sessions) { session in historyRow(session) }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Label(URL(fileURLWithPath: group.path).lastPathComponent, systemImage: "folder")
-                                    .font(.system(size: 11, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                                Spacer(minLength: 0)
-                                Text(group.sessions.count, format: .number).font(.caption2).foregroundStyle(.secondary)
-                            }.help(group.path)
                         }
-                    }
-                }.listStyle(.inset)
+                    }.padding(8)
+                }
             }
         }.background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
             .onChange(of: model.selectedSession) { _, id in
@@ -230,25 +238,20 @@ struct ManagerView: View {
 
     private func historyRow(_ session: RunSession) -> some View {
         Button { model.toggleSession(session) } label: {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(session.command).font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        Text(session.startedAt, format: .dateTime.month().day().hour().minute())
-                            .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize()
-                        Spacer(minLength: 0)
-                        SessionBadge(status: session.status, compact: true)
-                    }
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(session.startedAt, format: .dateTime.month().day().hour().minute())
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                        SessionBadge(status: session.status, compact: true)
-                    }
-                }
-            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                Text(session.startedAt, format: .dateTime.month().day().hour().minute())
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                SessionBadge(status: session.status, compact: true)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .contentShape(Rectangle())
+            .background(model.selectedSession == session.id ? Color.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain).help("\(session.projectPath)\n\(session.command)")
-            .listRowBackground(model.selectedSession == session.id ? Color.accentColor.opacity(0.12) : Color.clear)
             .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
     }
 
