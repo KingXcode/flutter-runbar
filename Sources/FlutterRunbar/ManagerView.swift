@@ -20,6 +20,8 @@ struct ManagerView: View {
     @State private var pendingSessionDeletion = Set<UUID>()
     @State private var showingSessionDeletion = false
     @State private var pendingProjectRemoval: Project?
+    @State private var expandedLog = false
+    @AppStorage("logWrapsLines") private var logWrapsLines = false
     private var projectHistory: [RunSession] {
         guard let path = model.project?.path else { return [] }
         return model.history.filter { $0.projectPath == path }
@@ -86,7 +88,7 @@ struct ManagerView: View {
                 projectHeader
                 Divider()
                 HSplitView {
-                    historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300)
+                    if !expandedLog { historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300) }
                     logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }.background(Color(nsColor: .windowBackgroundColor))
@@ -366,7 +368,11 @@ struct ManagerView: View {
                     })
                 }.frame(height: min(140, metadataHeight > 0 ? metadataHeight : 100))
                     .onPreferenceChange(LogMetadataHeightKey.self) { metadataHeight = $0 }
-                LogView(text: model.logText)
+                logNavigation
+                LogView(page: model.logPage, totalBytes: model.logTotalBytes, wrapsLines: logWrapsLines,
+                        scrollRevision: model.logScrollRevision, placement: model.logScrollPlacement,
+                        followsOutput: model.logFollowing, loading: model.logLoading,
+                        onScrollAway: model.pauseLogFollowing, onLoadWindow: model.shiftLogWindow, onSeek: model.seekLog)
                     .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.65)))
@@ -388,7 +394,7 @@ struct ManagerView: View {
             }
             HStack(spacing: 5) {
                 Image(systemName: "lock.shield")
-                Text("仅保存在本机 · 视图显示尾部，文件保留完整输出")
+                Text("仅保存在本机 · 分段读取完整日志，单段最多 1 MB")
             }.font(.system(size: 10)).foregroundStyle(.secondary)
         }.padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 14)
     }
@@ -440,7 +446,45 @@ struct ManagerView: View {
         HStack(spacing: 8) {
             Label("输出日志", systemImage: "terminal").font(.system(size: 13, weight: .semibold))
             if let session = model.session { SessionBadge(status: session.status) }
+            Button { expandedLog.toggle() } label: {
+                Image(systemName: expandedLog ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+            }.buttonStyle(.borderless).help(expandedLog ? "恢复运行记录列表" : "展开日志，隐藏运行记录列表")
+                .accessibilityLabel(expandedLog ? "收起日志" : "展开日志")
         }.fixedSize()
+    }
+    private var logNavigation: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { logPageButtons; Spacer(minLength: 4); logDisplayOptions }
+            VStack(alignment: .leading, spacing: 5) {
+                logPageButtons
+                HStack { logDisplayOptions; Spacer(minLength: 0) }
+            }
+        }.controlSize(.mini).font(.system(size: 10))
+    }
+    private var logPageButtons: some View {
+        HStack(spacing: 5) {
+            Button("最早") { model.showLog(.first) }
+                .disabled(model.logLoading || model.logPage == nil)
+            Button(model.logHasNewOutput ? "最新 · 有新输出" : "最新") { model.showLog(.latest) }
+                .disabled(model.logLoading)
+            if model.logLoading { ProgressView().controlSize(.mini) }
+            if let page = model.logPage {
+                Text("\(logSize(page.startOffset))–\(logSize(page.endOffset)) / \(logSize(model.logTotalBytes))")
+                    .monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                    .help("内存中的日志范围 / 文件总大小；上下滚动自动读取，右侧滚动条代表整份日志的字节进度")
+            }
+        }
+    }
+    private var logDisplayOptions: some View {
+        HStack(spacing: 8) {
+            Toggle("跟随输出", isOn: Binding(get: { model.logFollowing }, set: {
+                if $0 { model.showLog(.latest) } else { model.pauseLogFollowing() }
+            })).help("向上滚动时自动暂停跟随，点击最新可恢复")
+            Toggle("自动换行", isOn: $logWrapsLines)
+        }.toggleStyle(.checkbox).fixedSize()
+    }
+    private func logSize(_ value: UInt64) -> String {
+        value == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
     }
     private var revealButton: some View {
         Button("在 Finder 中显示日志文件", systemImage: "folder") { model.revealSelectedOutput() }
@@ -507,30 +551,5 @@ private struct StatusTag: View {
             .padding(.horizontal, compact ? 4 : 6).padding(.vertical, compact ? 2 : 3)
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             .fixedSize().accessibilityLabel(title)
-    }
-}
-
-/// Selectable, wrapping native log view with semantic colors in both appearances.
-struct LogView: NSViewRepresentable {
-    var text: String
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = false
-        scroll.autohidesScrollers = true; scroll.drawsBackground = true; scroll.backgroundColor = .textBackgroundColor
-        let view = NSTextView(); view.isEditable = false; view.isSelectable = true
-        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
-        view.textContainerInset = NSSize(width: 12, height: 12); view.textContainer?.lineFragmentPadding = 0
-        view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
-        view.setAccessibilityLabel("运行日志")
-        scroll.documentView = view; return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView else { return }
-        view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
-        guard view.string != text else { return }
-        let atBottom = scroll.documentVisibleRect.maxY >= view.bounds.maxY - 40
-        view.string = text
-        if atBottom { view.scrollToEndOfDocument(nil) }
     }
 }

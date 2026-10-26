@@ -7,7 +7,7 @@ public struct OutputParser {
     private var line = ""
     private var devToolsContext = false
     public init() {}
-    public mutating func consume(_ data: Data, final: Bool = false) -> (text: String, urls: [String]) {
+    public mutating func consume(_ data: Data, final: Bool = false, detectURLs: Bool = true) -> (text: String, urls: [String]) {
         bytes.append(data)
         var count = bytes.count
         if !final && count > 0 {
@@ -31,6 +31,7 @@ public struct OutputParser {
             default: escapeState = scalar == "\\" ? 0 : 3
             }
         }
+        guard detectURLs else { return (clean, []) }
         var urls: [String] = []
         for character in clean {
             if character == "\n" || character == "\r" {

@@ -146,7 +146,20 @@ final class AppModel: ObservableObject {
         get { historySelection.focusedID }
         set { historySelection.setSingle(newValue) }
     }
-    @Published var logText = ""
+    @Published private(set) var logPage: LogFilePage?
+    @Published private(set) var logLoading = false
+    @Published private(set) var logFollowing = true
+    @Published private(set) var logHasNewOutput = false
+    @Published private(set) var logScrollRevision = 0
+    private(set) var logScrollPlacement = LogScrollPlacement.end
+    @Published private(set) var logTotalBytes: UInt64 = 0
+    var logText: String { logPage?.text ?? "" }
+    private let logLoader = LogPageLoader()
+    private var logReadTask: Task<Void, Never>?
+    private var logRefreshTask: Task<Void, Never>?
+    private var logReadToken = UUID()
+    private var displayedLogSession: UUID?
+    private var logRefreshNeeded = false
     @Published var error: String?
     @Published var nativeActionProjectID: UUID?
     var quitWhenFinished = false
@@ -260,7 +273,7 @@ final class AppModel: ObservableObject {
             projectRuns[id] = nil
             if selectedProject == id {
                 if let next = config.projects.first { select(next) }
-                else { selectedProject = nil; selectedSession = nil; logText = "" }
+                else { selectedProject = nil; selectedSession = nil; loadLog() }
             }
         } catch { self.error = error.localizedDescription }
     }
@@ -309,14 +322,14 @@ final class AppModel: ObservableObject {
         var didTrash = false
         func append(_ text: String) throws {
             try log?.append(Data((text + "\n").utf8))
-            if selectedSession == session.id { logText = (try? store.tail(session.id)) ?? logText }
+            if selectedSession == session.id { refreshLogAfterOutput() }
         }
         do {
             try store.save(session)
             log = try RunLog(directory: store.directory(session.id))
             state.session = session; projectRuns[project.id] = state
             replace(session)
-            if selectedProject == project.id { selectedSession = session.id; logText = "" }
+            if selectedProject == project.id { selectedSession = session.id; loadLog() }
             try append("内置操作，不执行 shell。仅在核实 App、容器和明确确认后移到废纸篓。")
             let service = SandboxResetService()
             let candidates = try service.discoverApplications(projectPath: project.path)
@@ -400,9 +413,9 @@ final class AppModel: ObservableObject {
         case .started(let id, let value):
             replace(value)
             // Another project's start or finish must not steal the viewed log.
-            if selectedProject == id { selectedSession = value.id; logText = "" }
+            if selectedProject == id { selectedSession = value.id; loadLog() }
         case .output(_, let sessionID, _):
-            if selectedSession == sessionID { logText = coordinator?.liveLog(for: sessionID) ?? "" }
+            if selectedSession == sessionID { refreshLogAfterOutput() }
         case .updated(_, let value): replace(value)
         case .finished(let id, let value):
             let hadStarted = history.contains { $0.id == value.id }
@@ -422,12 +435,101 @@ final class AppModel: ObservableObject {
         if let i = history.firstIndex(where: { $0.id == value.id }) { history[i] = value } else { history.insert(value, at: 0) }
     }
     func loadLog() {
-        guard let id = selectedSession, let store else { logText = ""; return }
-        // Live snapshots share the coordinator's delivery boundary; reading disk
-        // could include bytes whose queued UI event has not arrived yet.
-        if let live = coordinator?.liveLog(for: id) { logText = live; return }
-        do { logText = try store.tail(id) }
-        catch { logText = ""; self.error = "读取日志失败：\(error.localizedDescription)" }
+        if displayedLogSession != selectedSession || selectedSession == nil {
+            logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
+            logReadToken = UUID(); logLoading = false; logRefreshNeeded = false
+            displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0
+            logFollowing = true; logHasNewOutput = false
+            if selectedSession != nil { readLog(.latest, placement: .end) }
+        } else { refreshLogAfterOutput() }
+    }
+    func pauseLogFollowing() {
+        guard logFollowing else { return }
+        logFollowing = false
+        logRefreshTask?.cancel(); logRefreshTask = nil
+    }
+    func showLog(_ location: LogPageLocation) {
+        logRefreshTask?.cancel(); logRefreshTask = nil
+        logFollowing = { if case .latest = location { return true }; return false }()
+        let placement: LogScrollPlacement
+        switch location {
+        case .latest, .before: placement = .end
+        case .around, .fraction: placement = .anchor
+        default: placement = .start
+        }
+        readLog(location, placement: placement)
+    }
+    func shiftLogWindow(_ offset: UInt64) {
+        guard !logLoading else { return }
+        pauseLogFollowing()
+        readLog(.around(offset), placement: .preserveAnchor)
+    }
+    func seekLog(_ progress: Double) {
+        logRefreshTask?.cancel()
+        logReadTask?.cancel(); logReadToken = UUID(); logLoading = false; logRefreshNeeded = false
+        let value = LogScrollMetrics.clamp(progress)
+        pauseLogFollowing()
+        // Dragging updates the knob immediately; only the last requested disk
+        // position is read after a short debounce, keeping queued work bounded.
+        logRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(60)) } catch { return }
+            guard let self else { return }
+            self.logRefreshTask = nil
+            if value == 0 { self.showLog(.first) }
+            else if value == 1 { self.showLog(.latest) }
+            else { self.showLog(.fraction(value)) }
+        }
+    }
+    private func refreshLogAfterOutput() {
+        guard selectedSession != nil else { return }
+        if !logFollowing { logHasNewOutput = true }
+        if logLoading { logRefreshNeeded = true; return }
+        guard logRefreshTask == nil else { return }
+        // Coalesce bursts; never re-read or re-layout a megabyte per pipe chunk.
+        logRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let self else { return }
+            self.logRefreshTask = nil
+            if self.logFollowing { self.readLog(.latest, placement: nil) }
+            else { await self.refreshLogSize() }
+        }
+    }
+    private func refreshLogSize() async {
+        guard let id = selectedSession, let store else { return }
+        let token = logReadToken
+        let url = store.directory(id).appendingPathComponent("output.raw")
+        if let size = try? await logLoader.size(url), !Task.isCancelled, selectedSession == id, logReadToken == token {
+            logTotalBytes = size
+        }
+    }
+    private func readLog(_ location: LogPageLocation, placement: LogScrollPlacement?) {
+        guard let id = selectedSession, let store else { return }
+        logReadTask?.cancel()
+        let token = UUID(); logReadToken = token
+        logLoading = true; logRefreshNeeded = false; logHasNewOutput = false
+        let url = store.directory(id).appendingPathComponent("output.raw")
+        let live = history.first(where: { $0.id == id })?.status == .running
+        let loader = logLoader
+        logReadTask = Task { [weak self] in
+            do {
+                let page = try await loader.read(url, at: location, isLive: live)
+                guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
+                self.logLoading = false
+                // Scrolling away pauses live updates, including an in-flight read.
+                self.logTotalBytes = page.totalBytes
+                if placement != nil || self.logFollowing {
+                    self.logPage = page
+                    if let placement {
+                        self.logScrollPlacement = placement; self.logScrollRevision += 1
+                    }
+                } else { self.logHasNewOutput = true }
+                if self.logRefreshNeeded { self.refreshLogAfterOutput() }
+            } catch {
+                guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
+                self.logLoading = false
+                self.error = "读取日志失败：\(error.localizedDescription)"
+            }
+        }
     }
     var selectedOutputFile: URL? {
         guard let id = selectedSession, let store else { return nil }
@@ -578,6 +680,22 @@ private struct ProjectMenuRow: View {
         }.padding(.horizontal, 10).padding(.vertical, 6)
     }
 }
+
+/// Serial, off-main disk parsing; cancelled selections never queue full-file work.
+private actor LogPageLoader {
+    func size(_ url: URL) throws -> UInt64 {
+        try Task.checkCancellation()
+        return (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+    func read(_ url: URL, at location: LogPageLocation, isLive: Bool) throws -> LogFilePage {
+        try Task.checkCancellation()
+        let page = try LogFileReader.read(url, at: location, isLive: isLive)
+        try Task.checkCancellation()
+        return page
+    }
+}
+
+enum LogScrollPlacement { case start, end, anchor, preserveAnchor }
 
 private func phaseLabel(_ phase: ProjectRunPhase) -> String {
     switch phase { case .idle: return "未运行"; case .starting: return "正在启动…"; case .running: return "运行中"; case .stopping: return "正在停止…" }

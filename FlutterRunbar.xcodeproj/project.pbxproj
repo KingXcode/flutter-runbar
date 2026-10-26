@@ -15,9 +15,11 @@
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
 		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
 		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
+		673CC5846603D7C9C0D66235 /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F988073F96A1983555A9F5EA /* LogView.swift */; };
 		7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */; };
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
+		DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */; };
 		E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F989F55D837BC0137D8965AC /* ProjectKindTests.swift */; };
 		EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */; };
 /* End PBXBuildFile section */
@@ -44,8 +46,10 @@
 		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
 		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		F988073F96A1983555A9F5EA /* LogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogView.swift; sourceTree = "<group>"; };
 		F989F55D837BC0137D8965AC /* ProjectKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectKindTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -84,6 +88,7 @@
 				DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */,
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
 				A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */,
+				E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
@@ -144,6 +149,7 @@
 			isa = PBXGroup;
 			children = (
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
+				F988073F96A1983555A9F5EA /* LogView.swift */,
 				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
 			);
 			path = FlutterRunbar;
@@ -264,6 +270,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
+				673CC5846603D7C9C0D66235 /* LogView.swift in Sources */,
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -276,6 +283,7 @@
 				4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */,
 				638995230949F6C246161705 /* CoreTests.swift in Sources */,
 				EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */,
+				DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
@@ -378,7 +386,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -392,7 +400,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.7.1;
+				MARKETING_VERSION = 0.8.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -455,7 +463,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -475,7 +483,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.7.1;
+				MARKETING_VERSION = 0.8.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
