@@ -12,8 +12,23 @@ public struct LogFilePage: Sendable {
     public let totalBytes: UInt64
     public let anchorByteOffset: UInt64?
     public let anchorUTF16Offset: Int?
+    public let change: LogTextChange?
+    public init(text: String, startOffset: UInt64, endOffset: UInt64, totalBytes: UInt64,
+                anchorByteOffset: UInt64? = nil, anchorUTF16Offset: Int? = nil, change: LogTextChange? = nil) {
+        self.text = text; self.startOffset = startOffset; self.endOffset = endOffset; self.totalBytes = totalBytes
+        self.anchorByteOffset = anchorByteOffset; self.anchorUTF16Offset = anchorUTF16Offset; self.change = change
+    }
     public var hasEarlier: Bool { startOffset > 0 }
     public var hasLater: Bool { endOffset < totalBytes }
+}
+
+/// Applied only if the native view still displays this exact base window.
+public struct LogTextChange: Sendable {
+    public let baseStartOffset: UInt64
+    public let baseEndOffset: UInt64
+    public let baseUTF16Length: Int
+    public let removedUTF16Count: Int
+    public let insertedText: String
 }
 
 public enum LogFileReader {

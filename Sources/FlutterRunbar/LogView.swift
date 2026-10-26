@@ -20,7 +20,7 @@ struct LogView: NSViewRepresentable {
         let host = LogViewport()
         let coordinator = context.coordinator
         coordinator.host = host
-        host.onLayout = { [weak coordinator] in coordinator?.settleLayout() }
+        host.onLayout = { [weak coordinator] in coordinator?.viewportResized() }
         host.scroll.onScrolled = { [weak coordinator] delta in coordinator?.userScrolled(delta) }
         host.text.onNavigation = { [weak coordinator] key, command in coordinator?.navigate(key, command: command) }
         host.bar.onSeek = { [weak coordinator] value in coordinator?.seek(value) }
@@ -47,8 +47,14 @@ struct LogView: NSViewRepresentable {
             if anchor == old.startOffset { anchorDelta = oldY - host.characterY(0) }
             else if anchor == old.endOffset { anchorDelta = oldY - host.characterY(coordinator.text.utf16.count) }
         }
-        view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
+        if coordinator.colorScheme != context.environment.colorScheme {
+            coordinator.colorScheme = context.environment.colorScheme
+            // These setters can invalidate the entire TextKit layout even when
+            // assigned the same semantic colors. Never run them per live batch.
+            view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
+        }
         if coordinator.wrapsLines != wrapsLines {
+            coordinator.layoutDirty = true
             coordinator.wrapsLines = wrapsLines
             host.scroll.hasHorizontalScroller = !wrapsLines
             view.isHorizontallyResizable = !wrapsLines
@@ -60,7 +66,23 @@ struct LogView: NSViewRepresentable {
             host.needsLayout = true
         }
         if coordinator.text != text {
-            if !coordinator.text.isEmpty, text.hasPrefix(coordinator.text) {
+            coordinator.layoutDirty = true
+            if let change = page?.change, let old = coordinator.page,
+               change.baseStartOffset == old.startOffset, change.baseEndOffset == old.endOffset,
+               change.baseUTF16Length == coordinator.text.utf16.count,
+               change.removedUTF16Count <= change.baseUTF16Length,
+               change.baseUTF16Length - change.removedUTF16Count + change.insertedText.utf16.count == text.utf16.count {
+                view.textStorage?.beginEditing()
+                if change.removedUTF16Count > 0 {
+                    view.textStorage?.deleteCharacters(in: NSRange(location: 0, length: change.removedUTF16Count))
+                }
+                if !change.insertedText.isEmpty {
+                    view.textStorage?.append(NSAttributedString(string: change.insertedText, attributes: [
+                        .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.textColor
+                    ]))
+                }
+                view.textStorage?.endEditing()
+            } else if !coordinator.text.isEmpty, text.hasPrefix(coordinator.text) {
                 view.textStorage?.append(NSAttributedString(string: String(text.dropFirst(coordinator.text.count)), attributes: [
                     .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.textColor
                 ]))
@@ -85,8 +107,11 @@ struct LogView: NSViewRepresentable {
         var page: LogFilePage?
         var text = ""
         var wrapsLines: Bool?
+        var colorScheme: ColorScheme?
         var revision = -1
         var updating = false
+        var layoutDirty = true
+        var layoutSize: NSSize?
         var wasLoading = false
         var pendingWindow = false
         var pendingSeek: Double?
@@ -97,10 +122,19 @@ struct LogView: NSViewRepresentable {
         var observer: NSObjectProtocol?
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
+        func viewportResized() {
+            if layoutSize != host?.scroll.contentSize { layoutDirty = true }
+            settleLayout()
+        }
+
         func settleLayout() {
             guard !updating, let host, let parent, host.scroll.contentSize.width > 20, host.scroll.contentSize.height > 0 else { return }
             updating = true
-            host.prepareDocument(wraps: parent.wrapsLines)
+            let changed = layoutDirty
+            if changed {
+                host.prepareDocument(wraps: parent.wrapsLines)
+                layoutDirty = false; layoutSize = host.scroll.contentSize
+            }
             if let navigation {
                 self.navigation = nil
                 switch navigation.placement {
@@ -109,7 +143,7 @@ struct LogView: NSViewRepresentable {
                 case .anchor, .preserveAnchor:
                     host.scrollTo(y: host.characterY(page?.anchorUTF16Offset ?? 0) + navigation.anchorDelta, x: navigation.x)
                 }
-            } else if parent.followsOutput { host.scrollToEnd(x: host.scroll.contentView.bounds.origin.x) }
+            } else if parent.followsOutput && changed { host.scrollToEnd(x: host.scroll.contentView.bounds.origin.x) }
             updating = false
             updateProgress()
         }

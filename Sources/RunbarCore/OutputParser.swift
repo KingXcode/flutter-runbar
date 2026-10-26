@@ -6,6 +6,7 @@ public struct OutputParser {
     private var escapeState = 0
     private var line = ""
     private var devToolsContext = false
+    public var bufferedByteCount: Int { bytes.count }
     public init() {}
     public mutating func consume(_ data: Data, final: Bool = false, detectURLs: Bool = true) -> (text: String, urls: [String]) {
         bytes.append(data)

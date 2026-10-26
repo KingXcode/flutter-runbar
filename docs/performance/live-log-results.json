@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-26",
+  "baselineCommit": "054fed059ca9e8490c358e8740091eb878ced2be",
+  "optimizedSource": "incremental live-tail performance fix",
+  "workload": {
+    "initialLogApproxMB": 20,
+    "appendApproxKBPerSecond": 20,
+    "wrapLines": true,
+    "platform": "macOS 27 / Apple Silicon",
+    "probeIntervalMs": 50,
+    "recentHeartbeatSamples": 200
+  },
+  "baseline": {
+    "p95DelayMs": 240.47674999999998,
+    "maxDelayMs": 258.0355,
+    "meanDelayMs": 43.65892897499999,
+    "samples": 200
+  },
+  "optimized": {
+    "p95DelayMs": 8.012999999999998,
+    "maxDelayMs": 65.513208,
+    "meanDelayMs": 1.9046842000000004,
+    "samples": 200,
+    "logBytes": 20728810,
+    "runStatus": "running"
+  }
+}

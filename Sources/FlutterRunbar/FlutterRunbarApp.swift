@@ -24,9 +24,12 @@ struct FlutterRunbarApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    #if SCREENSHOT_PREVIEW
+    #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
     private var previewWindow: NSWindow?
     private var previewMenuWindow: NSWindow?
+    #if LIVE_LOG_VALIDATION
+    private var responsivenessProbe: LogResponsivenessProbe?
+    #endif
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = ProcessInfo.processInfo.arguments
         if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
@@ -54,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previewWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        #if LIVE_LOG_VALIDATION
+        // Isolated QA host with the real runner; fixture HOME and commands are
+        // supplied by the test launcher. Never enabled in production builds.
+        responsivenessProbe = LogResponsivenessProbe()
+        return
+        #endif
         if let flag = arguments.firstIndex(of: "--screenshot-metrics"), arguments.indices.contains(flag + 1) {
             let destination = URL(fileURLWithPath: arguments[flag + 1])
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
@@ -147,7 +156,9 @@ final class AppModel: ObservableObject {
         set { historySelection.setSingle(newValue) }
     }
     @Published private(set) var logPage: LogFilePage?
-    @Published private(set) var logLoading = false
+    private var logReading = false
+    @Published private(set) var logNavigating = false
+    @Published private(set) var logShowsLoading = false
     @Published private(set) var logFollowing = true
     @Published private(set) var logHasNewOutput = false
     @Published private(set) var logScrollRevision = 0
@@ -156,6 +167,7 @@ final class AppModel: ObservableObject {
     var logText: String { logPage?.text ?? "" }
     private let logLoader = LogPageLoader()
     private var logReadTask: Task<Void, Never>?
+    private var logLoadingIndicatorTask: Task<Void, Never>?
     private var logRefreshTask: Task<Void, Never>?
     private var logReadToken = UUID()
     private var displayedLogSession: UUID?
@@ -437,7 +449,7 @@ final class AppModel: ObservableObject {
     func loadLog() {
         if displayedLogSession != selectedSession || selectedSession == nil {
             logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
-            logReadToken = UUID(); logLoading = false; logRefreshNeeded = false
+            logReadToken = UUID(); finishLogLoading(); logRefreshNeeded = false
             displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0
             logFollowing = true; logHasNewOutput = false
             if selectedSession != nil { readLog(.latest, placement: .end) }
@@ -460,13 +472,13 @@ final class AppModel: ObservableObject {
         readLog(location, placement: placement)
     }
     func shiftLogWindow(_ offset: UInt64) {
-        guard !logLoading else { return }
+        guard !logNavigating else { return }
         pauseLogFollowing()
         readLog(.around(offset), placement: .preserveAnchor)
     }
     func seekLog(_ progress: Double) {
         logRefreshTask?.cancel()
-        logReadTask?.cancel(); logReadToken = UUID(); logLoading = false; logRefreshNeeded = false
+        logReadTask?.cancel(); logReadToken = UUID(); finishLogLoading(); logRefreshNeeded = false
         let value = LogScrollMetrics.clamp(progress)
         pauseLogFollowing()
         // Dragging updates the knob immediately; only the last requested disk
@@ -482,8 +494,8 @@ final class AppModel: ObservableObject {
     }
     private func refreshLogAfterOutput() {
         guard selectedSession != nil else { return }
-        if !logFollowing { logHasNewOutput = true }
-        if logLoading { logRefreshNeeded = true; return }
+        if !logFollowing && !logHasNewOutput { logHasNewOutput = true }
+        if logReading { logRefreshNeeded = true; return }
         guard logRefreshTask == nil else { return }
         // Coalesce bursts; never re-read or re-layout a megabyte per pipe chunk.
         logRefreshTask = Task { [weak self] in
@@ -506,7 +518,21 @@ final class AppModel: ObservableObject {
         guard let id = selectedSession, let store else { return }
         logReadTask?.cancel()
         let token = UUID(); logReadToken = token
-        logLoading = true; logRefreshNeeded = false; logHasNewOutput = false
+        logLoadingIndicatorTask?.cancel()
+        logReading = true
+        if logNavigating != (placement != nil) { logNavigating = placement != nil }
+        if logShowsLoading { logShowsLoading = false }
+        logRefreshNeeded = false
+        if logHasNewOutput { logHasNewOutput = false }
+        // Ordinary live refresh is silent. Only a slower explicit navigation
+        // needs a spinner; short reads must not flash the toolbar.
+        if placement != nil {
+            logLoadingIndicatorTask = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                guard let self, !Task.isCancelled, self.logReadToken == token, self.logReading else { return }
+                self.logShowsLoading = true
+            }
+        }
         let url = store.directory(id).appendingPathComponent("output.raw")
         let live = history.first(where: { $0.id == id })?.status == .running
         let loader = logLoader
@@ -514,7 +540,7 @@ final class AppModel: ObservableObject {
             do {
                 let page = try await loader.read(url, at: location, isLive: live)
                 guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
-                self.logLoading = false
+                self.finishLogLoading()
                 // Scrolling away pauses live updates, including an in-flight read.
                 self.logTotalBytes = page.totalBytes
                 if placement != nil || self.logFollowing {
@@ -526,10 +552,16 @@ final class AppModel: ObservableObject {
                 if self.logRefreshNeeded { self.refreshLogAfterOutput() }
             } catch {
                 guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
-                self.logLoading = false
+                self.finishLogLoading()
                 self.error = "读取日志失败：\(error.localizedDescription)"
             }
         }
+    }
+    private func finishLogLoading() {
+        logLoadingIndicatorTask?.cancel(); logLoadingIndicatorTask = nil
+        logReading = false
+        if logNavigating { logNavigating = false }
+        if logShowsLoading { logShowsLoading = false }
     }
     var selectedOutputFile: URL? {
         guard let id = selectedSession, let store else { return nil }
@@ -683,13 +715,16 @@ private struct ProjectMenuRow: View {
 
 /// Serial, off-main disk parsing; cancelled selections never queue full-file work.
 private actor LogPageLoader {
+    private var tail = LogTailReader()
     func size(_ url: URL) throws -> UInt64 {
         try Task.checkCancellation()
         return (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0
     }
     func read(_ url: URL, at location: LogPageLocation, isLive: Bool) throws -> LogFilePage {
         try Task.checkCancellation()
-        let page = try LogFileReader.read(url, at: location, isLive: isLive)
+        let page: LogFilePage
+        if case .latest = location { page = try tail.read(url, isLive: isLive) }
+        else { tail.reset(); page = try LogFileReader.read(url, at: location, isLive: isLive) }
         try Task.checkCancellation()
         return page
     }

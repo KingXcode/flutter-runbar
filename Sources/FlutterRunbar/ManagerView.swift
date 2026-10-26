@@ -371,7 +371,7 @@ struct ManagerView: View {
                 logNavigation
                 LogView(page: model.logPage, totalBytes: model.logTotalBytes, wrapsLines: logWrapsLines,
                         scrollRevision: model.logScrollRevision, placement: model.logScrollPlacement,
-                        followsOutput: model.logFollowing, loading: model.logLoading,
+                        followsOutput: model.logFollowing, loading: model.logNavigating,
                         onScrollAway: model.pauseLogFollowing, onLoadWindow: model.shiftLogWindow, onSeek: model.seekLog)
                     .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
@@ -464,10 +464,10 @@ struct ManagerView: View {
     private var logPageButtons: some View {
         HStack(spacing: 5) {
             Button("最早") { model.showLog(.first) }
-                .disabled(model.logLoading || model.logPage == nil)
+                .disabled(model.logNavigating || model.logPage == nil)
             Button(model.logHasNewOutput ? "最新 · 有新输出" : "最新") { model.showLog(.latest) }
-                .disabled(model.logLoading)
-            if model.logLoading { ProgressView().controlSize(.mini) }
+                .disabled(model.logNavigating)
+            if model.logShowsLoading { ProgressView().controlSize(.mini) }
             if let page = model.logPage {
                 Text("\(logSize(page.startOffset))–\(logSize(page.endOffset)) / \(logSize(model.logTotalBytes))")
                     .monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
