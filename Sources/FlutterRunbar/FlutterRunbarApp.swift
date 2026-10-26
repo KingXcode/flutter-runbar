@@ -11,7 +11,7 @@ struct FlutterRunbarApp: App {
         MenuBarExtra {
             MenuContent(model: model)
         } label: {
-            Label(!model.busy ? "Flutter Runbar" : "Flutter 运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
+            Label(!model.busy ? "Flutter Runbar" : "命令运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
         }
         .menuBarExtraStyle(.window)
         Window("Flutter Runbar", id: "manager") {
@@ -141,7 +141,11 @@ final class AppModel: ObservableObject {
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
     @Published var selectedProject: UUID?
-    @Published var selectedSession: UUID?
+    @Published var historySelection = HistorySelection()
+    var selectedSession: UUID? {
+        get { historySelection.focusedID }
+        set { historySelection.setSingle(newValue) }
+    }
     @Published var logText = ""
     @Published var error: String?
     @Published var nativeActionProjectID: UUID?
@@ -192,7 +196,7 @@ final class AppModel: ObservableObject {
     }
     func chooseProject() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
-        panel.message = "选择 Flutter 项目目录"
+        panel.message = "选择项目目录（支持任意类型或空目录）"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path
         if let existing = config.projects.first(where: { URL(fileURLWithPath: $0.path).standardizedFileURL.resolvingSymlinksInPath().path == path }) { select(existing); return }
@@ -200,17 +204,65 @@ final class AppModel: ObservableObject {
     }
     func select(_ project: Project) {
         selectedProject = project.id
-        selectedSession = state(for: project.id).session?.id ?? history.first(where: { $0.projectPath == project.path })?.id
+        let records = history.filter { $0.projectPath == project.path }
+        selectedSession = records.first(where: { $0.id == state(for: project.id).session?.id })?.id ?? records.first?.id
         loadLog()
     }
-    func toggleSession(_ session: RunSession) {
-        if selectedSession == session.id {
-            selectedSession = nil
-        } else {
-            selectedSession = session.id
-            selectedProject = config.projects.first(where: { $0.path == session.projectPath })?.id
+    func setProjectKind(_ kind: ProjectKind, for id: UUID) {
+        guard !state(for: id).isBusy, let index = config.projects.firstIndex(where: { $0.id == id }) else { return }
+        let original = config.projects[index]
+        config.projects[index].kind = kind
+        if let selected = config.projects[index].selectedPresetID,
+           !config.projects[index].availablePresets.contains(where: { $0.id == selected }) {
+            config.projects[index].selectedPresetID = config.projects[index].presets.first?.id
         }
+        if !persist() { config.projects[index] = original }
+    }
+    func toggleSession(_ session: RunSession, mode: HistorySelection.Mode = .single) {
+        selectedProject = config.projects.first(where: { $0.path == session.projectPath })?.id
+        historySelection.select(session.id, visible: visibleHistory.map(\.id), mode: mode)
         loadLog()
+    }
+    var visibleHistory: [RunSession] {
+        guard let path = project?.path else { return [] }
+        return history.filter { $0.projectPath == path }.sorted { $0.startedAt > $1.startedAt }
+    }
+    private var activeSessionIDs: Set<UUID> {
+        Set(projectRuns.values.filter(\.isBusy).compactMap { $0.session?.id })
+    }
+    func canDeleteSessions(_ ids: Set<UUID>) -> Bool {
+        let finishedIDs = Set(history.filter { $0.status != .running }.map(\.id))
+        return !ids.isEmpty && ids.isDisjoint(with: activeSessionIDs) && ids.isSubset(of: finishedIDs)
+    }
+    func deletionIDs(for session: RunSession) -> Set<UUID> {
+        historySelection.ids.contains(session.id) ? historySelection.ids : [session.id]
+    }
+    func selectAllDeletableHistory() {
+        let active = activeSessionIDs
+        historySelection.selectAll(visibleHistory.filter { $0.status != .running && !active.contains($0.id) }.map(\.id))
+        loadLog()
+    }
+    func deleteSessions(_ ids: Set<UUID>) {
+        guard let store, canDeleteSessions(ids) else { error = "不能删除正在运行或已不存在的记录。"; return }
+        do {
+            try store.trashSessions(ids, activeSessionIDs: activeSessionIDs)
+            history.removeAll { ids.contains($0.id) }
+            historySelection.remove(ids, visible: visibleHistory.map(\.id))
+            loadLog()
+        } catch { self.error = "删除记录失败：\(error.localizedDescription)" }
+    }
+    func removeProject(_ id: UUID) {
+        let original = config
+        do {
+            let active = Set(projectRuns.filter { $0.value.isBusy }.map(\.key))
+            guard try config.removeProject(id, activeProjectIDs: active) != nil else { return }
+            guard persist() else { config = original; return }
+            projectRuns[id] = nil
+            if selectedProject == id {
+                if let next = config.projects.first { select(next) }
+                else { selectedProject = nil; selectedSession = nil; logText = "" }
+            }
+        } catch { self.error = error.localizedDescription }
     }
     func choosePreset(_ presetID: UUID?, for projectID: UUID) {
         guard !state(for: projectID).isBusy,

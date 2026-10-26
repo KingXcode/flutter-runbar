@@ -1,11 +1,12 @@
 # Flutter Runbar
 
-macOS 26+ 的原生 SwiftUI 菜单栏 Flutter 开发辅助工具。独立新项目，不依赖或修改其他应用。
+macOS 26+ 的原生 SwiftUI 菜单栏项目命令工具。可为任意项目目录保存并运行终端命令，根据项目类型提供可选模板。
 
 ## 第一版功能
 
 - 选择并保存多个项目目录，添加、编辑每个项目的命令预设。
-- 默认命令：`fvm flutter run -d macos`。
+- 支持任意项目和空目录；新项目没有默认命令，所有命令由用户选择模板或自行保存。
+- 自动识别 Flutter、Xcode、Android、Swift Package、Node.js、Python、Rust、Go、Dart、Gradle；可手动调整项目类型或重新识别。
 - 在项目目录中执行你明确保存的命令；每个项目同一时刻只允许运行一条，不同项目可以同时运行。
 - 菜单栏项目列表：每行项目名、独立命令选择、运行、停止；本次运行识别出的 DevTools 地址显示在该项目下面，点击后打开。保留「打开主界面」。列表支持滚动、长文本省略与辅助功能标签。
 - 保存每次运行的命令快照、开始/结束时间、持续时间、状态、退出码。
@@ -19,8 +20,8 @@ macOS 26+ 的原生 SwiftUI 菜单栏 Flutter 开发辅助工具。独立新项�
 ## 运行环境
 
 - macOS 26 或更新版本。
-- Xcode 26（Swift 6.2）或更新版本。项目使用 Swift 5 语言模式，以明确控制渐进迁移；UI 使用 SwiftUI，日志显示与目录选择采用 AppKit 桥接。
-- 已安装 Flutter / FVM 与运行 Flutter macOS 项目需要的开发工具。
+- 从源码开发或打包需 Xcode 26（Swift 6.2）或更新版本。已打包应用执行普通命令不要求安装 Xcode。项目使用 Swift 5 语言模式，UI 使用 SwiftUI，日志显示与目录选择采用 AppKit 桥接。
+- 按实际命令安装所需工具链；应用本身不要求安装 Flutter / FVM。
 - 不需要第三方 Swift 包、API 密钥、Apple Developer 证书或在线服务。
 
 ## 构建
@@ -71,11 +72,13 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 
 ## 使用
 
-1. 从菜单栏打开管理窗口，点击「添加项目」。项目目录可包含空格或中文。
-2. 选择或编辑命令。支持 zsh 引号、管道与环境变量赋值，例如 `fvm flutter run -d macos`。
+1. 从菜单栏打开管理窗口，点击「添加项目」选择任意目录。根据根目录中的工程文件识别类型；Flutter 优先于其平台子工程，Xcode 工程优先于同目录的 Package.swift。不执行项目代码或扫描全部子目录。目录可包含空格或中文。
+2. 在项目标题旁可调整类型或「重新识别项目类型」。点击「+」选用该类型的模板或直接输入自定义命令；新项目不会自动加入任何命令。支持 zsh 引号、管道与环境变量赋值，例如 `npm run dev`、`swift test`、`fvm flutter run -d macos`。
 3. 在菜单栏列表选择该项目的命令，点击右侧「运行」。不同项目互不影响；运行中不能改选/编辑该项目命令。DevTools 出现后，直接点击该行下方的链接。停止时链接立即隐藏，新一轮运行不会复用旧链接。主界面保留详细日志与历史记录。
 4. 点击「停止」。界面等待最多约 6 秒的正常升级阶段，并继续排空输出，再保存最终退出结果。
 5. 运行记录只显示左侧所选项目的数据，记录数量也随项目切换更新；按完整项目目录匹配，同名不同目录的项目不会混在一起。项目分组可折叠或展开，新记录在前。点击记录可选中高亮并查看输出，再次点击同一条取消选中，右侧恢复默认空白。取消查看不停止命令；任务结束也不会改变当前选中状态。选中记录后点击「在 Finder 中显示日志文件」定位该记录的 `output.raw`；未选中或文件不存在时按钮不可用。
+6. 右键运行记录可删除；点击「多选」勾选、⌘ 点选或 Shift 连选后，可批量删除。「全选」只选当前项目的可删除记录。确认后记录及完整日志一起移到系统废纸篓，运行中的记录不能删除；删除失败会恢复整个批次。
+7. 右键项目选择「移除项目」，或点击项目栏底部的「−」。仅移除应用内的项目与命令配置，保留磁盘项目目录和历史日志；运行中的项目需先停止。重新添加同一目录仍可查看历史，但需重新配置命令。不提供批量移除项目。
 
 命令由 `/bin/zsh -l -c` 执行，工作目录通过进程 API 设置，不拼接 `cd`。每次运行会在自定义 PATH 后补充 `~/.pub-cache/bin`、`~/fvm/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，已有配置也会生效；自定义路径中的 `~/` 会展开为用户主目录。可在「PATH 设置」添加其他 SDK 或 FVM 实际所在目录，自定义路径优先。登录 zsh 会读取你自己的登录配置；本应用不安装 SDK、不修改 shell 文件。PATH 只影响新运行。
 
@@ -98,6 +101,7 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 - `events.jsonl`：每次读取分块的 UTC 接收时间、顺序号、原始文件字节偏移及长度。不是进程自身打印时间，也不伪称可以还原两个流在源头的精确时间或来源标签。每次分块同步落盘。
 - `session.json`：运行信息，最多保存最先识别的 32 个不同 DevTools 地址；完整 URL 仍在原始日志中。
 - 实时视图保留有限尾部；历史视图最多读取末尾 200 KB。完整日志始终在磁盘，直到用户自行管理文件。MVP 没有自动清理，会持续占用磁盘。
+- 删除的记录按批次存放在废纸篓的 `Runbar Deleted Records …` 文件夹中，可找回原始日志。若要恢复到运行列表，将批次中的 UUID 目录放回 `~/Library/Application Support/FlutterRunbar/sessions/` 后重启应用；不要覆盖已有的同名目录。
 - 磁盘写入、同步或读取失败会显式报错，并停止命令；不把不完整日志宣称为成功。异常中断无法准确知道结束时间，因此保留为空。
 - 损坏的单条历史记录保留原文件、跳过并提醒；损坏配置不会自动覆盖。
 - 无遥测、无日志上传、无云同步。命令本身可联网；你手动打开 DevTools 后，浏览器会访问该本机服务。
@@ -133,16 +137,29 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 
 ### 常用命令模板
 
-主界面命令旁的「+」可选择 15 个模板，再点「填入下方编辑区」：macOS / Chrome 运行、获取依赖、检查依赖更新、清理构建缓存、代码检查、测试、Dart 格式化、设备列表、环境诊断，以及 macOS / Web / APK / App Bundle / iOS（不签名）构建。默认使用 FVM，也可取消勾选改用 PATH 中的 Flutter / Dart。模板说明会展示文件修改、清理、SDK 和签名要求。
+主界面命令旁的「+」根据项目类型提供模板，点击「填入下方编辑区」后仍可编辑：
+
+| 项目类型 | 模板来源及示例 |
+| --- | --- |
+| Flutter | `pubspec.yaml` 中的 Flutter SDK 依赖；运行 macOS/Chrome、依赖、检查、测试、格式化及各平台构建。FVM 仅是这一类模板的可选前缀。 |
+| Xcode | 根目录 `.xcodeproj` / `.xcworkspace`；列出 Scheme、查看模拟器，为找到的共享 Scheme 生成构建命令。多个容器时不猜测目标，需自行补充参数。 |
+| Android | Android Manifest 或 Gradle Android 插件；列出任务、Debug APK、Lint、测试、清理。存在 `gradlew` 时优先使用 Wrapper。 |
+| Swift Package | `Package.swift`；构建、Release、测试、解析依赖和清理。 |
+| Node.js / Web | `package.json`；按 `packageManager` 或锁文件选择 npm/pnpm/yarn/bun，只提供实际存在的 scripts，不假定 dev/build/test 一定存在。 |
+| Python | `pyproject.toml` / requirements / setup.py / Pipfile；虚拟环境、版本、unittest，按文件提供 requirements 或 uv 同步。 |
+| Rust / Go / Dart / Gradle | 根据对应清单提供构建、检查、测试、依赖等命令。 |
+| 通用 / 自定义 | 不提供模板或内置操作，全部由用户自定义。 |
+
+识别仅影响建议与工具选项，不限制可运行的命令。手动类型会保存；旧配置首次读取时识别类型，已有命令的内容、UUID、选择及历史不会重写。未识别的类型也可使用任意终端命令。
 
 模板仅填入可编辑草稿，保存后才加入当前项目，且仍需手动点击运行。不会自动执行、安装 SDK、上传构建或向已有项目批量添加配置。原有命令及选择保持不变；保存时拒绝当前项目中相同的命令文本（忽略首尾空白），不重写 shell 引号或参数。格式化会修改源文件；清理会删除生成目录。运行前请检查模板说明和实际命令。
 
-命令参考：[Flutter CLI](https://docs.flutter.dev/reference/flutter-cli)、[Dart format](https://dart.dev/tools/dart-format)、[FVM 使用](https://fvm.app/documentation/getting-started/faq)、[Android 构建](https://docs.flutter.dev/deployment/android)、[iOS 构建](https://docs.flutter.dev/deployment/ios)、[Web 构建](https://docs.flutter.dev/deployment/web)。
+命令参考：[Flutter CLI](https://docs.flutter.dev/reference/flutter-cli)、[Xcode 命令行工具](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference)、[Gradle CLI](https://docs.gradle.org/current/userguide/command_line_interface.html)、[Swift Package](https://docs.swift.org/swiftpm/documentation/packagemanagerdocs/)、[npm scripts](https://docs.npmjs.com/cli/v7/commands/npm-run-script/)。
 
 
 ### 清空 macOS App 沙盒（内置操作）
 
-每个项目的命令列表（主界面与菜单栏）都有「清空 macOS App 沙盒」。这是原生操作，不拼接 shell、不添加 FVM 前缀，也不能编辑成命令字符串。旧自定义命令和当前选择不变。
+Flutter 类型项目的命令列表（主界面与菜单栏）提供「清空 macOS App 沙盒」。其他类型不显示这一 Flutter 构建目录专用操作。这是原生操作，不拼接 shell、不添加 FVM 前缀，也不能编辑成命令字符串。旧自定义命令和当前选择不变。
 
 - 先停止项目运行并退出目标 App。只发现该项目 `build/macos/Build/Products/<配置>/*.app` 的实际构建产物；多个候选时明确选择，不猜测 Debug / Release 或 flavor。尚未构建时先构建，不扫描其他项目或 Applications。
 - 读取实际 App Bundle ID、验证签名及 App Sandbox entitlement，再核验当前用户的容器归属、路径及身份。未启用沙盒、无容器、符号链接重定向或无法核验时停止。

@@ -9,12 +9,17 @@ struct ManagerView: View {
     @State private var editingProjectID: UUID?
     @State private var presetName = ""
     @State private var command = ""
-    @State private var templateID = CommandTemplate.all[0].id
+    @State private var templates: [CommandTemplate] = []
+    @State private var templateID: String?
     @State private var useFVM = true
     @State private var editorError: String?
     @State private var pathSettings = false
     @State private var metadataHeight: CGFloat = 0
     @State private var collapsedHistoryProjects = Set<String>()
+    @State private var selectingHistory = false
+    @State private var pendingSessionDeletion = Set<UUID>()
+    @State private var showingSessionDeletion = false
+    @State private var pendingProjectRemoval: Project?
     private var projectHistory: [RunSession] {
         guard let path = model.project?.path else { return [] }
         return model.history.filter { $0.projectPath == path }
@@ -58,14 +63,23 @@ struct ManagerView: View {
                             }.buttonStyle(.plain).help(project.path)
                                 .listRowBackground(model.selectedProject == project.id ? Color.accentColor.opacity(0.12) : Color.clear)
                                 .accessibilityAddTraits(model.selectedProject == project.id ? .isSelected : [])
+                                .contextMenu {
+                                    Button("移除项目…", role: .destructive) { pendingProjectRemoval = project }
+                                        .disabled(model.state(for: project.id).isBusy)
+                                }
                         }
                     } header: {
                         HStack { Text("项目"); Spacer(); Text("\(model.config.projects.count)").monospacedDigit() }
                     }
                 }.listStyle(.sidebar)
                 Divider()
-                Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                HStack {
+                    Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { pendingProjectRemoval = model.project } label: { Image(systemName: "minus") }
+                        .disabled(model.project == nil || model.selectedState.isBusy)
+                        .help("移除所选项目").accessibilityLabel("移除所选项目")
+                }.padding(12)
             }.navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             VStack(spacing: 0) {
@@ -93,27 +107,7 @@ struct ManagerView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                 Text(editingID == nil ? "添加命令" : "编辑命令").font(.title2)
-                if editingID == nil {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Picker("常用模板", selection: $templateID) {
-                                ForEach(CommandTemplate.all) { template in Text(template.name).tag(template.id) }
-                            }
-                            Toggle("使用 FVM", isOn: $useFVM).fixedSize()
-                        }
-                        if let template = CommandTemplate.all.first(where: { $0.id == templateID }) {
-                            Text(template.command(useFVM: useFVM)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                            Text(template.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            Button("填入下方编辑区") {
-                                presetName = template.name
-                                command = template.command(useFVM: useFVM)
-                            }.help("替换下方草稿，不保存也不执行；可继续编辑")
-                        }
-                        Text(useFVM ? "需已安装 FVM 并为项目配置 Flutter SDK。" : "使用 PATH 中的 flutter / dart；请确认两者属于预期 SDK。")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Divider()
-                    }
-                }
+                if editingID == nil { templatePicker }
                 TextField("名称", text: $presetName)
                 TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
                 Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
@@ -137,13 +131,28 @@ struct ManagerView: View {
         .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("知道了") { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .alert("删除 \(pendingSessionDeletion.count) 条运行记录？", isPresented: $showingSessionDeletion) {
+            Button("取消", role: .cancel) { pendingSessionDeletion = [] }
+            Button("移到废纸篓", role: .destructive) {
+                let ids = pendingSessionDeletion; pendingSessionDeletion = []
+                model.deleteSessions(ids)
+            }
+        } message: { Text("对应日志也会一起移到废纸篓，可从废纸篓恢复。正在运行的记录不能删除。") }
+        .confirmationDialog("移除项目“\(pendingProjectRemoval?.name ?? "")”？", isPresented: Binding(
+            get: { pendingProjectRemoval != nil }, set: { if !$0 { pendingProjectRemoval = nil } }
+        ), titleVisibility: .visible) {
+            if let project = pendingProjectRemoval {
+                Button("移除项目", role: .destructive) { model.removeProject(project.id); pendingProjectRemoval = nil }
+            }
+            Button("取消", role: .cancel) { pendingProjectRemoval = nil }
+        } message: { Text("仅移除应用内的项目配置和命令，不删除磁盘上的项目文件或运行记录。") }
     }
 
     private var projectHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.project?.name ?? "选择一个 Flutter 项目")
+                    Text(model.project?.name ?? "选择一个项目")
                         .font(.system(size: 16, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                         .help(model.project?.name ?? "")
                     Text(model.project?.path ?? "从左侧添加项目，管理命令与本地运行日志。")
@@ -152,7 +161,20 @@ struct ManagerView: View {
                         .help(model.project?.path ?? "")
                         .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "尚未选择项目")
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                if model.project != nil { PhaseBadge(phase: model.selectedState.phase) }
+                if let project = model.project {
+                    Menu {
+                        ForEach(ProjectKind.allCases) { kind in
+                            Button(kind.displayName) { model.setProjectKind(kind, for: project.id) }
+                        }
+                        Divider()
+                        Button("重新识别项目类型") {
+                            model.setProjectKind(ProjectDetector.detect(at: project.path), for: project.id)
+                        }
+                    } label: { Text(project.kind.displayName).font(.caption) }
+                        .fixedSize().disabled(model.selectedState.isBusy)
+                        .help("项目类型只影响可选模板，不改变已保存命令")
+                    PhaseBadge(phase: model.selectedState.phase)
+                }
                 Button { pathSettings = true } label: { Image(systemName: "gearshape") }
                     .help("命令环境与 PATH 设置").accessibilityLabel("PATH 设置")
             }
@@ -163,7 +185,7 @@ struct ManagerView: View {
                         if project.presets.isEmpty { Text("选择命令").tag(Optional<UUID>.none) }
                         ForEach(project.availablePresets) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.labelsHidden().frame(minWidth: 110, maxWidth: 160).disabled(model.selectedState.isBusy)
-                    Button { editorError = nil; editingProjectID = project.id; editingID = nil; presetName = ""; command = ""; templateID = "pub-get"; useFVM = true; editing = true } label: { Image(systemName: "plus") }
+                    Button { beginAddingCommand(for: project) } label: { Image(systemName: "plus") }
                         .disabled(model.selectedState.isBusy).help("添加常用模板或自定义命令").accessibilityLabel("添加命令或常用模板")
                     Button {
                         guard let preset = model.preset else { return }
@@ -188,13 +210,64 @@ struct ManagerView: View {
         }.padding(.horizontal, 12).padding(.vertical, 10)
     }
 
+    private func beginAddingCommand(for project: Project) {
+        editorError = nil; editingProjectID = project.id; editingID = nil
+        presetName = ""; command = ""
+        templates = CommandTemplate.templates(for: project)
+        templateID = templates.first?.id; useFVM = project.kind == .flutter
+        editing = true
+    }
+
+    @ViewBuilder
+    private var templatePicker: some View {
+        if templates.isEmpty {
+            Text("此项目没有预设模板，请直接填写自定义命令。")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Picker("常用模板", selection: $templateID) {
+                        ForEach(templates) { template in Text(template.name).tag(Optional(template.id)) }
+                    }
+                    if templates.first(where: { $0.id == templateID })?.supportsFVM == true {
+                        Toggle("使用 FVM", isOn: $useFVM).fixedSize()
+                    }
+                }
+                if let template = templates.first(where: { $0.id == templateID }) {
+                    Text(template.command(useFVM: useFVM)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text(template.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button("填入下方编辑区") {
+                        presetName = template.name; command = template.command(useFVM: useFVM)
+                    }.help("替换下方草稿，不保存也不执行；可继续编辑")
+                }
+                Text("模板仅供选择和编辑，保存后仍需手动运行；所需工具链请自行安装。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Divider()
+            }
+        }
+    }
+
     private var historyPane: some View {
         VStack(spacing: 0) {
             HStack {
                 Label("运行记录", systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 4)
                 Text("\(projectHistory.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Button(selectingHistory ? "完成" : "多选") {
+                    selectingHistory.toggle()
+                    if !selectingHistory { model.selectedSession = model.selectedSession }
+                }.buttonStyle(.borderless).font(.caption)
             }.padding(.horizontal, 12).padding(.vertical, 8)
+            if selectingHistory || model.historySelection.ids.count > 1 {
+                HStack {
+                    Button("全选") { model.selectAllDeletableHistory() }.help("选择当前项目的所有可删除记录")
+                    Spacer(minLength: 4)
+                    Button("删除 \(model.historySelection.ids.count) 项", role: .destructive) {
+                        pendingSessionDeletion = model.historySelection.ids
+                        showingSessionDeletion = true
+                    }.disabled(!model.canDeleteSessions(model.historySelection.ids))
+                }.font(.caption).buttonStyle(.borderless).padding(.horizontal, 12).padding(.bottom, 8)
+            }
             if projectHistory.isEmpty {
                 VStack(spacing: 6) {
                     Text(model.project == nil ? "请先选择项目" : "该项目还没有运行记录").font(.caption)
@@ -241,7 +314,17 @@ struct ManagerView: View {
     }
 
     private func historyRow(_ session: RunSession) -> some View {
-        Button { model.toggleSession(session) } label: {
+        Button {
+            let flags = NSApp.currentEvent?.modifierFlags ?? []
+            let mode: HistorySelection.Mode = flags.contains(.shift) ? .range : (selectingHistory || flags.contains(.command) ? .toggle : .single)
+            model.toggleSession(session, mode: mode)
+        } label: {
+            HStack(alignment: .top, spacing: 6) {
+            if selectingHistory || model.historySelection.ids.count > 1 {
+                Image(systemName: model.historySelection.ids.contains(session.id) ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(model.historySelection.ids.contains(session.id) ? Color.accentColor : .secondary)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.command).font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
@@ -249,14 +332,22 @@ struct ManagerView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                 SessionBadge(status: session.status, compact: true)
             }
+            }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .contentShape(Rectangle())
-            .background(model.selectedSession == session.id ? Color.accentColor.opacity(0.12) : Color.clear,
+            .background(model.historySelection.ids.contains(session.id) ? Color.accentColor.opacity(0.12) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain).help("\(session.projectPath)\n\(session.command)")
-            .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
+            .accessibilityAddTraits(model.historySelection.ids.contains(session.id) ? .isSelected : [])
+            .contextMenu {
+                let ids = model.deletionIDs(for: session)
+                Button(ids.count > 1 ? "删除所选 \(ids.count) 条记录…" : "删除记录…", role: .destructive) {
+                    pendingSessionDeletion = ids
+                    showingSessionDeletion = true
+                }.disabled(!model.canDeleteSessions(ids))
+            }
     }
 
     private var logPane: some View {

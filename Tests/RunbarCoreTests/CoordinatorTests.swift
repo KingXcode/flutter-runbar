@@ -72,7 +72,7 @@ final class CoordinatorTests: XCTestCase {
         let coordinator = ProjectRunCoordinator(store: store) { _, send in
             let driver = FakeProjectDriver(send); drivers.append(driver); return driver
         }
-        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset()
+        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset(command: "echo fixture")
         var outputs: [UUID: String] = [:]
         coordinator.onEvent = { event in
             if case .output(let id, _, let text) = event { outputs[id, default: ""] += text }
@@ -102,7 +102,7 @@ final class CoordinatorTests: XCTestCase {
         let coordinator = ProjectRunCoordinator(store: store) { _, send in
             let driver = FakeProjectDriver(send); drivers.append(driver); return driver
         }
-        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset()
+        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset(command: "echo fixture")
         coordinator.start(project: a, preset: preset, extraPath: ""); coordinator.start(project: b, preset: preset, extraPath: "")
         let session = RunSession(projectPath: a.path, command: preset.command)
         drivers[0].send(.started(session))
@@ -126,9 +126,9 @@ final class CoordinatorTests: XCTestCase {
         let a = Project(path: "/tmp/a"), alias = Project(path: "/tmp/a/../a"), b = Project(path: "/tmp/b")
         XCTAssertFalse(coordinator.start(project: a, preset: CommandPreset(command: " \n"), extraPath: ""))
         XCTAssertFalse(coordinator.isBusy)
-        coordinator.start(project: a, preset: CommandPreset(), extraPath: "")
-        XCTAssertFalse(coordinator.start(project: alias, preset: CommandPreset(), extraPath: ""))
-        coordinator.start(project: b, preset: CommandPreset(), extraPath: "")
+        coordinator.start(project: a, preset: CommandPreset(command: "echo fixture"), extraPath: "")
+        XCTAssertFalse(coordinator.start(project: alias, preset: CommandPreset(command: "echo fixture"), extraPath: ""))
+        coordinator.start(project: b, preset: CommandPreset(command: "echo fixture"), extraPath: "")
         drivers[0].send(.failure("disk failure"))
         XCTAssertEqual(coordinator.state(for: a.id).phase, .stopping)
         XCTAssertEqual(drivers[0].stops, 1); XCTAssertEqual(drivers[1].stops, 0)
@@ -144,7 +144,7 @@ final class CoordinatorTests: XCTestCase {
         let coordinator = ProjectRunCoordinator(store: store) { _, send in
             let driver = FakeProjectDriver(send); drivers.append(driver); return driver
         }
-        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset()
+        let a = Project(path: "/tmp/a"), b = Project(path: "/tmp/b"), preset = CommandPreset(command: "echo fixture")
         coordinator.start(project: a, preset: preset, extraPath: "")
         coordinator.start(project: b, preset: preset, extraPath: "")
         let sessionA = RunSession(projectPath: a.path, command: preset.command)

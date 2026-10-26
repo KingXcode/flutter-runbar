@@ -3,12 +3,20 @@ import Foundation
 public final class SessionStore {
     public let root: URL
     public private(set) var warnings: [String] = []
+    private let trashDirectory: (URL) throws -> Void
     private var encoder: JSONEncoder {
         let value = JSONEncoder(); value.dateEncodingStrategy = .iso8601
         value.outputFormatting = [.prettyPrinted, .sortedKeys]; return value
     }
-    public init(root: URL? = nil) throws {
+    public init(root: URL? = nil, trashDirectory: ((URL) throws -> Void)? = nil) throws {
         self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("FlutterRunbar", isDirectory: true)
+        self.trashDirectory = trashDirectory ?? { url in
+            #if os(macOS)
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            #else
+            throw RunbarError.message("当前平台不支持系统废纸篓。")
+            #endif
+        }
         try FileManager.default.createDirectory(at: self.root.appendingPathComponent("sessions"), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
     public func directory(_ id: UUID) -> URL { root.appendingPathComponent("sessions/\(id.uuidString)", isDirectory: true) }
@@ -21,6 +29,40 @@ public final class SessionStore {
     public func save(_ session: RunSession) throws {
         try FileManager.default.createDirectory(at: directory(session.id), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try encoder.encode(session).write(to: directory(session.id).appendingPathComponent("session.json"), options: .atomic)
+    }
+    /// Preflight the whole batch and stage together. A trash failure restores all records.
+    public func trashSessions(_ ids: Set<UUID>, activeSessionIDs: Set<UUID> = []) throws {
+        guard !ids.isEmpty else { return }
+        guard ids.isDisjoint(with: activeSessionIDs) else { throw RunbarError.message("不能删除正在运行的记录，请先停止任务。") }
+        let files = FileManager.default
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        for id in ids {
+            let folder = directory(id)
+            let values = try folder.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+            guard values.isDirectory == true, values.isSymbolicLink != true else { throw RunbarError.message("记录目录无效，未删除。") }
+            let session = try decoder.decode(RunSession.self, from: Data(contentsOf: folder.appendingPathComponent("session.json")))
+            guard session.id == id else { throw RunbarError.message("记录身份不匹配，未删除。") }
+            guard session.status != .running else { throw RunbarError.message("不能删除正在运行的记录，请先停止任务。") }
+        }
+        let staging = root.appendingPathComponent("Runbar Deleted Records \(UUID().uuidString)")
+        try files.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        var moved: [UUID] = []
+        do {
+            for id in ids.sorted(by: { $0.uuidString < $1.uuidString }) {
+                try files.moveItem(at: directory(id), to: staging.appendingPathComponent(id.uuidString))
+                moved.append(id)
+            }
+            try trashDirectory(staging)
+        } catch {
+            var restoreErrors: [String] = []
+            for id in moved {
+                do { try files.moveItem(at: staging.appendingPathComponent(id.uuidString), to: directory(id)) }
+                catch { restoreErrors.append(id.uuidString) }
+            }
+            if restoreErrors.isEmpty { try? files.removeItem(at: staging) }
+            else { throw RunbarError.message("删除失败，部分记录恢复失败。原文件保留于 \(staging.path)：\(restoreErrors.joined(separator: ", "))") }
+            throw error
+        }
     }
     public func sessions() throws -> [RunSession] {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
+		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
@@ -17,6 +18,8 @@
 		7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */; };
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
+		E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F989F55D837BC0137D8965AC /* ProjectKindTests.swift */; };
+		EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,14 +28,17 @@
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
+		75CB9B8540936580652BC9EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
 		92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandTemplateTests.swift; sourceTree = "<group>"; };
 		93EF2065DD5AA9968FE3FF8B /* Flutter Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Flutter Runbar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
+		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
+		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
 		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
@@ -40,6 +46,7 @@
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		F989F55D837BC0137D8965AC /* ProjectKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectKindTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,13 +69,23 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		250C094D8AC86FF7E0A7DB1B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				75CB9B8540936580652BC9EC /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
 			isa = PBXGroup;
 			children = (
 				92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */,
 				DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */,
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
+				A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
+				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
 				EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */,
 			);
@@ -98,6 +115,7 @@
 				1023E627F98907FA69966F18 /* capture-main-themes.sh */,
 				B637E5526FA142797BA3D836 /* capture-preview.sh */,
 				0C6F66E99688501B309B2459 /* capture-real-menu.sh */,
+				B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */,
 				8BA286984BB626AF54E8C607 /* process-tests.c */,
 				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
 				BEC4844EA1FB283BAA93DA69 /* test-process.sh */,
@@ -137,6 +155,7 @@
 				1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */,
 				CE552C978360C0B9FEED0C40 /* README.md */,
 				3D807E313C430C635BCA2CF1 /* Packages */,
+				250C094D8AC86FF7E0A7DB1B /* Resources */,
 				87BF212ED71F5E022BBD09EB /* scripts */,
 				6E46135F8D7D378CB421F75C /* Sources */,
 				9C78DA381C463E93DF22D6F5 /* Tests */,
@@ -171,6 +190,7 @@
 			buildConfigurationList = 1BC8E6E0F3EDE6F29FAE8846 /* Build configuration list for PBXNativeTarget "FlutterRunbar" */;
 			buildPhases = (
 				F2EAF89CB7608CCF1264F9BE /* Sources */,
+				CBE78880F38A021AB325E480 /* Resources */,
 				16030357D28652FF245108AC /* Frameworks */,
 			);
 			buildRules = (
@@ -227,6 +247,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		CBE78880F38A021AB325E480 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F2EAF89CB7608CCF1264F9BE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -244,7 +275,9 @@
 				185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */,
 				4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */,
 				638995230949F6C246161705 /* CoreTests.swift in Sources */,
+				EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
+				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
 				7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */,
 			);
@@ -345,7 +378,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -359,7 +392,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 0.7.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -422,7 +455,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 9;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -442,7 +475,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.5.0;
+				MARKETING_VERSION = 0.7.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

@@ -5,6 +5,24 @@ final class RunnerTests: XCTestCase {
     private func temporaryStore() throws -> SessionStore {
         try SessionStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("Runbar tests \(UUID().uuidString)"))
     }
+    func testGenericProjectRunsCustomCommandWithoutFlutterOnPath() throws {
+        let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+        var project = Project(path: store.root.path)
+        XCTAssertEqual(project.kind, .generic)
+        XCTAssertTrue(project.availablePresets.isEmpty)
+        try project.savePreset(name: "自定义命令", command: "PATH=/usr/bin:/bin; if command -v fvm >/dev/null 2>&1; then exit 99; fi; printf 'custom project\\n'")
+        let finished = expectation(description: "custom command finished")
+        var result: RunSession?
+        let runner = ProcessRunner(store: store) { event in
+            if case .finished(let session) = event { result = session; finished.fulfill() }
+            if case .failure(let message) = event { XCTFail(message) }
+        }
+        runner.run(project: project, preset: try XCTUnwrap(project.selectedPreset), extraPath: "/usr/bin:/bin", shell: "/bin/sh")
+        wait(for: [finished], timeout: 10)
+        let session = try XCTUnwrap(result)
+        XCTAssertEqual(session.status, .succeeded)
+        XCTAssertEqual(try Data(contentsOf: store.directory(session.id).appendingPathComponent("output.raw")), Data("custom project\n".utf8))
+    }
     func testNativeActionRejectedBeforeShellLaunch() throws {
         let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
         let rejected = expectation(description: "built-in rejected")
