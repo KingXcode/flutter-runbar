@@ -13,7 +13,7 @@ struct ManagerView: View {
     @State private var templateID: String?
     @State private var useFVM = true
     @State private var editorError: String?
-    @State private var pathSettings = false
+    @State private var showingSettings = false
     @State private var metadataHeight: CGFloat = 0
     @State private var collapsedHistoryProjects = Set<String>()
     @State private var selectingHistory = false
@@ -120,14 +120,20 @@ struct ManagerView: View {
                 HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { if model.savePreset(name: presetName, command: command, id: editingID, projectID: editingProjectID) { editing = false } else { editorError = model.error ?? "项目正在运行或不可用，暂时无法保存。"; model.error = nil } }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
             }.padding(24).frame(width: 520)
         }
-        .sheet(isPresented: $pathSettings) {
+        .sheet(isPresented: $showingSettings) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("命令环境").font(.title2)
+                Text("设置").font(.title2)
+                Text("应用显示").font(.headline)
+                Toggle("在 Dock 中显示", isOn: Binding(get: { model.showInDock }, set: { model.setDockVisibility($0) }))
+                Text("切换立即生效并自动保存。关闭后仍可从菜单栏打开 Runbar。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Text("命令环境").font(.headline)
                 Text("额外 PATH（冒号分隔；支持完整路径和 ~/）")
                 TextField("PATH", text: $model.config.extraPath)
                 Text("自定义目录优先，并自动补充 ~/.pub-cache/bin、~/fvm/bin 和 Homebrew 路径；可添加其他 FVM 安装目录。不安装 SDK、不修改 shell 配置。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("保存") { model.persist(); pathSettings = false }
+                HStack { Spacer(); Button("保存") { if model.persist() { showingSettings = false } }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
         }
         .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
@@ -177,8 +183,8 @@ struct ManagerView: View {
                         .help("项目类型只影响可选模板，不改变已保存命令")
                     PhaseBadge(phase: model.selectedState.phase)
                 }
-                Button { pathSettings = true } label: { Image(systemName: "gearshape") }
-                    .help("命令环境与 PATH 设置").accessibilityLabel("PATH 设置")
+                Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                    .help("Dock 显示与命令环境设置").accessibilityLabel("设置")
             }
             if let project = model.project {
                 HStack(spacing: 6) {

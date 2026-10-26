@@ -11,7 +11,7 @@ struct FlutterRunbarApp: App {
         MenuBarExtra {
             MenuContent(model: model)
         } label: {
-            Label(!model.busy ? "Runbar" : "命令运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
+            RunbarStatusLabel(model: model)
         }
         .menuBarExtraStyle(.window)
         Window("Runbar", id: "manager") {
@@ -19,6 +19,22 @@ struct FlutterRunbarApp: App {
                 .frame(minWidth: 880, minHeight: 620)
         }
         .defaultSize(width: 1100, height: 760)
+    }
+}
+
+private struct RunbarStatusLabel: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Label(model.busy ? "Runbar · 命令运行中" : "Runbar", systemImage: model.busy ? "terminal.fill" : "terminal")
+            .symbolRenderingMode(.monochrome)
+            .help(model.busy ? "Runbar · \(model.activeCount) 个项目运行中" : "Runbar · 暂无运行任务")
+            .onAppear {
+                model.installManagerOpener {
+                    openWindow(id: "manager")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
     }
 }
 
@@ -30,7 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #if LIVE_LOG_VALIDATION
     private var responsivenessProbe: LogResponsivenessProbe?
     #endif
+    #endif
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Let SwiftUI finish its initial application/window setup first.
+        DispatchQueue.main.async { AppModel.shared.restoreDockVisibility() }
+        #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
         let arguments = ProcessInfo.processInfo.arguments
         if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
             NSApp.appearance = NSAppearance(named: arguments[theme + 1] == "dark" ? .darkAqua : .aqua)
@@ -90,7 +110,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuView.layoutSubtreeIfNeeded()
             menuWindow.setContentSize(NSSize(width: MenuLayout.width, height: max(100, menuView.fittingSize.height)))
         }
+        #endif
     }
+    #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
     private func captureActualMenu(in folder: URL) {
         func statusButtons(in view: NSView) -> [NSStatusBarButton] {
             var found = (view as? NSStatusBarButton).map { [$0] } ?? []
@@ -124,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     #endif
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        AppModel.shared.showManagerWindow()
+        return true
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if SCREENSHOT_PREVIEW
         return .terminateNow
@@ -174,6 +200,10 @@ final class AppModel: ObservableObject {
     private var logRefreshNeeded = false
     @Published var error: String?
     @Published var nativeActionProjectID: UUID?
+    @Published private(set) var showInDock = UserDefaults.standard.bool(forKey: "showInDock")
+    private var managerOpener: (() -> Void)?
+    private var pendingManagerOpen = false
+    private var installedInitialManagerOpener = false
     var quitWhenFinished = false
     private var quitReplySent = false
     private var store: SessionStore?
@@ -214,6 +244,41 @@ final class AppModel: ObservableObject {
     var preset: CommandPreset? { project?.selectedPreset }
     var session: RunSession? { history.first { $0.id == selectedSession } }
     func state(for id: UUID) -> ProjectRunState { projectRuns[id] ?? ProjectRunState() }
+    func restoreDockVisibility() {
+        let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
+        guard NSApp.activationPolicy() == policy || NSApp.setActivationPolicy(policy) else {
+            error = "无法恢复 Dock 显示设置，请在设置中重试。"
+            return
+        }
+    }
+    func setDockVisibility(_ visible: Bool) {
+        guard visible != showInDock else { return }
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        let policy: NSApplication.ActivationPolicy = visible ? .regular : .accessory
+        guard NSApp.activationPolicy() == policy || NSApp.setActivationPolicy(policy) else {
+            error = "无法切换 Dock 显示状态，设置未更改。"
+            return
+        }
+        showInDock = visible
+        UserDefaults.standard.set(visible, forKey: "showInDock")
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window?.makeKeyAndOrderFront(nil)
+        }
+    }
+    func installManagerOpener(_ opener: @escaping () -> Void) {
+        managerOpener = opener
+        let initialPresentation = !installedInitialManagerOpener && showInDock
+        installedInitialManagerOpener = true
+        if pendingManagerOpen || initialPresentation {
+            pendingManagerOpen = false
+            DispatchQueue.main.async { opener() }
+        }
+    }
+    func showManagerWindow() {
+        if let managerOpener { managerOpener() }
+        else { pendingManagerOpen = true }
+    }
     @discardableResult
     func persist() -> Bool {
         do { guard let store else { throw RunbarError.message("本地存储不可用") }; try store.saveConfiguration(config); return true }

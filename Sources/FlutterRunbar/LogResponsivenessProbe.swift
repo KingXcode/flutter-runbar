@@ -1,5 +1,5 @@
 #if LIVE_LOG_VALIDATION
-import Foundation
+import AppKit
 
 /// QA-only main-queue latency probe. Reports a bounded recent window to the
 /// isolated fixture HOME; never compiled into the shipped application.
@@ -22,6 +22,8 @@ final class LogResponsivenessProbe {
         guard ticks % 20 == 0 else { return }
         let sorted = samples.sorted()
         let report: [String: Any] = [
+            "activationPolicy": NSApp.activationPolicy().rawValue,
+            "showInDock": UserDefaults.standard.bool(forKey: "showInDock"),
             "samples": samples.count, "ticks": ticks,
             "p95DelayMs": sorted[Int(Double(sorted.count - 1) * 0.95)],
             "maxDelayMs": sorted.last ?? 0,
