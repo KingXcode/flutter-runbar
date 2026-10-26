@@ -156,13 +156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #else
         let model = AppModel.shared
         guard model.nativeActionProjectID == nil else { return .terminateCancel }
-        guard model.busy else { return .terminateNow }
+        guard model.busy else { model.finishLogQueriesForQuit(); return .terminateLater }
         let alert = NSAlert()
         alert.messageText = "命令仍在运行"
         alert.informativeText = "退出将停止所有正在运行的项目，并等待每份日志保存完成。"
         alert.addButton(withTitle: "停止并退出"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
-        guard model.busy else { return .terminateNow }
+        guard model.busy else { model.finishLogQueriesForQuit(); return .terminateLater }
         model.stopAllForQuit()
         return .terminateLater
         #endif
@@ -190,6 +190,23 @@ final class AppModel: ObservableObject {
     @Published private(set) var logScrollRevision = 0
     private(set) var logScrollPlacement = LogScrollPlacement.end
     @Published private(set) var logTotalBytes: UInt64 = 0
+    @Published var logSearchText = "" { didSet { if logSearchText != oldValue { scheduleLogQuery() } } }
+    @Published private(set) var logMatchCount: UInt64 = 0
+    @Published private(set) var logMatchOrdinal: UInt64 = 0
+    @Published private(set) var logQueryBusy = false
+    @Published private(set) var logQueryProgress: Double = 0
+    @Published private(set) var logSearchContext = false
+    @Published private(set) var logSearchHighlight: NSRange?
+    @Published private(set) var logTimeMarks: [LogTimeMark] = []
+    @Published var logShowsTimestamps = UserDefaults.standard.object(forKey: "logShowsTimestamps") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(logShowsTimestamps, forKey: "logShowsTimestamps")
+            if logShowsTimestamps { refreshTimestampMarks() }
+        }
+    }
+    var logPreferences: LogPreferences { config.logPreferences ?? LogPreferences() }
+    var logFilter: LogFilter { logPreferences.filter }
+    private var logQueryTask: Task<Void, Never>?
     var logText: String { logPage?.text ?? "" }
     private let logLoader = LogPageLoader()
     private var logReadTask: Task<Void, Never>?
@@ -206,6 +223,7 @@ final class AppModel: ObservableObject {
     private var installedInitialManagerOpener = false
     var quitWhenFinished = false
     private var quitReplySent = false
+    private var logShutdownStarted = false
     private var store: SessionStore?
     private var coordinator: ProjectRunCoordinator?
     var busy: Bool { projectRuns.values.contains(where: \.isBusy) }
@@ -482,7 +500,19 @@ final class AppModel: ObservableObject {
         quitReplySent = true
         // Defer one main-queue turn so applicationShouldTerminate has returned
         // .terminateLater, and the final session event has updated the UI/history.
-        DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
+        DispatchQueue.main.async { self.finishLogQueriesForQuit() }
+    }
+    func finishLogQueriesForQuit() {
+        guard !logShutdownStarted else { return }
+        logShutdownStarted = true
+        logQueryTask?.cancel(); logReadTask?.cancel(); logRefreshTask?.cancel(); logLoadingIndicatorTask?.cancel()
+        logReadToken = UUID()
+        Task {
+            // Wait for the cancelled scan to leave its chunk, then close handles
+            // and remove the current disk index before completing normal quit.
+            await logLoader.clear()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
     }
     func handle(_ event: ProjectRunCoordinator.Event) {
         switch event {
@@ -513,12 +543,82 @@ final class AppModel: ObservableObject {
     }
     func loadLog() {
         if displayedLogSession != selectedSession || selectedSession == nil {
+            logQueryTask?.cancel(); logQueryTask = nil
             logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
             logReadToken = UUID(); finishLogLoading(); logRefreshNeeded = false
-            displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0
+            displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0; logTimeMarks = []
             logFollowing = true; logHasNewOutput = false
-            if selectedSession != nil { readLog(.latest, placement: .end) }
+            logMatchCount = 0; logMatchOrdinal = 0; logSearchContext = false; logSearchHighlight = nil
+            logQueryBusy = false
+            if selectedSession != nil {
+                if !logSearchText.isEmpty { logFollowing = false }
+                readLog(.latest, placement: .end, matchOrdinal: logSearchText.isEmpty ? nil : 1)
+            }
         } else { refreshLogAfterOutput() }
+    }
+    @discardableResult
+    func applyLogFilter(_ filter: LogFilter) -> Bool {
+        do {
+            let old = config.logPreferences
+            var preferences = logPreferences; try preferences.apply(filter)
+            config.logPreferences = preferences
+            guard persist() else { config.logPreferences = old; return false }
+            scheduleLogQuery(); return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+    func saveLogFilterPreset(_ name: String) {
+        do {
+            let old = config.logPreferences
+            var preferences = logPreferences; try preferences.savePreset(name: name)
+            config.logPreferences = preferences
+            if !persist() { config.logPreferences = old }
+        } catch { self.error = error.localizedDescription }
+    }
+    func deleteLogKeyword(_ keyword: String) {
+        let old = config.logPreferences
+        var preferences = logPreferences; preferences.keywords.removeAll { $0 == keyword }
+        config.logPreferences = preferences
+        if !persist() { config.logPreferences = old }
+    }
+    func deleteLogFilterPreset(_ id: UUID) {
+        let old = config.logPreferences
+        var preferences = logPreferences; preferences.presets.removeAll { $0.id == id }
+        config.logPreferences = preferences
+        if !persist() { config.logPreferences = old }
+    }
+    private func scheduleLogQuery() {
+        logQueryTask?.cancel(); logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
+        logReadToken = UUID(); finishLogLoading(); logRefreshNeeded = false
+        logMatchCount = 0; logMatchOrdinal = 0; logSearchHighlight = nil; logSearchContext = false
+        logQueryBusy = selectedSession != nil && (!logFilter.isEmpty || !logSearchText.isEmpty)
+        logQueryProgress = 0
+        guard selectedSession != nil else { return }
+        if !logSearchText.isEmpty { pauseLogFollowing() }
+        logQueryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let self else { return }
+            self.logQueryTask = nil
+            self.readLog(.latest, placement: .end, matchOrdinal: self.logSearchText.isEmpty ? nil : 1)
+        }
+    }
+    func moveLogSearch(_ delta: Int) {
+        guard !logQueryBusy, logMatchCount > 0 else { return }
+        let ordinal: UInt64
+        if delta < 0 { ordinal = logMatchOrdinal > 1 ? logMatchOrdinal - 1 : logMatchCount }
+        else { ordinal = logMatchOrdinal < logMatchCount ? logMatchOrdinal + 1 : 1 }
+        pauseLogFollowing()
+        readLog(.first, placement: .anchor, matchOrdinal: ordinal)
+    }
+    func returnToFilteredLog() { showLog(.latest) }
+    private func refreshTimestampMarks() {
+        guard !logReading, let page = logPage, let url = selectedOutputFile else { return }
+        let token = logReadToken
+        Task {
+            if let marks = try? await logLoader.timestamps(url, page: page), token == logReadToken,
+               logPage?.startOffset == page.startOffset, logPage?.endOffset == page.endOffset, logPage?.text == page.text {
+                logTimeMarks = marks
+            }
+        }
     }
     func pauseLogFollowing() {
         guard logFollowing else { return }
@@ -526,6 +626,8 @@ final class AppModel: ObservableObject {
         logRefreshTask?.cancel(); logRefreshTask = nil
     }
     func showLog(_ location: LogPageLocation) {
+        guard logQueryTask == nil else { return }
+        logSearchContext = false; logSearchHighlight = nil
         logRefreshTask?.cancel(); logRefreshTask = nil
         logFollowing = { if case .latest = location { return true }; return false }()
         let placement: LogScrollPlacement
@@ -537,7 +639,7 @@ final class AppModel: ObservableObject {
         readLog(location, placement: placement)
     }
     func shiftLogWindow(_ offset: UInt64) {
-        guard !logNavigating else { return }
+        guard !logNavigating, logQueryTask == nil else { return }
         pauseLogFollowing()
         readLog(.around(offset), placement: .preserveAnchor)
     }
@@ -559,6 +661,7 @@ final class AppModel: ObservableObject {
     }
     private func refreshLogAfterOutput() {
         guard selectedSession != nil else { return }
+        if logQueryTask != nil { return }
         if !logFollowing && !logHasNewOutput { logHasNewOutput = true }
         if logReading { logRefreshNeeded = true; return }
         guard logRefreshTask == nil else { return }
@@ -572,6 +675,10 @@ final class AppModel: ObservableObject {
         }
     }
     private func refreshLogSize() async {
+        if !logFilter.isEmpty || !logSearchText.isEmpty {
+            readLog(.latest, placement: nil, refreshOnly: true)
+            return
+        }
         guard let id = selectedSession, let store else { return }
         let token = logReadToken
         let url = store.directory(id).appendingPathComponent("output.raw")
@@ -579,7 +686,7 @@ final class AppModel: ObservableObject {
             logTotalBytes = size
         }
     }
-    private func readLog(_ location: LogPageLocation, placement: LogScrollPlacement?) {
+    private func readLog(_ location: LogPageLocation, placement: LogScrollPlacement?, matchOrdinal: UInt64? = nil, refreshOnly: Bool = false) {
         guard let id = selectedSession, let store else { return }
         logReadTask?.cancel()
         let token = UUID(); logReadToken = token
@@ -601,23 +708,45 @@ final class AppModel: ObservableObject {
         let url = store.directory(id).appendingPathComponent("output.raw")
         let live = history.first(where: { $0.id == id })?.status == .running
         let loader = logLoader
+        let progressModel = self
+        let filter = logFilter, query = logSearchText
+        let searchContext = matchOrdinal != nil || logSearchContext
+        if placement != nil && (!filter.isEmpty || !query.isEmpty) { logQueryBusy = true }
         logReadTask = Task { [weak self] in
             do {
-                let page = try await loader.read(url, at: location, isLive: live)
+                let result = try await loader.read(url, at: location, isLive: live, filter: filter, query: query,
+                                                   searchContext: searchContext, matchOrdinal: matchOrdinal, refreshOnly: refreshOnly,
+                                                   showTimestamps: progressModel.logShowsTimestamps) { done, total in
+                    Task { @MainActor in
+                        let model = progressModel
+                        guard model.logReadToken == token, model.logQueryBusy else { return }
+                        model.logQueryProgress = total > 0 ? Double(done) / Double(total) : 1
+                    }
+                }
                 guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
                 self.finishLogLoading()
+                if self.logQueryBusy { self.logQueryBusy = false }
+                if self.logMatchCount != result.matchCount { self.logMatchCount = result.matchCount }
+                if let ordinal = result.ordinal { self.logMatchOrdinal = ordinal }
+                else if result.matchCount == 0 { self.logMatchOrdinal = 0 }
                 // Scrolling away pauses live updates, including an in-flight read.
-                self.logTotalBytes = page.totalBytes
-                if placement != nil || self.logFollowing {
+                self.logTotalBytes = result.totalBytes
+                if let page = result.page, placement != nil || self.logFollowing {
                     self.logPage = page
-                    if let placement {
+                    if self.logTimeMarks != result.timeMarks { self.logTimeMarks = result.timeMarks }
+                    if self.logShowsTimestamps && result.timeMarks.isEmpty && !page.text.isEmpty { self.refreshTimestampMarks() }
+                    if self.logSearchHighlight != result.highlight { self.logSearchHighlight = result.highlight }
+                    let context = result.ordinal != nil ? result.ordinal! > 0 : searchContext
+                    if self.logSearchContext != context { self.logSearchContext = context }
+                    if let placement = result.highlight != nil ? LogScrollPlacement.anchor : placement {
                         self.logScrollPlacement = placement; self.logScrollRevision += 1
                     }
-                } else { self.logHasNewOutput = true }
+                } else if !self.logHasNewOutput { self.logHasNewOutput = true }
                 if self.logRefreshNeeded { self.refreshLogAfterOutput() }
             } catch {
                 guard let self, !Task.isCancelled, self.logReadToken == token, self.selectedSession == id else { return }
                 self.finishLogLoading()
+                self.logQueryBusy = false
                 self.error = "读取日志失败：\(error.localizedDescription)"
             }
         }
@@ -781,18 +910,64 @@ private struct ProjectMenuRow: View {
 /// Serial, off-main disk parsing; cancelled selections never queue full-file work.
 private actor LogPageLoader {
     private var tail = LogTailReader()
+    private let processor = LogQueryProcessor()
+    private var filterRevision: UInt64 = 0
+    private let receiveTimes = LogReceiveTimeIndex()
+    private let timestampReader = LogTimestampReader()
+    private var targetTimes: URL?
+    func clear() { processor.reset(); tail.reset(); receiveTimes.reset(); timestampReader.reset(); targetTimes = nil }
+    func timestamps(_ rawURL: URL, page: LogFilePage) throws -> [LogTimeMark] {
+        try receiveTimes.update(rawURL.deletingLastPathComponent().appendingPathComponent("events.jsonl"))
+        if let targetTimes { return try timestampReader.projected(targetTimes, page: page) }
+        return try timestampReader.raw(rawURL, page: page, times: receiveTimes)
+    }
     func size(_ url: URL) throws -> UInt64 {
         try Task.checkCancellation()
         return (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value ?? 0
     }
-    func read(_ url: URL, at location: LogPageLocation, isLive: Bool) throws -> LogFilePage {
+    func read(_ url: URL, at location: LogPageLocation, isLive: Bool, filter: LogFilter, query: String,
+              searchContext: Bool, matchOrdinal: UInt64?, refreshOnly: Bool, showTimestamps: Bool,
+              progress: @Sendable (UInt64, UInt64) -> Void) throws -> LogReadResult {
         try Task.checkCancellation()
+        var target = url, location = location, count: UInt64 = 0, ordinal: UInt64?
+        if showTimestamps || !filter.isEmpty || !query.isEmpty {
+            try receiveTimes.update(url.deletingLastPathComponent().appendingPathComponent("events.jsonl"))
+        }
+        targetTimes = nil
+        if !filter.isEmpty || !query.isEmpty {
+            let snapshot = try processor.update(url, filter: filter, query: query, isLive: isLive, times: receiveTimes, progress: progress)
+            count = snapshot.matchCount
+            if snapshot.filterRevision != filterRevision { tail.reset(); filterRevision = snapshot.filterRevision }
+            if let requested = matchOrdinal {
+                ordinal = min(requested, count)
+                if count > 0 { location = .around(try processor.matchOffset(at: ordinal!)) }
+            }
+            let fullContext = searchContext && (matchOrdinal == nil || count > 0)
+            target = fullContext ? snapshot.fullURL : snapshot.filteredURL
+            targetTimes = fullContext ? snapshot.fullTimesURL : snapshot.filteredTimesURL
+        } else { processor.reset(); filterRevision = 0 }
+        let total = try size(target)
+        if refreshOnly { return LogReadResult(page: nil, totalBytes: total, matchCount: count, ordinal: nil, highlight: nil, timeMarks: []) }
         let page: LogFilePage
-        if case .latest = location { page = try tail.read(url, isLive: isLive) }
-        else { tail.reset(); page = try LogFileReader.read(url, at: location, isLive: isLive) }
+        if case .latest = location { page = try tail.read(target, isLive: isLive) }
+        else { tail.reset(); page = try LogFileReader.read(target, at: location, isLive: isLive) }
         try Task.checkCancellation()
-        return page
+        let highlight = (ordinal ?? 0) > 0 ? page.anchorUTF16Offset.map { NSRange(location: $0, length: query.utf16.count) } : nil
+        let marks: [LogTimeMark]
+        if !showTimestamps { marks = [] }
+        else if let targetTimes { marks = try timestampReader.projected(targetTimes, page: page) }
+        else { marks = try timestampReader.raw(url, page: page, times: receiveTimes) }
+        return LogReadResult(page: page, totalBytes: total, matchCount: count, ordinal: ordinal, highlight: highlight, timeMarks: marks)
     }
+}
+
+private struct LogReadResult: Sendable {
+    let page: LogFilePage?
+    let totalBytes: UInt64
+    let matchCount: UInt64
+    let ordinal: UInt64?
+    let highlight: NSRange?
+    let timeMarks: [LogTimeMark]
 }
 
 enum LogScrollPlacement { case start, end, anchor, preserveAnchor }

@@ -23,7 +23,8 @@ public final class SessionStore {
     public func loadConfiguration() throws -> Configuration {
         let url = root.appendingPathComponent("configuration.json")
         guard FileManager.default.fileExists(atPath: url.path) else { return Configuration() }
-        return try JSONDecoder().decode(Configuration.self, from: Data(contentsOf: url))
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(Configuration.self, from: Data(contentsOf: url))
     }
     public func saveConfiguration(_ value: Configuration) throws { try encoder.encode(value).write(to: root.appendingPathComponent("configuration.json"), options: .atomic) }
     public func save(_ session: RunSession) throws {

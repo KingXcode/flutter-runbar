@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
 		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
+		286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC0C281B047474B3C8BE784 /* LogToolsView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
@@ -21,8 +22,10 @@
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
 		A803486EBC6D49F61DC76278 /* LogTailReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */; };
 		B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */; };
+		D1D8400C3C7EE2A7DF000A59 /* LogQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB0EFD74313532934ED48FB /* LogQueryTests.swift */; };
 		DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */; };
 		E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F989F55D837BC0137D8965AC /* ProjectKindTests.swift */; };
+		EB88B4D3E791610ADDF50A13 /* LogTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */; };
 		EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -33,14 +36,17 @@
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
+		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
 		75CB9B8540936580652BC9EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
 		8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTailReaderTests.swift; sourceTree = "<group>"; };
 		92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandTemplateTests.swift; sourceTree = "<group>"; };
+		9BC0C281B047474B3C8BE784 /* LogToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogToolsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
+		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
@@ -93,7 +99,9 @@
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
 				A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */,
 				E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */,
+				ADB0EFD74313532934ED48FB /* LogQueryTests.swift */,
 				8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */,
+				6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
@@ -155,6 +163,7 @@
 			children = (
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
 				08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */,
+				9BC0C281B047474B3C8BE784 /* LogToolsView.swift */,
 				F988073F96A1983555A9F5EA /* LogView.swift */,
 				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
 			);
@@ -277,6 +286,7 @@
 			files = (
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
 				B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */,
+				286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */,
 				673CC5846603D7C9C0D66235 /* LogView.swift in Sources */,
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 			);
@@ -291,7 +301,9 @@
 				638995230949F6C246161705 /* CoreTests.swift in Sources */,
 				EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */,
 				DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */,
+				D1D8400C3C7EE2A7DF000A59 /* LogQueryTests.swift in Sources */,
 				A803486EBC6D49F61DC76278 /* LogTailReaderTests.swift in Sources */,
+				EB88B4D3E791610ADDF50A13 /* LogTimelineTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
@@ -394,7 +406,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -471,7 +483,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

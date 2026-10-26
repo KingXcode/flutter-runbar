@@ -15,6 +15,7 @@ struct ManagerView: View {
     @State private var editorError: String?
     @State private var showingSettings = false
     @State private var metadataHeight: CGFloat = 0
+    @State private var showingLogDetails = false
     @State private var collapsedHistoryProjects = Set<String>()
     @State private var selectingHistory = false
     @State private var pendingSessionDeletion = Set<UUID>()
@@ -359,29 +360,57 @@ struct ManagerView: View {
     }
 
     private var logPane: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { logTitle; Spacer(minLength: 4); revealButton }
-                VStack(alignment: .leading, spacing: 7) {
-                    logTitle
-                    revealButton.frame(maxWidth: .infinity, alignment: .trailing)
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                logTitle
+                Spacer(minLength: 0)
+                Button { showingLogDetails.toggle() } label: { Image(systemName: showingLogDetails ? "info.circle.fill" : "info.circle") }
+                    .buttonStyle(.borderless).help(showingLogDetails ? "收起运行详情" : "查看运行时间、命令和路径")
+                    .accessibilityLabel("运行详情")
+                revealButton
             }
             if let session = model.session {
-                ScrollView {
-                    sessionMetadata(session).background(GeometryReader { geometry in
-                        Color.clear.preference(key: LogMetadataHeightKey.self, value: geometry.size.height)
-                    })
-                }.frame(height: min(140, metadataHeight > 0 ? metadataHeight : 100))
-                    .onPreferenceChange(LogMetadataHeightKey.self) { metadataHeight = $0 }
+                HStack(spacing: 7) {
+                    Text(session.startedAt.formatted(date: .omitted, time: .standard)).monospacedDigit().fixedSize()
+                        .help(session.startedAt.formatted(date: .complete, time: .standard))
+                    Text(session.command).font(.system(size: 10, design: .monospaced))
+                        .lineLimit(1).truncationMode(.middle).help(session.command).frame(maxWidth: .infinity, alignment: .leading)
+                    if !session.devToolsURLs.isEmpty {
+                        Menu("DevTools") {
+                            ForEach(session.devToolsURLs, id: \.self) { url in
+                                Button("打开 DevTools") {
+                                    if let id = model.liveProjectID(for: session.id) { model.openLiveURL(url, projectID: id) }
+                                }.disabled(model.liveProjectID(for: session.id) == nil)
+                                Button("复制地址") { model.copy(url) }
+                            }
+                        }.menuStyle(.borderlessButton).fixedSize().help(session.devToolsURLs.joined(separator: "\n"))
+                    }
+                }.font(.system(size: 10)).foregroundStyle(.secondary).controlSize(.mini)
+                if showingLogDetails {
+                    ScrollView {
+                        sessionMetadata(session).background(GeometryReader { geometry in
+                            Color.clear.preference(key: LogMetadataHeightKey.self, value: geometry.size.height)
+                        })
+                    }.frame(height: min(140, metadataHeight > 0 ? metadataHeight : 75))
+                        .onPreferenceChange(LogMetadataHeightKey.self) { metadataHeight = $0 }
+                } else if let error = session.error {
+                    Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red).lineLimit(1).help(error)
+                }
+                LogToolsView(model: model)
                 logNavigation
                 LogView(page: model.logPage, totalBytes: model.logTotalBytes, wrapsLines: logWrapsLines,
                         scrollRevision: model.logScrollRevision, placement: model.logScrollPlacement,
-                        followsOutput: model.logFollowing, loading: model.logNavigating,
+                        followsOutput: model.logFollowing, loading: model.logNavigating, highlight: model.logSearchHighlight,
+                        showsTimestamps: model.logShowsTimestamps, timeMarks: model.logTimeMarks,
                         onScrollAway: model.pauseLogFollowing, onLoadWindow: model.shiftLogWindow, onSeek: model.seekLog)
                     .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.65)))
+                    .overlay {
+                        if model.logPage?.text.isEmpty == true, !model.logQueryBusy, !model.logFilter.isEmpty, !model.logSearchContext {
+                            Text("没有匹配的日志，请调整筛选条件").font(.caption).foregroundStyle(.secondary).allowsHitTesting(false)
+                        }
+                    }
                 if let path = model.selectedOutputPath {
                     Text(path).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(path)
@@ -398,11 +427,7 @@ struct ManagerView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            HStack(spacing: 5) {
-                Image(systemName: "lock.shield")
-                Text("仅保存在本机 · 分段读取完整日志，单段最多 1 MB")
-            }.font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 14)
+        }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 8)
     }
 
     private func sessionMetadata(_ session: RunSession) -> some View {
@@ -459,12 +484,10 @@ struct ManagerView: View {
         }.fixedSize()
     }
     private var logNavigation: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { logPageButtons; Spacer(minLength: 4); logDisplayOptions }
-            VStack(alignment: .leading, spacing: 5) {
-                logPageButtons
-                HStack { logDisplayOptions; Spacer(minLength: 0) }
-            }
+        HStack(spacing: 7) {
+            logPageButtons.layoutPriority(-1)
+            Spacer(minLength: 0)
+            logDisplayOptions
         }.controlSize(.mini).font(.system(size: 10))
     }
     private var logPageButtons: some View {
@@ -475,27 +498,29 @@ struct ManagerView: View {
                 .disabled(model.logNavigating)
             if model.logShowsLoading { ProgressView().controlSize(.mini) }
             if let page = model.logPage {
-                Text("\(logSize(page.startOffset))–\(logSize(page.endOffset)) / \(logSize(model.logTotalBytes))")
+                Text("\(!model.logFilter.isEmpty && !model.logSearchContext ? "筛选结果 " : "")\(logSize(page.startOffset))–\(logSize(page.endOffset)) / \(logSize(model.logTotalBytes))")
                     .monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-                    .help("内存中的日志范围 / 文件总大小；上下滚动自动读取，右侧滚动条代表整份日志的字节进度")
+                    .help("内存中的范围 / 当前显示内容总大小；应用筛选时按筛选结果计算进度。上下滚动自动读取，原始日志保留完整输出。")
             }
         }
     }
     private var logDisplayOptions: some View {
         HStack(spacing: 8) {
-            Toggle("跟随输出", isOn: Binding(get: { model.logFollowing }, set: {
+            Toggle("跟随", isOn: Binding(get: { model.logFollowing }, set: {
                 if $0 { model.showLog(.latest) } else { model.pauseLogFollowing() }
             })).help("向上滚动时自动暂停跟随，点击最新可恢复")
-            Toggle("自动换行", isOn: $logWrapsLines)
+            Toggle("时间", isOn: $model.logShowsTimestamps).help("显示或隐藏每行输出的接收时间").accessibilityLabel("显示输出时间")
+            Toggle("换行", isOn: $logWrapsLines).accessibilityLabel("自动换行")
         }.toggleStyle(.checkbox).fixedSize()
     }
     private func logSize(_ value: UInt64) -> String {
         value == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
     }
     private var revealButton: some View {
-        Button("在 Finder 中显示日志文件", systemImage: "folder") { model.revealSelectedOutput() }
+        Button { model.revealSelectedOutput() } label: { Image(systemName: "folder") }
+            .accessibilityLabel("在 Finder 中显示日志文件")
             .controlSize(.small).disabled(model.selectedOutputFile == nil).fixedSize()
-            .help(model.selectedOutputPath ?? "请先选择一次运行记录")
+            .help(model.selectedOutputPath.map { "在 Finder 中显示日志文件\n" + $0 } ?? "请先选择一次运行记录")
             .accessibilityHint("定位当前选中运行的 output.raw 原始输出文件，不是最新一次运行")
     }
 

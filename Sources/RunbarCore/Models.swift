@@ -44,6 +44,7 @@ public struct Project: Codable, Identifiable, Equatable {
 public struct Configuration: Codable {
     public var projects: [Project] = []
     public var extraPath: String = CommandEnvironment.extraPath("")
+    public var logPreferences: LogPreferences?
     public init() {}
     @discardableResult
     public mutating func removeProject(_ id: UUID, activeProjectIDs: Set<UUID>) throws -> Project? {

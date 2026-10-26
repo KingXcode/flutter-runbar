@@ -11,6 +11,9 @@ struct LogView: NSViewRepresentable {
     var placement: LogScrollPlacement
     var followsOutput: Bool
     var loading: Bool
+    var highlight: NSRange?
+    var showsTimestamps: Bool
+    var timeMarks: [LogTimeMark]
     var onScrollAway: () -> Void
     var onLoadWindow: (UInt64) -> Void
     var onSeek: (Double) -> Void
@@ -39,6 +42,16 @@ struct LogView: NSViewRepresentable {
         defer { coordinator.updating = false; coordinator.settleLayout() }
         if coordinator.wasLoading && !loading { coordinator.pendingWindow = false }
         coordinator.wasLoading = loading
+        if host.showsTimestamps != showsTimestamps {
+            let origin = host.scroll.contentView.bounds.origin
+            host.showsTimestamps = showsTimestamps
+            host.needsLayout = true; host.layoutSubtreeIfNeeded()
+            host.scrollTo(y: origin.y, x: origin.x)
+            coordinator.layoutDirty = true
+        }
+        if host.timeRuler.marks != timeMarks {
+            host.timeRuler.marks = timeMarks; host.timeRuler.needsDisplay = true
+        }
         let newNavigation = coordinator.revision != scrollRevision
         let x = host.scroll.contentView.bounds.origin.x
         let oldY = host.scroll.contentView.bounds.origin.y
@@ -99,6 +112,16 @@ struct LogView: NSViewRepresentable {
             coordinator.pendingWindow = false; coordinator.pendingSeek = nil
             coordinator.navigation = (placement, anchorDelta, x)
         }
+        if coordinator.highlight != highlight || newNavigation {
+            if let old = coordinator.highlight, old.location + old.length <= text.utf16.count {
+                view.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: old)
+            }
+            coordinator.highlight = highlight
+            if let highlight, highlight.location + highlight.length <= text.utf16.count {
+                view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.45), forCharacterRange: highlight)
+                if newNavigation { coordinator.revealHighlight = highlight }
+            }
+        }
     }
 
     final class Coordinator {
@@ -119,6 +142,8 @@ struct LogView: NSViewRepresentable {
         var lastDocumentHeight: CGFloat?
         var lastViewportSize: NSSize?
         var navigation: (placement: LogScrollPlacement, anchorDelta: CGFloat, x: CGFloat)?
+        var highlight: NSRange?
+        var revealHighlight: NSRange?
         var observer: NSObjectProtocol?
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
@@ -144,6 +169,10 @@ struct LogView: NSViewRepresentable {
                     host.scrollTo(y: host.characterY(page?.anchorUTF16Offset ?? 0) + navigation.anchorDelta, x: navigation.x)
                 }
             } else if parent.followsOutput && changed { host.scrollToEnd(x: host.scroll.contentView.bounds.origin.x) }
+            if let range = revealHighlight {
+                revealHighlight = nil
+                host.text.scrollRangeToVisible(range)
+            }
             updating = false
             updateProgress()
         }
@@ -164,6 +193,7 @@ struct LogView: NSViewRepresentable {
         }
         func clipChanged() {
             guard let host else { return }
+            host.timeRuler.needsDisplay = true
             let clip = host.scroll.contentView.bounds
             let height = host.text.bounds.height
             let stableLayout = lastDocumentHeight == height && lastViewportSize == clip.size
@@ -217,6 +247,8 @@ final class LogViewport: NSView {
     let scroll = LogScrollView()
     let text = LogTextView()
     let bar = GlobalLogScroller()
+    let timeRuler = LogTimestampRuler()
+    var showsTimestamps = false
     var onLayout: (() -> Void)?
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -235,15 +267,20 @@ final class LogViewport: NSView {
         text.layoutManager?.allowsNonContiguousLayout = false
         text.setAccessibilityLabel("运行日志")
         scroll.documentView = text
+        timeRuler.textView = text
+        timeRuler.setAccessibilityRole(.staticText); timeRuler.setAccessibilityLabel("输出接收时间")
         bar.scrollerStyle = .legacy; bar.controlSize = .small
         bar.setAccessibilityLabel("整份日志进度（按字节）")
-        addSubview(scroll); addSubview(bar)
+        addSubview(scroll); addSubview(bar); addSubview(timeRuler)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func layout() {
         super.layout()
         let width: CGFloat = 15
-        scroll.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - width), height: bounds.height)
+        let timeWidth: CGFloat = showsTimestamps ? 67 : 0
+        timeRuler.isHidden = !showsTimestamps
+        timeRuler.frame = NSRect(x: 0, y: 0, width: timeWidth, height: bounds.height)
+        scroll.frame = NSRect(x: timeWidth, y: 0, width: max(0, bounds.width - width - timeWidth), height: bounds.height)
         bar.frame = NSRect(x: max(0, bounds.width - width), y: 0, width: width, height: bounds.height)
         onLayout?()
     }
@@ -297,6 +334,46 @@ final class LogViewport: NSView {
     func scrollToEnd(x: CGFloat) {
         text.scrollToEndOfDocument(nil)
         scrollTo(y: max(0, text.bounds.height - scroll.contentView.bounds.height), x: x)
+    }
+}
+
+/// Paint only visible timestamps. The text document stays unchanged, so
+/// searching, copying, wrapping and global byte navigation keep their offsets.
+final class LogTimestampRuler: NSView {
+    weak var textView: NSTextView?
+    var marks: [LogTimeMark] = []
+    private let formatter: DateFormatter = {
+        let value = DateFormatter(); value.locale = Locale(identifier: "en_US_POSIX")
+        value.timeZone = .autoupdatingCurrent; value.dateFormat = "HH:mm:ss"; return value
+    }()
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.controlBackgroundColor.setFill(); bounds.fill()
+        guard let text = textView, let layout = text.layoutManager, let container = text.textContainer else { return }
+        var visible = text.visibleRect; visible.origin.y -= text.textContainerOrigin.y
+        let glyphs = layout.glyphRange(forBoundingRect: visible, in: container)
+        let string = text.string as NSString
+        var glyph = glyphs.location
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.secondaryLabelColor]
+        var cachedDate: Date?, cachedLabel = "--:--:--"
+        while glyph < NSMaxRange(glyphs) {
+            var range = NSRange()
+            let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: &range)
+            let character = layout.characterIndexForGlyph(at: range.location)
+            guard character < string.length else { break }
+            let paragraph = string.lineRange(for: NSRange(location: character, length: 0))
+            if paragraph.location == character {
+                let date = LogTimeMark.date(at: character, in: marks)
+                if date != cachedDate || cachedLabel == "--:--:--" {
+                    cachedDate = date; cachedLabel = date.map { formatter.string(from: $0) } ?? "--:--:--"
+                }
+                let y = convert(NSPoint(x: 0, y: fragment.minY + text.textContainerOrigin.y), from: text).y
+                (cachedLabel as NSString).draw(at: NSPoint(x: 5, y: y + 1), withAttributes: attributes)
+            }
+            guard NSMaxRange(range) > glyph else { break }
+            glyph = NSMaxRange(range)
+        }
+        NSColor.separatorColor.setFill(); NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
     }
 }
 
