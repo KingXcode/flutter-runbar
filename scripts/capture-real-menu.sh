@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p screenshots
 python3 scripts/seed-screenshot-fixture.py
-open -n 'dist/Flutter Runbar.app' --args --capture-real-menu "$PWD/screenshots"
+open -n 'dist/Runbar.app' --args --capture-real-menu "$PWD/screenshots"
 # Wait for the app's bounded public-API attempt, never grant permissions.
 for attempt in {1..15}; do
   if [[ -f screenshots/actual-menu-blocked.txt ]]; then

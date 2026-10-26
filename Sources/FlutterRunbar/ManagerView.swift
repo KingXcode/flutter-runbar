@@ -95,7 +95,7 @@ struct ManagerView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     NSApp.activate(ignoringOtherApps: true)
                     for window in NSApp.windows where window.frame.width > 800 {
-                        window.title = "Flutter Runbar · 演示数据（非真实运行）"
+                        window.title = "Runbar · 演示数据（非真实运行）"
                         window.makeKeyAndOrderFront(nil)
                     }
                 }

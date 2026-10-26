@@ -37,9 +37,9 @@ for variant in light dark light-small; do
   METRICS="$PWD/screenshots/main-window-$variant-metrics.json"
   if [[ "$variant" == light-small ]]; then
     theme=light
-    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-small-window --screenshot-metrics "$METRICS" &
+    'dist/Runbar.app/Contents/MacOS/Runbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-small-window --screenshot-metrics "$METRICS" &
   else
-    'dist/Flutter Runbar.app/Contents/MacOS/FlutterRunbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-metrics "$METRICS" &
+    'dist/Runbar.app/Contents/MacOS/Runbar' --screenshot-appearance "$theme" --screenshot-main-only --screenshot-metrics "$METRICS" &
   fi
   APP_PID=$!
   sleep 6

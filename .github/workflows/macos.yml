@@ -31,9 +31,9 @@ jobs:
       - name: Build app bundle
         run: bash scripts/build-app.sh
       - name: Archive
-        run: ditto -c -k --keepParent 'dist/Flutter Runbar.app' dist/FlutterRunbar-macOS26-arm64.zip
+        run: ditto -c -k --keepParent 'dist/Runbar.app' dist/Runbar-macOS26-arm64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: FlutterRunbar-macOS26-arm64
-          path: dist/FlutterRunbar-macOS26-arm64.zip
+          name: Runbar-macOS26-arm64
+          path: dist/Runbar-macOS26-arm64.zip
           retention-days: 3

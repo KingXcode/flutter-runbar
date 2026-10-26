@@ -11,9 +11,9 @@ its titlebar is preview-host chrome, not the actual popup chrome. Running state 
 No Accessibility or Screen Recording permissions were granted or changed.
 TEXT
 python3 scripts/seed-screenshot-fixture.py
-open -n 'dist/Flutter Runbar.app'
+open -n 'dist/Runbar.app'
 sleep 6
-if ! pgrep -x FlutterRunbar >/dev/null; then
+if ! pgrep -x Runbar >/dev/null; then
   echo 'Screenshot application process is not running.' >&2
   exit 1
 fi
@@ -35,7 +35,7 @@ for info in windows {
 }
 let owners = Set(windows.compactMap { $0[kCGWindowOwnerName as String] as? String }).sorted()
 fputs("Visible window owners: \(owners.joined(separator: ", "))\n", stderr)
-fputs("No visible Flutter Runbar management window. GUI capture unavailable.\n", stderr)
+fputs("No visible Runbar management window. GUI capture unavailable.\n", stderr)
 exit(1)
 SWIFT
 WINDOW_ID="$(swift screenshots/find-window.swift)"

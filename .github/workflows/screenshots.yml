@@ -28,7 +28,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: FlutterRunbar-UI-preview
+          name: Runbar-UI-preview
           path: |
             screenshots/*.png
             screenshots/provenance.txt

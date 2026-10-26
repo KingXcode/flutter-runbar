@@ -7,8 +7,8 @@ usage() {
   cat <<'TEXT'
 用法：bash scripts/build-app.sh [--desktop] [--help]
 桌面入口：./build_macos_app.sh（默认包含 --desktop）
-  默认        Release 构建当前机器架构，输出 dist/Flutter Runbar.app
-  --desktop   同时复制到 ~/Desktop/Flutter Runbar.app
+  默认        Release 构建当前机器架构，输出 dist/Runbar.app
+  --desktop   同时复制到 ~/Desktop/Runbar.app
   --help      显示帮助
 替换桌面应用前会先请求旧版正常退出，确认退出后备份并替换，不自动启动新版。
 TEXT
@@ -44,8 +44,8 @@ install_bundle() {
   parent="$(dirname "$destination")"
   mkdir -p "$parent"
   STAGING_DIRECTORY="$(mktemp -d "$parent/.runbar-package.XXXXXX")"
-  ditto --norsrc --noextattr "$BUILT_APP" "$STAGING_DIRECTORY/Flutter Runbar.app"
-  codesign --verify --strict --verbose=2 "$STAGING_DIRECTORY/Flutter Runbar.app"
+  ditto --norsrc --noextattr "$BUILT_APP" "$STAGING_DIRECTORY/Runbar.app"
+  codesign --verify --strict --verbose=2 "$STAGING_DIRECTORY/Runbar.app"
   if [[ -e "$destination" || -L "$destination" ]]; then
     if [[ -L "$destination" || ! -d "$destination" ]]; then
       echo "目标不是普通应用目录，未替换：$destination" >&2
@@ -54,14 +54,14 @@ install_bundle() {
     local identifier
     identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$destination/Contents/Info.plist" 2>/dev/null || true)"
     if [[ "$identifier" != dev.kingxcode.flutter-runbar ]]; then
-      echo "目标不是 Flutter Runbar，未替换：$destination" >&2
+      echo "目标不是 Runbar，未替换：$destination" >&2
       return 1
     fi
-    backup="$ROOT/.build/package-backups/$RUN_ID/$label/Flutter Runbar.app"
+    backup="$ROOT/.build/package-backups/$RUN_ID/$label/Runbar.app"
     mkdir -p "$(dirname "$backup")"
     mv "$destination" "$backup"
   fi
-  if ! mv "$STAGING_DIRECTORY/Flutter Runbar.app" "$destination"; then
+  if ! mv "$STAGING_DIRECTORY/Runbar.app" "$destination"; then
     if [[ -n "$backup" ]]; then mv "$backup" "$destination"; fi
     return 1
   fi
@@ -83,18 +83,18 @@ xcodebuild -project FlutterRunbar.xcodeproj -scheme FlutterRunbar \
   -configuration Release -destination 'generic/platform=macOS' \
   -derivedDataPath "$DERIVED_DATA" "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES \
   "${BUILD_SETTINGS[@]}" build 2>&1 | tee "$BUILD_LOG"
-BUILT_APP="$DERIVED_DATA/Build/Products/Release/Flutter Runbar.app"
+BUILT_APP="$DERIVED_DATA/Build/Products/Release/Runbar.app"
 # Local ad hoc signature only. This is NOT Developer ID signing or notarization.
 codesign --verify --strict --verbose=2 "$BUILT_APP"
-install_bundle "$ROOT/dist/Flutter Runbar.app" dist
+install_bundle "$ROOT/dist/Runbar.app" dist
 INSTALL_PENDING=0
 if [[ $COPY_TO_DESKTOP == 1 ]]; then
   mkdir -p "$ROOT/.build/tools"
   INSTALLER="$ROOT/.build/tools/install-desktop-app"
   xcrun swiftc "$ROOT/scripts/install-desktop-app.swift" -o "$INSTALLER"
   INSTALL_LOG="$ROOT/.build/logs/install-$RUN_ID.log"
-  if "$INSTALLER" "$BUILT_APP" "$HOME/Desktop/Flutter Runbar.app" \
-      "$ROOT/.build/package-backups/$RUN_ID/desktop/Flutter Runbar.app" "$INSTALL_LOG"; then
+  if "$INSTALLER" "$BUILT_APP" "$HOME/Desktop/Runbar.app" \
+      "$ROOT/.build/package-backups/$RUN_ID/desktop/Runbar.app" "$INSTALL_LOG"; then
     echo "安装日志：$INSTALL_LOG"
   else
     status=$?
@@ -108,6 +108,6 @@ BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$BUILT_APP/
 if [[ $INSTALL_PENDING == 1 ]]; then
   echo "构建完成，独立安装器将退出旧版并替换桌面应用：$VERSION+$BUILD_NUMBER"
 else
-  echo "打包完成：$VERSION+$BUILD_NUMBER ($(lipo -archs "$BUILT_APP/Contents/MacOS/FlutterRunbar"))"
+  echo "打包完成：$VERSION+$BUILD_NUMBER ($(lipo -archs "$BUILT_APP/Contents/MacOS/Runbar"))"
 fi
 echo "构建日志：$BUILD_LOG"

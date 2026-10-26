@@ -16,9 +16,13 @@ let backup = URL(fileURLWithPath: arguments[2])
 let logURL = URL(fileURLWithPath: arguments[3])
 let identifier = "dev.kingxcode.flutter-runbar"
 let files = FileManager.default
+// Keep the bundle identifier and data directory stable across the rename.
+// Migrate the old Desktop filename too, including when both names exist.
+let legacyDestination = destination.deletingLastPathComponent().appendingPathComponent("Flutter Runbar.app")
+let destinations = destination.lastPathComponent == "Runbar.app" ? [destination, legacyDestination] : [destination]
 
 func failure(_ message: String) -> NSError {
-    NSError(domain: "FlutterRunbarInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    NSError(domain: "RunbarInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
 }
 func log(_ message: String) {
     if !detached { print(message) }
@@ -42,13 +46,13 @@ func run(_ executable: String, _ arguments: [String]) throws -> String {
     guard process.terminationStatus == 0 else { throw failure("\(executable) 失败：\(output)") }
     return output
 }
-func validateExistingDestination() throws {
-    let values = try? destination.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
-    if values?.isSymbolicLink == true { throw failure("目标是符号链接，未替换：\(destination.path)") }
-    guard files.fileExists(atPath: destination.path) else { return }
-    let info = NSDictionary(contentsOf: destination.appendingPathComponent("Contents/Info.plist"))
+func validateExistingDestination(_ url: URL) throws {
+    let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+    if values?.isSymbolicLink == true { throw failure("目标是符号链接，未替换：\(url.path)") }
+    guard files.fileExists(atPath: url.path) else { return }
+    let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist"))
     guard values?.isDirectory == true, info?["CFBundleIdentifier"] as? String == identifier else {
-        throw failure("目标不是 Flutter Runbar，未替换：\(destination.path)")
+        throw failure("目标不是 Runbar，未替换：\(url.path)")
     }
 }
 func runningApps() -> [NSRunningApplication] {
@@ -68,7 +72,7 @@ func isHostedByRunbar(_ apps: [NSRunningApplication]) -> Bool {
 }
 
 do {
-    try validateExistingDestination()
+    try destinations.forEach(validateExistingDestination)
     if !detached, isHostedByRunbar(runningApps()) {
         // No inherited output pipe or process group: the app can now stop its
         // own packaging command without killing the actual desktop installer.
@@ -90,13 +94,13 @@ do {
     try files.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
     let staging = destination.deletingLastPathComponent().appendingPathComponent(".runbar-install-\(UUID().uuidString)")
     defer { try? files.removeItem(at: staging) }
-    let stagedApp = staging.appendingPathComponent("Flutter Runbar.app")
+    let stagedApp = staging.appendingPathComponent("Runbar.app")
     try files.createDirectory(at: staging, withIntermediateDirectories: true)
     try run("/usr/bin/ditto", ["--norsrc", "--noextattr", source.path, stagedApp.path])
     try run("/usr/bin/codesign", ["--verify", "--strict", stagedApp.path])
     let applications = runningApps()
     for application in applications {
-        log("正在请求退出旧版 Flutter Runbar（PID \(application.processIdentifier)）…")
+        log("正在请求退出旧版 Runbar（PID \(application.processIdentifier)）…")
         guard application.terminate() || application.isTerminated else {
             throw failure("旧版拒绝退出，未替换桌面应用。")
         }
@@ -108,16 +112,19 @@ do {
         }
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
     }
-    guard runningApps().isEmpty else { throw failure("仍有 Flutter Runbar 在运行，未替换桌面应用。") }
-    try validateExistingDestination()
-    var movedOldApp = false
-    if files.fileExists(atPath: destination.path) {
-        try files.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try files.moveItem(at: destination, to: backup)
-        movedOldApp = true
-    }
+    guard runningApps().isEmpty else { throw failure("仍有 Runbar 在运行，未替换桌面应用。") }
+    try destinations.forEach(validateExistingDestination)
+    var movedApps: [(original: URL, saved: URL)] = []
+    var installed = false
     do {
+        for oldApp in destinations where files.fileExists(atPath: oldApp.path) {
+            let saved = oldApp == destination ? backup : backup.deletingLastPathComponent().appendingPathComponent(oldApp.lastPathComponent)
+            try files.createDirectory(at: saved.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try files.moveItem(at: oldApp, to: saved)
+            movedApps.append((oldApp, saved))
+        }
         try files.moveItem(at: stagedApp, to: destination)
+        installed = true
         // Finder can attach these metadata attributes when a Desktop item is
         // replaced. Remove only packaging detritus from the newly copied bundle;
         // never strip quarantine or other security attributes.
@@ -127,14 +134,17 @@ do {
         }
         try run("/usr/bin/codesign", ["--verify", "--strict", destination.path])
     } catch {
-        if movedOldApp {
-            try? files.removeItem(at: destination)
-            try files.moveItem(at: backup, to: destination)
+        let installError = error
+        do {
+            if installed { try files.removeItem(at: destination) }
+            for moved in movedApps.reversed() { try files.moveItem(at: moved.saved, to: moved.original) }
+        } catch {
+            throw failure("安装失败且恢复旧版失败：\(error.localizedDescription)。备份位于 \(backup.deletingLastPathComponent().path)。原始错误：\(installError.localizedDescription)")
         }
-        throw error
+        throw installError
     }
     log("桌面应用已替换：\(destination.path)")
-    if movedOldApp { log("旧版备份：\(backup.path)") }
+    for moved in movedApps { log("旧版备份：\(moved.saved.path)") }
     log("桌面安装完成。")
 } catch {
     log("桌面安装失败：\(error.localizedDescription)")

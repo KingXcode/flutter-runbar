@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CEAE80F2C3266BFBEEC9F559"
-               BuildableName = "Flutter Runbar.app"
+               BuildableName = "Runbar.app"
                BlueprintName = "FlutterRunbar"
                ReferencedContainer = "container:FlutterRunbar.xcodeproj">
             </BuildableReference>
@@ -33,7 +33,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CEAE80F2C3266BFBEEC9F559"
-            BuildableName = "Flutter Runbar.app"
+            BuildableName = "Runbar.app"
             BlueprintName = "FlutterRunbar"
             ReferencedContainer = "container:FlutterRunbar.xcodeproj">
          </BuildableReference>
@@ -76,7 +76,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CEAE80F2C3266BFBEEC9F559"
-            BuildableName = "Flutter Runbar.app"
+            BuildableName = "Runbar.app"
             BlueprintName = "FlutterRunbar"
             ReferencedContainer = "container:FlutterRunbar.xcodeproj">
          </BuildableReference>
@@ -107,7 +107,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "CEAE80F2C3266BFBEEC9F559"
-            BuildableName = "Flutter Runbar.app"
+            BuildableName = "Runbar.app"
             BlueprintName = "FlutterRunbar"
             ReferencedContainer = "container:FlutterRunbar.xcodeproj">
          </BuildableReference>

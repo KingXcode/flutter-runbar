@@ -11,10 +11,10 @@ struct FlutterRunbarApp: App {
         MenuBarExtra {
             MenuContent(model: model)
         } label: {
-            Label(!model.busy ? "Flutter Runbar" : "命令运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
+            Label(!model.busy ? "Runbar" : "命令运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
         }
         .menuBarExtraStyle(.window)
-        Window("Flutter Runbar", id: "manager") {
+        Window("Runbar", id: "manager") {
             ManagerView(model: model)
                 .frame(minWidth: 880, minHeight: 620)
         }
@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
-        window.title = "Flutter Runbar · 演示数据（非真实运行）"
+        window.title = "Runbar · 演示数据（非真实运行）"
         // Match the production Window scene's content minimums, including after
         // NavigationSplitView installs its taller unified toolbar.
         window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared).frame(minWidth: 880, minHeight: 620))
@@ -473,7 +473,7 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Flutter Runbar", systemImage: "terminal").font(.system(size: 12, weight: .semibold))
+                Label("Runbar", systemImage: "terminal").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("打开主界面") { openWindow(id: "manager"); NSApp.activate(ignoringOtherApps: true) }
                     .accessibilityHint("打开项目、命令和运行日志管理窗口")

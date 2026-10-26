@@ -17,15 +17,15 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    MARKETING_VERSION: "0.7.0"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.7.1"
+    CURRENT_PROJECT_VERSION: "10"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
 targets:
   FlutterRunbar:
     type: application
-    productName: Flutter Runbar
+    productName: Runbar
     platform: macOS
     sources:
       - Sources/FlutterRunbar
@@ -33,7 +33,7 @@ targets:
     info:
       path: Resources/Info.plist
       properties:
-        CFBundleDisplayName: Flutter Runbar
+        CFBundleDisplayName: Runbar
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
@@ -41,8 +41,8 @@ targets:
         NSHighResolutionCapable: true
     settings:
       base:
-        PRODUCT_NAME: Flutter Runbar
-        EXECUTABLE_NAME: FlutterRunbar
+        PRODUCT_NAME: Runbar
+        EXECUTABLE_NAME: Runbar
         PRODUCT_MODULE_NAME: FlutterRunbar
         PRODUCT_BUNDLE_IDENTIFIER: dev.kingxcode.flutter-runbar
         ENABLE_APP_SANDBOX: false

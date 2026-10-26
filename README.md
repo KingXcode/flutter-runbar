@@ -1,4 +1,4 @@
-# Flutter Runbar
+# Runbar
 
 macOS 26+ 的原生 SwiftUI 菜单栏项目命令工具。可为任意项目目录保存并运行终端命令，根据项目类型提供可选模板。
 
@@ -41,7 +41,7 @@ macOS 26+ 的原生 SwiftUI 菜单栏项目命令工具。可为任意项目目�
 swift test
 bash scripts/test-process.sh
 bash scripts/build-app.sh
-open 'dist/Flutter Runbar.app'
+open 'dist/Runbar.app'
 ```
 
 ### 一键打包到桌面
@@ -52,9 +52,11 @@ open 'dist/Flutter Runbar.app'
 ./build_macos_app.sh
 ```
 
-脚本执行 Release 构建和签名校验，同时生成 `dist/Flutter Runbar.app` 与 `~/Desktop/Flutter Runbar.app`，只生成 `.app`。也可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
+脚本执行 Release 构建和签名校验，同时生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`，只生成 `.app`。也可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
 
-替换桌面应用前，安装器先请求正在运行的 Flutter Runbar 正常退出，确认退出后整体备份旧包并替换，不合并旧文件，也不自动启动新版。若还有项目任务，会显示应用原有的「停止并退出 / 取消」确认；取消或 120 秒内未退出就停止安装，保留桌面旧包，不强制杀进程。旧包备份到 `.build/package-backups/<时间>/`，确认不再需要后可自行删除。
+首次改名安装会同时备份并移走桌面旧名 `Flutter Runbar.app`，桌面只保留新版 `Runbar.app`。应用标识和数据目录保持不变，原有配置、命令与运行记录继续使用。
+
+替换桌面应用前，安装器先请求正在运行的 Runbar 正常退出，确认退出后整体备份旧包并替换，不合并旧文件，也不自动启动新版。若还有项目任务，会显示应用原有的「停止并退出 / 取消」确认；取消或 120 秒内未退出就停止安装，保留桌面旧包，不强制杀进程。旧包备份到 `.build/package-backups/<时间>/`，确认不再需要后可自行删除。
 
 从 Runbar 自身执行打包时，会把桌面替换交给独立安装器，避免退出旧版时连同安装器一起停止。此时脚本会明确提示安装仍在进行，最终结果查看 `.build/logs/install-*.log` 中的「桌面安装完成」。构建日志位于 `.build/logs/package-*.log`；从终端执行时会等待桌面替换完成，失败返回非零退出码。
 
