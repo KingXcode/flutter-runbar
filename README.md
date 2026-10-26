@@ -43,6 +43,22 @@ bash scripts/build-app.sh
 open 'dist/Flutter Runbar.app'
 ```
 
+### 一键打包到桌面
+
+在项目根目录运行：
+
+```sh
+./build_macos_app.sh
+```
+
+脚本执行 Release 构建和签名校验，同时生成 `dist/Flutter Runbar.app` 与 `~/Desktop/Flutter Runbar.app`，只生成 `.app`。也可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
+
+替换桌面应用前，安装器先请求正在运行的 Flutter Runbar 正常退出，确认退出后整体备份旧包并替换，不合并旧文件，也不自动启动新版。若还有项目任务，会显示应用原有的「停止并退出 / 取消」确认；取消或 120 秒内未退出就停止安装，保留桌面旧包，不强制杀进程。旧包备份到 `.build/package-backups/<时间>/`，确认不再需要后可自行删除。
+
+从 Runbar 自身执行打包时，会把桌面替换交给独立安装器，避免退出旧版时连同安装器一起停止。此时脚本会明确提示安装仍在进行，最终结果查看 `.build/logs/install-*.log` 中的「桌面安装完成」。构建日志位于 `.build/logs/package-*.log`；从终端执行时会等待桌面替换完成，失败返回非零退出码。
+
+CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
+
 构建脚本生成可放进 Applications 的 `.app`，仅使用本机 ad hoc 签名，不是 Developer ID 签名，未公证。跨机器分发可能遇到 Gatekeeper；不要关闭系统安全功能。正式分发需单独配置合法签名与公证。当前构建只生成所在机器架构的应用。
 
 `FlutterRunbar.xcodeproj`、共享 Scheme 和 `Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 执行 `xcodegen generate`。如果直接在 Xcode 修改工程设置，应同步修改 `project.yml`，避免重新生成时覆盖设置。
@@ -59,7 +75,7 @@ open 'dist/Flutter Runbar.app'
 2. 选择或编辑命令。支持 zsh 引号、管道与环境变量赋值，例如 `fvm flutter run -d macos`。
 3. 在菜单栏列表选择该项目的命令，点击右侧「运行」。不同项目互不影响；运行中不能改选/编辑该项目命令。DevTools 出现后，直接点击该行下方的链接。停止时链接立即隐藏，新一轮运行不会复用旧链接。主界面保留详细日志与历史记录。
 4. 点击「停止」。界面等待最多约 6 秒的正常升级阶段，并继续排空输出，再保存最终退出结果。
-5. 左侧运行记录按项目目录分组，可折叠或展开；项目按最近运行时间排列，组内新记录在前。悬停项目名可查看完整目录，同名不同目录的项目分别显示。点击记录可选中高亮并查看输出，再次点击同一条取消选中，右侧恢复默认空白。取消查看不停止命令；任务结束也不会改变当前选中状态。选中记录后点击「在 Finder 中显示日志文件」定位该记录的 `output.raw`；未选中或文件不存在时按钮不可用。
+5. 运行记录只显示左侧所选项目的数据，记录数量也随项目切换更新；按完整项目目录匹配，同名不同目录的项目不会混在一起。项目分组可折叠或展开，新记录在前。点击记录可选中高亮并查看输出，再次点击同一条取消选中，右侧恢复默认空白。取消查看不停止命令；任务结束也不会改变当前选中状态。选中记录后点击「在 Finder 中显示日志文件」定位该记录的 `output.raw`；未选中或文件不存在时按钮不可用。
 
 命令由 `/bin/zsh -l -c` 执行，工作目录通过进程 API 设置，不拼接 `cd`。每次运行会在自定义 PATH 后补充 `~/.pub-cache/bin`、`~/fvm/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，已有配置也会生效；自定义路径中的 `~/` 会展开为用户主目录。可在「PATH 设置」添加其他 SDK 或 FVM 实际所在目录，自定义路径优先。登录 zsh 会读取你自己的登录配置；本应用不安装 SDK、不修改 shell 文件。PATH 只影响新运行。
 

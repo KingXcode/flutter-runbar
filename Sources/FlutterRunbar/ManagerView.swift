@@ -15,8 +15,12 @@ struct ManagerView: View {
     @State private var pathSettings = false
     @State private var metadataHeight: CGFloat = 0
     @State private var collapsedHistoryProjects = Set<String>()
+    private var projectHistory: [RunSession] {
+        guard let path = model.project?.path else { return [] }
+        return model.history.filter { $0.projectPath == path }
+    }
     private var historyGroups: [ProjectHistoryGroup] {
-        Dictionary(grouping: model.history, by: \.projectPath)
+        Dictionary(grouping: projectHistory, by: \.projectPath)
             .map { path, sessions in
                 ProjectHistoryGroup(path: path, sessions: sessions.sorted { $0.startedAt > $1.startedAt })
             }
@@ -189,12 +193,12 @@ struct ManagerView: View {
             HStack {
                 Label("运行记录", systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 4)
-                Text("\(model.history.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text("\(projectHistory.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }.padding(.horizontal, 12).padding(.vertical, 8)
-            if model.history.isEmpty {
+            if projectHistory.isEmpty {
                 VStack(spacing: 6) {
-                    Text("还没有运行记录").font(.caption)
-                    Text("运行命令后，记录会保存在这里。")
+                    Text(model.project == nil ? "请先选择项目" : "该项目还没有运行记录").font(.caption)
+                    Text("运行所选项目的命令后，记录会显示在这里。")
                         .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(16)
                 Spacer()
