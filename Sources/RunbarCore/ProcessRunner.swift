@@ -49,6 +49,7 @@ public final class ProcessRunner: @unchecked Sendable {
         queue.async { self.launch(project: project, preset: preset, extraPath: extraPath, shell: shell) }
     }
     private func launch(project: Project, preset: CommandPreset, extraPath: String, shell: String) {
+        guard preset.builtInAction == nil else { emit(.rejected("内置操作不能作为 shell 命令运行。")); return }
         guard session == nil else { emit(.rejected("已有命令正在运行，请先停止。")); return }
         guard !preset.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { emit(.rejected("命令不能为空。")); return }
         var next = RunSession(projectPath: project.path, command: preset.command)

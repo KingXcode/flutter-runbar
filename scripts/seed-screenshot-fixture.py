@@ -17,6 +17,13 @@ config = {
                               {"id": "33333333-3333-4333-8333-333333333333", "name": "检查代码", "command": "fvm flutter analyze"}]}],
     "extraPath": "/Users/demo/.pub-cache/bin:/opt/homebrew/bin:/usr/local/bin"
 }
+# Extra fictional projects show independent row controls, including a long name.
+config["projects"].extend([
+    {"id": "44444444-4444-4444-8444-444444444444", "path": "/Users/demo/Projects/后台管理端（演示）",
+     "presets": [{"id": "55555555-5555-4555-8555-555555555555", "name": "运行 Chrome", "command": "fvm flutter run -d chrome"}]},
+    {"id": "66666666-6666-4666-8666-666666666666", "path": "/Users/demo/Projects/这是一个名称比较长的移动客户端项目（演示）",
+     "presets": [{"id": "77777777-7777-4777-8777-777777777777", "name": "运行 macOS", "command": "fvm flutter run -d macos"}]}
+])
 (root / "configuration.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))
 logs = [
     ("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", "2026-10-24T14:00:00Z", "2026-10-24T14:02:15Z", "succeeded", 0,

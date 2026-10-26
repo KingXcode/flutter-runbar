@@ -7,26 +7,38 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
+		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
+		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
 		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
+		7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */; };
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterRunbarApp.swift; sourceTree = "<group>"; };
+		0C6F66E99688501B309B2459 /* capture-real-menu.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-real-menu.sh"; sourceTree = "<group>"; };
+		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
+		92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandTemplateTests.swift; sourceTree = "<group>"; };
 		93EF2065DD5AA9968FE3FF8B /* Flutter Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Flutter Runbar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
+		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
 		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
 		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
+		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -53,8 +65,12 @@
 		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
 			isa = PBXGroup;
 			children = (
+				92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */,
+				DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */,
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
+				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
+				EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */,
 			);
 			path = RunbarCoreTests;
 			sourceTree = "<group>";
@@ -79,7 +95,9 @@
 			isa = PBXGroup;
 			children = (
 				58E6091811E17D6C163ED7CB /* build-app.sh */,
+				1023E627F98907FA69966F18 /* capture-main-themes.sh */,
 				B637E5526FA142797BA3D836 /* capture-preview.sh */,
+				0C6F66E99688501B309B2459 /* capture-real-menu.sh */,
 				8BA286984BB626AF54E8C607 /* process-tests.c */,
 				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
 				BEC4844EA1FB283BAA93DA69 /* test-process.sh */,
@@ -108,6 +126,7 @@
 			isa = PBXGroup;
 			children = (
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
+				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
 			);
 			path = FlutterRunbar;
 			sourceTree = "<group>";
@@ -214,6 +233,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
+				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -221,8 +241,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */,
+				4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */,
 				638995230949F6C246161705 /* CoreTests.swift in Sources */,
+				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
+				7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,7 +345,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -335,7 +359,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -398,7 +422,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -418,7 +442,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

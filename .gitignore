@@ -7,3 +7,6 @@ xcuserdata/
 DerivedData/
 *.xcarchive/
 *.xcresult/
+
+screenshots/
+__pycache__/

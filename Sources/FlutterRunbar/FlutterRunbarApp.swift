@@ -11,8 +11,9 @@ struct FlutterRunbarApp: App {
         MenuBarExtra {
             MenuContent(model: model)
         } label: {
-            Label(model.running == nil ? "Flutter Runbar" : "Flutter 运行中", systemImage: model.running == nil ? "terminal" : "play.circle.fill")
+            Label(!model.busy ? "Flutter Runbar" : "Flutter 运行中", systemImage: !model.busy ? "terminal" : "play.circle.fill")
         }
+        .menuBarExtraStyle(.window)
         Window("Flutter Runbar", id: "manager") {
             ManagerView(model: model)
                 .frame(minWidth: 880, minHeight: 620)
@@ -25,33 +26,111 @@ struct FlutterRunbarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     #if SCREENSHOT_PREVIEW
     private var previewWindow: NSWindow?
+    private var previewMenuWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
+            NSApp.appearance = NSAppearance(named: arguments[theme + 1] == "dark" ? .darkAqua : .aqua)
+        }
+        if let flag = ProcessInfo.processInfo.arguments.firstIndex(of: "--capture-real-menu"),
+           ProcessInfo.processInfo.arguments.indices.contains(flag + 1) {
+            let folder = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[flag + 1], isDirectory: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.captureActualMenu(in: folder) }
+            return
+        }
         // A menu-bar agent may not instantiate its Window scene automatically.
         // Host the exact production ManagerView explicitly for screenshot builds.
+        let smallPreview = arguments.contains("--screenshot-small-window")
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: smallPreview ? 880 : 1100, height: smallPreview ? 620 : 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         window.title = "Flutter Runbar · 演示数据（非真实运行）"
-        window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared))
+        // Match the production Window scene's content minimums, including after
+        // NavigationSplitView installs its taller unified toolbar.
+        window.contentView = NSHostingView(rootView: ManagerView(model: AppModel.shared).frame(minWidth: 880, minHeight: 620))
         window.center()
         previewWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if let flag = arguments.firstIndex(of: "--screenshot-metrics"), arguments.indices.contains(flag + 1) {
+            let destination = URL(fileURLWithPath: arguments[flag + 1])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                let content = window.contentLayoutRect
+                let metrics: [String: Double] = [
+                    "frameWidth": Double(window.frame.width), "frameHeight": Double(window.frame.height),
+                    "contentWidth": Double(content.width), "contentHeight": Double(content.height)
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys]) {
+                    try? data.write(to: destination, options: .atomic)
+                }
+            }
+        }
+        if arguments.contains("--screenshot-main-only") { return }
+        let menuWindow = NSWindow(contentRect: NSRect(x: 40, y: 60, width: MenuLayout.width, height: MenuLayout.maximumListHeight + 100),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        menuWindow.title = "菜单栏项目列表 · 演示数据（非真实运行）"
+        // Same MenuContent used by MenuBarExtra; screenshot host only, not a claim
+        // that this titlebar or window chrome belongs to the actual popup.
+        let menuView = NSHostingView(rootView: MenuContent(model: AppModel.shared).fixedSize(horizontal: false, vertical: true))
+        menuWindow.contentView = menuView
+        previewMenuWindow = menuWindow
+        menuWindow.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            menuView.layoutSubtreeIfNeeded()
+            menuWindow.setContentSize(NSSize(width: MenuLayout.width, height: max(100, menuView.fittingSize.height)))
+        }
+    }
+    private func captureActualMenu(in folder: URL) {
+        func statusButtons(in view: NSView) -> [NSStatusBarButton] {
+            var found = (view as? NSStatusBarButton).map { [$0] } ?? []
+            for child in view.subviews { found += statusButtons(in: child) }
+            return found
+        }
+        func report(_ text: String, success: Bool) {
+            let name = success ? "actual-menu-ready.txt" : "actual-menu-blocked.txt"
+            try? text.write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        // Public app-owned view hierarchy only: no private selectors/KVC,
+        // Accessibility APIs, global input injection, or TCC changes.
+        let buttons = NSApp.windows.flatMap { window in
+            window.contentView.map { statusButtons(in: $0) } ?? []
+        }
+        guard buttons.count == 1, let button = buttons.first, button.isEnabled else {
+            report("Could not uniquely locate this app's public NSStatusBarButton (found \(buttons.count)). No permission or security changes attempted.", success: false)
+            return
+        }
+        for window in NSApp.windows where window.frame.width > 400 { window.orderOut(nil) }
+        button.performClick(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            // In this mode no preview host is created. A visible app-owned panel
+            // of the menu's width therefore verifies the actual MenuBarExtra opened.
+            let panels = NSApp.windows.filter { $0.isVisible && $0.frame.width >= MenuLayout.width - 10 && $0.frame.width < MenuLayout.width + 80 && $0.frame.height > 100 }
+            guard panels.count == 1 else {
+                report("Status-item action invoked, but actual MenuBarExtra panel was not uniquely visible (found \(panels.count)). No substitute window was created.", success: false)
+                return
+            }
+            report("Opened the app's actual MenuBarExtra through its own NSStatusBarButton.performClick. Fictional data; no command executed. No preview host or permission changes.", success: true)
+        }
     }
     #endif
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if SCREENSHOT_PREVIEW
+        return .terminateNow
+        #else
         let model = AppModel.shared
+        guard model.nativeActionProjectID == nil else { return .terminateCancel }
         guard model.busy else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "命令仍在运行"
-        alert.informativeText = "退出将先停止本次命令，并等待日志保存完成。"
+        alert.informativeText = "退出将停止所有正在运行的项目，并等待每份日志保存完成。"
         alert.addButton(withTitle: "停止并退出"); alert.addButton(withTitle: "取消")
         guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
         guard model.busy else { return .terminateNow }
-        model.quitWhenFinished = true; model.stop()
+        model.stopAllForQuit()
         return .terminateLater
+        #endif
     }
 }
 
@@ -60,36 +139,52 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
-    @Published var running: RunSession?
+    @Published var projectRuns: [UUID: ProjectRunState] = [:]
     @Published var selectedProject: UUID?
-    @Published var selectedPreset: UUID?
     @Published var selectedSession: UUID?
     @Published var logText = ""
     @Published var error: String?
-    @Published var busy = false
-    @Published var stopping = false
+    @Published var nativeActionProjectID: UUID?
     var quitWhenFinished = false
+    private var quitReplySent = false
     private var store: SessionStore?
-    private var runner: ProcessRunner?
+    private var coordinator: ProjectRunCoordinator?
+    var busy: Bool { projectRuns.values.contains(where: \.isBusy) }
+    var activeCount: Int { projectRuns.values.filter(\.isBusy).count }
+    var selectedState: ProjectRunState { selectedProject.map { state(for: $0) } ?? ProjectRunState() }
+    var selectedPreset: UUID? {
+        get { project?.selectedPreset?.id }
+        set { if let id = selectedProject { choosePreset(newValue, for: id) } }
+    }
     init() {
         do {
             let store = try SessionStore()
             config = try store.loadConfiguration(); try store.recoverInterrupted(); history = try store.sessions()
             self.store = store
-            selectedProject = config.projects.first?.id; selectedPreset = config.projects.first?.presets.first?.id
-            runner = ProcessRunner(store: store) { [weak self] event in self?.handle(event) }
+            selectedProject = config.projects.first?.id
+            let coordinator = ProjectRunCoordinator(store: store)
+            coordinator.onEvent = { [weak self] event in self?.handle(event) }
+            self.coordinator = coordinator
             if !store.warnings.isEmpty { error = store.warnings.joined(separator: "\n") }
             #if SCREENSHOT_PREVIEW
-            // Only the explicit screenshot build selects fixture history automatically.
-            // No command is launched by this path.
             selectedSession = history.first?.id
             loadLog()
+            if let first = config.projects.first, var example = history.first {
+                // This synthetic live run is distinct from the completed history
+                // selected for log preview; no fake live output file is created.
+                example.id = UUID(uuidString: "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD")!
+                example.status = .running; example.endedAt = nil; example.exitCode = nil
+                var preview = ProjectRunState(); preview.phase = .running
+                preview.session = example; preview.command = example.command
+                projectRuns[first.id] = preview
+            }
             #endif
         } catch { self.error = "初始化失败，请检查本地数据权限：\(error.localizedDescription)" }
     }
     var project: Project? { config.projects.first { $0.id == selectedProject } }
-    var preset: CommandPreset? { project?.presets.first { $0.id == selectedPreset } }
+    var preset: CommandPreset? { project?.selectedPreset }
     var session: RunSession? { history.first { $0.id == selectedSession } }
+    func state(for id: UUID) -> ProjectRunState { projectRuns[id] ?? ProjectRunState() }
     @discardableResult
     func persist() -> Bool {
         do { guard let store else { throw RunbarError.message("本地存储不可用") }; try store.saveConfiguration(config); return true }
@@ -99,267 +194,339 @@ final class AppModel: ObservableObject {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         panel.message = "选择 Flutter 项目目录"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if let existing = config.projects.first(where: { $0.path == url.path }) { select(existing); return }
-        let project = Project(path: url.path); config.projects.append(project); select(project); persist()
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        if let existing = config.projects.first(where: { URL(fileURLWithPath: $0.path).standardizedFileURL.resolvingSymlinksInPath().path == path }) { select(existing); return }
+        let project = Project(path: path); config.projects.append(project); select(project); persist()
     }
-    func select(_ project: Project) { selectedProject = project.id; selectedPreset = project.presets.first?.id }
-    func savePreset(name: String, command: String, id: UUID?) {
-        guard let index = config.projects.firstIndex(where: { $0.id == selectedProject }) else { return }
-        if let id, let p = config.projects[index].presets.firstIndex(where: { $0.id == id }) {
-            config.projects[index].presets[p].name = name; config.projects[index].presets[p].command = command
-        } else {
-            let preset = CommandPreset(name: name, command: command); config.projects[index].presets.append(preset); selectedPreset = preset.id
-        }
-        persist()
-    }
-    func run() {
-        guard !busy, let project, let preset, let runner else { return }
-        guard persist() else { return }; busy = true; stopping = false; selectedSession = nil; logText = ""; runner.run(project: project, preset: preset, extraPath: config.extraPath)
-    }
-    func stop() { guard busy else { return }; stopping = true; runner?.stop() }
-    func toggleSession(_ session: RunSession) {
-        selectedSession = selectedSession == session.id ? nil : session.id
+    func select(_ project: Project) {
+        selectedProject = project.id
+        selectedSession = state(for: project.id).session?.id ?? history.first(where: { $0.projectPath == project.path })?.id
         loadLog()
     }
-    func handle(_ event: ProcessRunner.Event) {
-        switch event {
-        case .started(let value): running = value; history.insert(value, at: 0); selectedSession = value.id
-        case .output(let text):
-            if let running, selectedSession == running.id {
-                logText += text
-                if logText.utf8.count > 200_000 { logText = "[实时视图已截断；完整输出仍保存在本地]\n" + String(decoding: logText.utf8.suffix(100_000), as: UTF8.self) }
-            }
-        case .updated(let value): running = value; replace(value)
-        case .finished(let value):
-            // A launch failure has no .started event, so select its error record.
-            // Otherwise keep the user's current selection, including no selection.
-            if running == nil { selectedSession = value.id }
-            replace(value); running = nil; busy = false; stopping = false
-            if let problem = value.error { error = problem }
-            if selectedSession == value.id { loadLog() }
-            if quitWhenFinished { NSApp.reply(toApplicationShouldTerminate: true) }
-        case .failure(let message): error = message
-        case .rejected(let message):
-            error = message; if running == nil { busy = false; stopping = false; if quitWhenFinished { NSApp.reply(toApplicationShouldTerminate: true) } }
+    func toggleSession(_ session: RunSession) {
+        if selectedSession == session.id {
+            selectedSession = nil
+        } else {
+            selectedSession = session.id
+            selectedProject = config.projects.first(where: { $0.path == session.projectPath })?.id
         }
+        loadLog()
+    }
+    func choosePreset(_ presetID: UUID?, for projectID: UUID) {
+        guard !state(for: projectID).isBusy,
+              let index = config.projects.firstIndex(where: { $0.id == projectID }),
+              config.projects[index].availablePresets.contains(where: { $0.id == presetID }) else { return }
+        config.projects[index].selectedPresetID = presetID; persist()
+    }
+    func savePreset(name: String, command: String, id: UUID?, projectID: UUID?) -> Bool {
+        guard let index = config.projects.firstIndex(where: { $0.id == projectID }),
+              !state(for: config.projects[index].id).isBusy else { return false }
+        let original = config.projects[index]
+        do {
+            try config.projects[index].savePreset(name: name, command: command, id: id)
+            guard persist() else { config.projects[index] = original; return false }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+    func run(projectID: UUID) {
+        #if SCREENSHOT_PREVIEW
+        error = "演示模式不会执行命令。"
+        return
+        #else
+        guard !quitWhenFinished, nativeActionProjectID == nil, !state(for: projectID).isBusy,
+              let project = config.projects.first(where: { $0.id == projectID }),
+              let preset = project.selectedPreset, let coordinator else { return }
+        guard persist() else { return }
+        if preset.builtInAction == .resetMacOSSandbox {
+            resetSandbox(project: project)
+        } else {
+            coordinator.start(project: project, preset: preset, extraPath: config.extraPath)
+        }
+        #endif
+    }
+    private func resetSandbox(project: Project) {
+        guard let store else { error = "本地存储不可用，未执行清理。"; return }
+        // A single native flow blocks reentrant run buttons while AppKit runs modal loops.
+        nativeActionProjectID = project.id
+        var state = ProjectRunState(); state.phase = .starting
+        state.command = "[内置] 清空 macOS App 沙盒"
+        projectRuns[project.id] = state
+        defer { projectRuns[project.id] = ProjectRunState(); nativeActionProjectID = nil }
+        var session = RunSession(projectPath: project.path, command: state.command!)
+        var log: RunLog?
+        var didTrash = false
+        func append(_ text: String) throws {
+            try log?.append(Data((text + "\n").utf8))
+            if selectedSession == session.id { logText = (try? store.tail(session.id)) ?? logText }
+        }
+        do {
+            try store.save(session)
+            log = try RunLog(directory: store.directory(session.id))
+            state.session = session; projectRuns[project.id] = state
+            replace(session)
+            if selectedProject == project.id { selectedSession = session.id; logText = "" }
+            try append("内置操作，不执行 shell。仅在核实 App、容器和明确确认后移到废纸篓。")
+            let service = SandboxResetService()
+            let candidates = try service.discoverApplications(projectPath: project.path)
+            guard !candidates.isEmpty else { throw RunbarError.message("未找到 macOS 构建产物，请先构建或运行该项目。") }
+            let application: URL
+            if candidates.count == 1 {
+                application = candidates[0]
+            } else {
+                NSApp.activate(ignoringOtherApps: true)
+                let chooser = NSAlert()
+                chooser.messageText = "选择此项目的 macOS App"
+                chooser.informativeText = "发现多个构建配置，请明确选择；不会自动猜测 Debug / Release 或 flavor。"
+                chooser.addButton(withTitle: "取消")
+                chooser.addButton(withTitle: "检查所选 App")
+                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 460, height: 26))
+                picker.addItems(withTitles: candidates.map { $0.deletingLastPathComponent().lastPathComponent + "/" + $0.lastPathComponent })
+                chooser.accessoryView = picker
+                guard chooser.runModal() == .alertSecondButtonReturn else { throw SandboxResetError.cancelled }
+                guard candidates.indices.contains(picker.indexOfSelectedItem) else { throw SandboxResetError.cancelled }
+                application = candidates[picker.indexOfSelectedItem]
+            }
+            let plan = try service.inspect(projectPath: project.path, applicationURL: application)
+            try append("App：\(plan.applicationURL.path)\nBundle ID：\(plan.bundleIdentifier)\n整个容器：\(plan.containerURL.path)")
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "清空整个 macOS App 沙盒？"
+            alert.informativeText = "App：\(plan.applicationURL.path)\nBundle ID：\(plan.bundleIdentifier)\n完整容器：\(plan.containerURL.path)\n\n将整个容器移到废纸篓，包括 Documents、Library、tmp 和容器元数据。相同 Bundle ID 的其他安装副本也会受影响。\n不清理外部链接目标、App Group、钥匙串或云端数据。请停止 IDE/Runbar 运行任务并退出 App。系统拒绝访问时将停止，不强制删除。"
+            alert.addButton(withTitle: "取消")
+            alert.addButton(withTitle: "移到废纸篓")
+            // First/default button is deliberately non-destructive.
+            guard alert.runModal() == .alertSecondButtonReturn else { throw SandboxResetError.cancelled }
+            try append("用户已确认；重新检查 App、运行状态及容器身份。")
+            let destination = try service.reset(plan, approved: true)
+            didTrash = true
+            session.status = .succeeded
+            try append("已将整个容器移到废纸篓。" + (destination.map { " 位置：\($0.path)" } ?? ""))
+            try append("未删除外部共享数据。下次启动通常重新创建容器；若需恢复，先退出应用再从废纸篓放回。")
+        } catch SandboxResetError.cancelled {
+            session.status = .cancelled
+            try? append("已取消；没有清理任何沙盒数据。")
+        } catch {
+            session.status = .failed
+            session.error = didTrash ? "容器已移到废纸篓，但记录结果失败：\(error.localizedDescription)" : error.localizedDescription
+            try? append("未完成：\(session.error!)")
+            self.error = session.error
+        }
+        session.endedAt = Date()
+        session.duration = session.endedAt!.timeIntervalSince(session.startedAt)
+        // Native actions have no shell exit code; status and text express the result.
+        do { try log?.close(); try store.save(session) }
+        catch { self.error = "\(didTrash ? "容器已移到废纸篓；" : "")保存操作记录失败：\(error.localizedDescription)" }
+        replace(session)
+        if selectedSession == session.id { loadLog() }
+    }
+    func run() { if let id = selectedProject { run(projectID: id) } }
+    func stop(projectID: UUID) {
+        #if SCREENSHOT_PREVIEW
+        projectRuns[projectID] = ProjectRunState()
+        #else
+        guard nativeActionProjectID != projectID else { return }
+        coordinator?.stop(projectID: projectID)
+        #endif
+    }
+    func stop() { if let id = selectedProject { stop(projectID: id) } }
+    func stopAllForQuit() {
+        quitWhenFinished = true
+        coordinator?.stopAll()
+        finishQuitIfReady()
+    }
+    private func finishQuitIfReady() {
+        guard quitWhenFinished, !busy, !quitReplySent else { return }
+        quitReplySent = true
+        // Defer one main-queue turn so applicationShouldTerminate has returned
+        // .terminateLater, and the final session event has updated the UI/history.
+        DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
+    }
+    func handle(_ event: ProjectRunCoordinator.Event) {
+        switch event {
+        case .stateChanged(let id, let state): projectRuns[id] = state
+        case .started(let id, let value):
+            replace(value)
+            // Another project's start or finish must not steal the viewed log.
+            if selectedProject == id { selectedSession = value.id; logText = "" }
+        case .output(_, let sessionID, _):
+            if selectedSession == sessionID { logText = coordinator?.liveLog(for: sessionID) ?? "" }
+        case .updated(_, let value): replace(value)
+        case .finished(let id, let value):
+            let hadStarted = history.contains { $0.id == value.id }
+            replace(value)
+            if selectedSession == value.id { loadLog() }
+            else if !hadStarted && selectedProject == id { selectedSession = value.id; loadLog() }
+            if let problem = value.error { report(problem, projectID: id) }
+            finishQuitIfReady()
+        case .failure(let id, let message): report(message, projectID: id); finishQuitIfReady()
+        }
+    }
+    private func report(_ message: String, projectID: UUID) {
+        let name = config.projects.first { $0.id == projectID }?.name ?? "项目"
+        error = "\(name)：\(message)"
     }
     private func replace(_ value: RunSession) {
         if let i = history.firstIndex(where: { $0.id == value.id }) { history[i] = value } else { history.insert(value, at: 0) }
     }
     func loadLog() {
-        logText = ""
+        guard let id = selectedSession, let store else { logText = ""; return }
+        // Live snapshots share the coordinator's delivery boundary; reading disk
+        // could include bytes whose queued UI event has not arrived yet.
+        if let live = coordinator?.liveLog(for: id) { logText = live; return }
+        do { logText = try store.tail(id) }
+        catch { logText = ""; self.error = "读取日志失败：\(error.localizedDescription)" }
+    }
+    var selectedOutputFile: URL? {
+        guard let id = selectedSession, let store else { return nil }
+        return try? store.outputFile(for: id)
+    }
+    var selectedOutputPath: String? {
+        guard let id = selectedSession, let store else { return nil }
+        return store.directory(id).appendingPathComponent("output.raw").path
+    }
+    func revealSelectedOutput() {
         guard let id = selectedSession, let store else { return }
-        do { logText = try store.tail(id) } catch { self.error = "读取日志失败：\(error.localizedDescription)" }
+        do { NSWorkspace.shared.activateFileViewerSelecting([try store.outputFile(for: id)]) }
+        catch { self.error = error.localizedDescription }
     }
     func showFiles() { guard let id = selectedSession, let store else { return }; NSWorkspace.shared.open(store.directory(id)) }
     func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
-    func open(_ value: String) {
-        guard let url = URL(string: value), let host = url.host, ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host), ["http", "https"].contains(url.scheme ?? "") else { return }
+    func openLiveURL(_ value: String, projectID: UUID) {
+        guard state(for: projectID).liveDevToolsURLs.contains(value), let url = DevToolsLink.validatedURL(value) else { return }
         NSWorkspace.shared.open(url)
     }
+    func liveProjectID(for sessionID: UUID) -> UUID? {
+        projectRuns.first { $0.value.phase == .running && $0.value.session?.id == sessionID }?.key
+    }
+}
+
+private enum MenuLayout {
+    static let width: CGFloat = 480
+    static let maximumListHeight: CGFloat = 320
+}
+
+private struct MenuListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 struct MenuContent: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
-    var body: some View {
-        Text(model.busy ? "Flutter 正在运行" : "Flutter Runbar")
-        if let project = model.project { Text(project.name) }
-        Button("打开管理窗口") { openWindow(id: "manager"); NSApp.activate(ignoringOtherApps: true) }
-        if model.busy { Button(model.stopping ? "正在停止…" : "停止运行") { model.stop() }.disabled(model.stopping) }
-        else { Button("运行所选命令") { model.run() }.disabled(model.preset == nil) }
-        Divider()
-        Button("退出") { NSApp.terminate(nil) }
-    }
-}
-
-struct ManagerView: View {
-    @ObservedObject var model: AppModel
-    @State private var editing = false
-    @State private var editingID: UUID?
-    @State private var presetName = ""
-    @State private var command = ""
-    @State private var pathSettings = false
-    @State private var collapsedHistoryProjects = Set<String>()
-    private var historyGroups: [ProjectHistoryGroup] {
-        Dictionary(grouping: model.history, by: \.projectPath)
-            .map { path, sessions in
-                ProjectHistoryGroup(path: path, sessions: sessions.sorted { $0.startedAt > $1.startedAt })
-            }
-            .sorted {
-                let left = $0.sessions.first?.startedAt ?? .distantPast
-                let right = $1.sessions.first?.startedAt ?? .distantPast
-                return left == right ? $0.path < $1.path : left > right
-            }
+    @State private var listHeight: CGFloat = 0
+    private var initialListHeight: CGFloat {
+        CGFloat(model.config.projects.count) * 48 + CGFloat(model.projectRuns.values.reduce(0) { $0 + $1.liveDevToolsURLs.count }) * 18
     }
     var body: some View {
-        NavigationSplitView {
-            List {
-                Section("项目") {
-                    ForEach(model.config.projects) { project in
-                        Button { model.select(project) } label: {
-                            Label(project.name, systemImage: model.selectedProject == project.id ? "folder.fill" : "folder")
-                        }.buttonStyle(.plain)
-                    }
-                    Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
-                }
-                Section("运行记录") {
-                    ForEach(historyGroups) { group in
-                        DisclosureGroup(isExpanded: Binding(
-                            get: { !collapsedHistoryProjects.contains(group.path) },
-                            set: { expanded in
-                                if expanded { collapsedHistoryProjects.remove(group.path) }
-                                else { collapsedHistoryProjects.insert(group.path) }
-                            }
-                        )) {
-                            ForEach(group.sessions) { session in
-                                Button { model.toggleSession(session) } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(session.command)
-                                            .font(.system(.caption, design: .monospaced))
-                                            .lineLimit(1).truncationMode(.middle)
-                                        Text(session.startedAt, format: .dateTime.month().day().hour().minute().second()).font(.caption)
-                                        Text(statusLabel(session.status)).font(.caption).foregroundStyle(session.status == .failed ? .red : .secondary)
-                                    }
-                                    .padding(.vertical, 3)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .listRowBackground(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(model.selectedSession == session.id ? Color.accentColor.opacity(0.2) : Color.clear)
-                                )
-                                .accessibilityAddTraits(model.selectedSession == session.id ? .isSelected : [])
-                                .help(session.command + (model.selectedSession == session.id ? "\n再次点击取消选中" : "\n查看运行记录"))
-                            }
-                        } label: {
-                            HStack {
-                                Label(URL(fileURLWithPath: group.path).lastPathComponent, systemImage: "folder")
-                                    .lineLimit(1).truncationMode(.middle)
-                                Spacer()
-                                Text(group.sessions.count, format: .number).font(.caption).foregroundStyle(.secondary)
-                            }
-                            .help(group.path)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("Flutter Runbar", systemImage: "terminal").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("打开主界面") { openWindow(id: "manager"); NSApp.activate(ignoringOtherApps: true) }
+                    .accessibilityHint("打开项目、命令和运行日志管理窗口")
+            }.padding(.horizontal, 10).padding(.vertical, 7)
+            Divider()
+            if model.config.projects.isEmpty {
+                Text("还没有项目，请先在主界面添加。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(model.config.projects) { project in
+                            ProjectMenuRow(model: model, project: project)
+                            Divider().padding(.horizontal, 10)
                         }
-                    }
-                }
-            }.navigationSplitViewColumnWidth(min: 200, ideal: 230)
-                .onChange(of: model.selectedSession) { _, id in
-                    if let session = model.history.first(where: { $0.id == id }) {
-                        collapsedHistoryProjects.remove(session.projectPath)
-                    }
-                }
-        } detail: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(model.project?.name ?? "先添加 Flutter 项目").font(.title2.bold())
-                        Text(model.project?.path ?? "命令与日志仅保存在本机").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
+                    }.background(GeometryReader { geometry in
+                        Color.clear.preference(key: MenuListHeightKey.self, value: geometry.size.height)
+                    })
+                }.frame(height: min(MenuLayout.maximumListHeight, listHeight > 0 ? listHeight : initialListHeight))
+                    .onPreferenceChange(MenuListHeightKey.self) { listHeight = $0 }
+            }
+            if let error = model.error {
+                HStack(alignment: .top, spacing: 6) {
+                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
                     Spacer()
-                    Button("PATH 设置", systemImage: "gearshape") { pathSettings = true }
-                }
-                if let project = model.project {
-                    HStack {
-                        Picker("命令", selection: $model.selectedPreset) {
-                            ForEach(project.presets) { preset in Text(preset.name).tag(Optional(preset.id)) }
-                        }
-                        Button("添加") { editingID = nil; presetName = "新命令"; command = "fvm flutter run -d macos"; editing = true }
-                        Button("编辑") { guard let preset = model.preset else { return }; editingID = preset.id; presetName = preset.name; command = preset.command; editing = true }.disabled(model.preset == nil)
-                        Button(model.busy ? (model.stopping ? "正在停止…" : "停止") : "运行", systemImage: model.busy ? "stop.fill" : "play.fill") { model.busy ? model.stop() : model.run() }
-                            .buttonStyle(.borderedProminent).disabled(model.stopping || (!model.busy && model.preset == nil))
-                    }
-                    Text(model.preset?.command ?? "").font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                }
+                    Button { model.error = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).accessibilityLabel("关闭提示")
+                }.padding(.horizontal, 10).padding(.vertical, 5)
                 Divider()
-                if let session = model.session {
-                    HStack {
-                        Text(statusLabel(session.status)).font(.headline)
-                        Text("开始 \(session.startedAt.formatted(date: .omitted, time: .standard))").font(.caption)
-                        if let end = session.endedAt { Text("结束 \(end.formatted(date: .omitted, time: .standard))").font(.caption) }
-                        if let code = session.exitCode { Text("退出码 \(code)").font(.caption) }
-                        Spacer(); Button("本地日志", systemImage: "folder") { model.showFiles() }
-                    }
-                    Text(session.command).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                    if let message = session.error { Text(message).foregroundStyle(.red).textSelection(.enabled) }
-                    ForEach(session.devToolsURLs, id: \.self) { url in
-                        HStack {
-                            Text("DevTools").font(.caption.bold())
-                            Text(url).font(.caption).lineLimit(1).textSelection(.enabled)
-                            Button("打开") { model.open(url) }.disabled(session.status != .running)
-                            Button("复制") { model.copy(url) }
-                        }
-                    }
-                }
-                LogView(text: model.logText).frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text("stdout / stderr 按接收顺序合并；完整原始字节与分块时间索引保存在本地。不会上传日志，也不会自动打开链接。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(20)
-            #if SCREENSHOT_PREVIEW
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    NSApp.activate(ignoringOtherApps: true)
-                    for window in NSApp.windows where window.frame.width > 600 {
-                        window.title = "Flutter Runbar · 演示数据（非真实运行）"
-                        window.makeKeyAndOrderFront(nil)
-                    }
-                }
             }
-            #endif
-        }
-        .sheet(isPresented: $editing) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(editingID == nil ? "添加命令" : "编辑命令").font(.title2)
-                TextField("名称", text: $presetName)
-                TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
-                Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
+            HStack {
+                Text(model.busy ? "\(model.activeCount) 个项目运行中" : "就绪")
                     .font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { model.savePreset(name: presetName, command: command, id: editingID); editing = false }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-            }.padding(24).frame(width: 520)
+                Spacer()
+                Button("退出") { NSApp.terminate(nil) }
+            }.padding(.horizontal, 10).padding(.vertical, 5)
+        }.controlSize(.small).frame(width: MenuLayout.width)
+    }
+}
+
+private struct ProjectMenuRow: View {
+    @ObservedObject var model: AppModel
+    let project: Project
+    private var state: ProjectRunState { model.state(for: project.id) }
+    private var stateIcon: String {
+        switch state.phase {
+        case .idle: return "circle"
+        case .starting: return "ellipsis"
+        case .running: return "play.fill"
+        case .stopping: return "stop.fill"
         }
-        .sheet(isPresented: $pathSettings) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("命令环境").font(.title2)
-                Text("额外 PATH（冒号分隔；使用完整路径，不要使用 ~）")
-                TextField("PATH", text: $model.config.extraPath)
-                Text("这些目录会添加到登录 zsh 的 PATH 前面。默认包含 pub-cache 和 Homebrew；可添加你的 FVM 可执行文件目录。不安装 SDK、不修改 shell 配置。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("保存") { model.persist(); pathSettings = false }
-            }.padding(24).frame(width: 560)
-        }
-        .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("知道了") { model.error = nil }
-        } message: { Text(model.error ?? "") }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Image(systemName: stateIcon).font(.system(size: 8))
+                            .foregroundStyle(state.phase == .running ? .green : .secondary)
+                            .frame(width: 8).accessibilityHidden(true)
+                        Text(project.name).font(.system(size: 12, weight: .medium))
+                            .lineLimit(1).truncationMode(.middle)
+                    }.accessibilityElement(children: .ignore)
+                        .accessibilityLabel("项目 \(project.name)")
+                        .accessibilityValue(phaseLabel(state.phase))
+                    Text(project.path).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(project.path)
+                        .accessibilityLabel("项目目录 \(project.path)")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .help("\(project.path)\n\(phaseLabel(state.phase))")
+                Picker("命令", selection: Binding(
+                    get: { project.selectedPreset?.id },
+                    set: { model.choosePreset($0, for: project.id) }
+                )) {
+                    if project.presets.isEmpty { Text("未配置命令").tag(Optional<UUID>.none) }
+                    ForEach(project.availablePresets) { preset in Text(preset.name).tag(Optional(preset.id)) }
+                }.labelsHidden().frame(width: 128).disabled(state.isBusy || model.quitWhenFinished)
+                    .accessibilityLabel("\(project.name)的命令")
+                    .help(state.command ?? project.selectedPreset?.displayCommand ?? "请在主界面添加命令")
+                Button("运行") { model.run(projectID: project.id) }
+                    .disabled(state.isBusy || project.selectedPreset == nil || model.quitWhenFinished || model.nativeActionProjectID != nil)
+                    .accessibilityLabel("运行\(project.name)")
+                Button("停止") { model.stop(projectID: project.id) }
+                    .disabled(!state.isBusy || state.phase == .stopping || model.nativeActionProjectID == project.id)
+                    .accessibilityLabel("停止\(project.name)")
+            }.controlSize(.small)
+            ForEach(state.liveDevToolsURLs, id: \.self) { value in
+                Button { model.openLiveURL(value, projectID: project.id) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "link").font(.system(size: 10))
+                        Text(value).font(.system(size: 10, design: .monospaced))
+                            .lineLimit(1).truncationMode(.middle)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain).foregroundStyle(.blue).help(value)
+                    .accessibilityLabel("打开\(project.name)的 DevTools")
+                    .accessibilityValue(value)
+            }
+            if let message = state.error {
+                Text(message).font(.caption).foregroundStyle(.red).lineLimit(1).help(message)
+            }
+        }.padding(.horizontal, 10).padding(.vertical, 6)
     }
 }
 
-private struct ProjectHistoryGroup: Identifiable {
-    let path: String
-    let sessions: [RunSession]
-    var id: String { path }
-}
-
-private func statusLabel(_ status: RunStatus) -> String {
-    switch status { case .running: return "运行中"; case .succeeded: return "已完成"; case .failed: return "失败"; case .stopped: return "已停止"; case .interrupted: return "异常中断" }
-}
-
-/// Native selectable log view avoids creating a SwiftUI view per output line.
-struct LogView: NSViewRepresentable {
-    var text: String
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
-        let view = NSTextView(); view.isEditable = false; view.isSelectable = true
-        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.backgroundColor = .textBackgroundColor; view.textContainerInset = NSSize(width: 10, height: 10)
-        view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-        view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = true
-        scroll.documentView = view; return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
-        let atBottom = scroll.documentVisibleRect.maxY >= view.bounds.maxY - 40
-        view.string = text
-        if atBottom { view.scrollToEndOfDocument(nil) }
-    }
+private func phaseLabel(_ phase: ProjectRunPhase) -> String {
+    switch phase { case .idle: return "未运行"; case .starting: return "正在启动…"; case .running: return "运行中"; case .stopping: return "正在停止…" }
 }

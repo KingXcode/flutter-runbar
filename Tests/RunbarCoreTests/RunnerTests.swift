@@ -5,6 +5,19 @@ final class RunnerTests: XCTestCase {
     private func temporaryStore() throws -> SessionStore {
         try SessionStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("Runbar tests \(UUID().uuidString)"))
     }
+    func testNativeActionRejectedBeforeShellLaunch() throws {
+        let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+        let rejected = expectation(description: "built-in rejected")
+        let runner = ProcessRunner(store: store) { event in
+            if case .rejected = event { rejected.fulfill() }
+            if case .started = event { XCTFail("A native action must not launch a shell") }
+        }
+        var preset = CommandPreset.sandboxReset; preset.command = "touch must-not-exist"
+        runner.run(project: Project(path: store.root.path), preset: preset, extraPath: "", shell: "/bin/sh")
+        wait(for: [rejected], timeout: 5)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.root.appendingPathComponent("must-not-exist").path))
+        XCTAssertTrue(try store.sessions().isEmpty)
+    }
     func testRunPersistsExitAndAllOutput() throws {
         let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
         let finished = expectation(description: "finished")
@@ -81,4 +94,25 @@ final class RunnerTests: XCTestCase {
         wait(for: [rejected], timeout: 3)
         XCTAssertEqual(try store.sessions().count, 0)
     }
+    func testShortOutputArrivesBeforeProcessExit() throws {
+        let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+        let live = expectation(description: "short output delivered while child still sleeps")
+        let finished = expectation(description: "child finishes")
+        var sawLive = false
+        var didFinish = false
+        let runner = ProcessRunner(store: store) { event in
+            switch event {
+            case .output(let text):
+                if text.contains("LIVE") && !sawLive {
+                    sawLive = true; XCTAssertFalse(didFinish); live.fulfill()
+                }
+            case .finished: didFinish = true; finished.fulfill()
+            default: break
+            }
+        }
+        runner.run(project: Project(path: store.root.path), preset: CommandPreset(command: "printf 'LIVE\\n'; sleep 5"), extraPath: "/usr/bin:/bin", shell: "/bin/sh")
+        wait(for: [live], timeout: 3)
+        wait(for: [finished], timeout: 8)
+    }
+
 }
