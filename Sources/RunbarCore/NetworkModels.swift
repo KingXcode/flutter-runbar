@@ -98,6 +98,36 @@ public struct NetworkPage: Sendable {
     public static let pageSize = 100
     public static let empty = NetworkPage(records: [], total: 0, matching: 0, page: 0)
 }
+
+/// Virtual rows omit headers and bodies. Even a long history only retains one
+/// bounded summary window plus the separately selected request's full details.
+public struct NetworkRequestSummary: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let method: String
+    public let url: String
+    public let startMicros: Int64
+    public let status: Int?
+    public let failed: Bool
+    public let durationMS: Double?
+    public var startDate: Date { Date(timeIntervalSince1970: Double(startMicros) / 1_000_000) }
+}
+public struct NetworkListCounts: Equatable, Sendable {
+    public let total: Int
+    public let matching: Int
+}
+public struct NetworkListWindow: Equatable, Sendable {
+    public static let capacity = 256
+    public let counts: NetworkListCounts
+    public let offset: Int
+    public let rows: [NetworkRequestSummary]
+    public var total: Int { counts.total }
+    public var matching: Int { counts.matching }
+    public func row(at index: Int) -> NetworkRequestSummary? {
+        let local = index - offset
+        return rows.indices.contains(local) ? rows[local] : nil
+    }
+    public static let empty = NetworkListWindow(counts: NetworkListCounts(total: 0, matching: 0), offset: 0, rows: [])
+}
 public struct NetworkBodyPage: Sendable {
     public let text: String
     public let page: Int

@@ -109,7 +109,7 @@ public final class NetworkStore {
         record.bodyState = NetworkBodyState(rawValue: text(stmt, 1)) ?? .unavailable
         record.bodyNote = text(stmt, 2); return record
     }
-    public func page(query: NetworkQuery = NetworkQuery(), page: Int = 0, latest: Bool = false) throws -> NetworkPage {
+    private func predicate(for query: NetworkQuery) -> (String, [String]) {
         var clauses = ["1=1"], values: [String] = []
         if !query.text.isEmpty { clauses.append("instr(lower(url),lower(?))>0"); values.append(String(query.text.prefix(1024))) }
         if !query.method.isEmpty { clauses.append("method=?"); values.append(query.method) }
@@ -122,7 +122,10 @@ public final class NetworkStore {
         case .serverError: clauses.append("status BETWEEN 500 AND 599")
         case .failed: clauses.append("failed=1")
         }
-        let predicate = clauses.joined(separator: " AND ")
+        return (clauses.joined(separator: " AND "), values)
+    }
+    public func page(query: NetworkQuery = NetworkQuery(), page: Int = 0, latest: Bool = false) throws -> NetworkPage {
+        let (predicate, values) = predicate(for: query)
         let total = try number("SELECT count(*) FROM requests")
         let matching = try number("SELECT count(*) FROM requests WHERE " + predicate, values)
         let lastPage = max(0, (matching - 1) / NetworkPage.pageSize)
@@ -134,6 +137,51 @@ public final class NetworkStore {
         while step == SQLITE_ROW { records.append(try record(stmt)); step = sqlite3_step(stmt) }
         guard step == SQLITE_DONE else { throw storageError() }
         return NetworkPage(records: records, total: total, matching: matching, page: page)
+    }
+    public func listCounts(query: NetworkQuery) throws -> NetworkListCounts {
+        let (predicate, values) = predicate(for: query)
+        try Task.checkCancellation()
+        let total = try number("SELECT count(*) FROM requests")
+        let matching = values.isEmpty && query.status == .all ? total : try number("SELECT count(*) FROM requests WHERE " + predicate, values)
+        return NetworkListCounts(total: total, matching: matching)
+    }
+    public func listWindow(query: NetworkQuery = NetworkQuery(), around row: Int, counts: NetworkListCounts? = nil) throws -> NetworkListWindow {
+        let counts = try counts ?? listCounts(query: query)
+        let anchor = min(max(0, row), max(0, counts.matching - 1))
+        let offset = min(max(0, anchor - NetworkListWindow.capacity / 2), max(0, counts.matching - NetworkListWindow.capacity))
+        let (predicate, values) = predicate(for: query)
+        // This is the reverse of requests_started(started DESC,id ASC), so the
+        // old database index also supports chronological virtual access. Equal
+        // timestamps use a stable ID order across windows and point selection.
+        let stmt = try statement("""
+            SELECT id,method,url,started,ended,status,failed,json_extract(CAST(metadata AS TEXT),'$.timingVersion')
+            FROM requests WHERE \(predicate) ORDER BY started ASC,id DESC LIMIT \(NetworkListWindow.capacity) OFFSET \(offset)
+            """, values)
+        defer { sqlite3_finalize(stmt) }
+        var rows: [NetworkRequestSummary] = []
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
+            try Task.checkCancellation()
+            let start = sqlite3_column_int64(stmt, 3)
+            let duration = sqlite3_column_int(stmt, 7) == 2 && sqlite3_column_type(stmt, 4) != SQLITE_NULL
+                ? Double(max(0, sqlite3_column_int64(stmt, 4) - start)) / 1000 : nil
+            rows.append(NetworkRequestSummary(id: text(stmt, 0), method: text(stmt, 1), url: text(stmt, 2), startMicros: start,
+                status: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 5)),
+                failed: sqlite3_column_int(stmt, 6) != 0, durationMS: duration))
+            step = sqlite3_step(stmt)
+        }
+        guard step == SQLITE_DONE else { throw storageError() }
+        return NetworkListWindow(counts: counts, offset: offset, rows: rows)
+    }
+    public func request(query: NetworkQuery, row: Int) throws -> NetworkRecord? {
+        guard row >= 0 else { return nil }
+        let (predicate, values) = predicate(for: query)
+        let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE \(predicate) ORDER BY started ASC,id DESC LIMIT 1 OFFSET \(row)", values)
+        defer { sqlite3_finalize(stmt) }
+        try Task.checkCancellation()
+        let step = sqlite3_step(stmt)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { throw storageError() }; return try record(stmt)
     }
     public func pendingBodies(epoch: String, isolate: String) throws -> [NetworkRecord] {
         let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE epoch=? AND isolate=? AND body_state='pending' AND (ended IS NOT NULL OR failed=1) ORDER BY started LIMIT \(limits.bodiesPerPoll)", [epoch, isolate])
@@ -239,7 +287,21 @@ public final class NetworkStore {
 }
 
 public actor NetworkCacheReader {
+    private var countsCache: (URL, NetworkQuery, NetworkListCounts)?
     public init() {}
+    public func listWindow(directory: URL, query: NetworkQuery, around row: Int, refreshCounts: Bool = true) throws -> NetworkListWindow {
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("requests.sqlite").path) else { countsCache = nil; return .empty }
+        try Task.checkCancellation()
+        let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
+        let counts: NetworkListCounts
+        if !refreshCounts, let cached = countsCache, cached.0 == directory, cached.1 == query { counts = cached.2 }
+        else { counts = try store.listCounts(query: query); countsCache = (directory, query, counts) }
+        return try store.listWindow(query: query, around: row, counts: counts)
+    }
+    public func request(directory: URL, query: NetworkQuery, row: Int) throws -> NetworkRecord? {
+        let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
+        return try store.request(query: query, row: row)
+    }
     public func page(directory: URL, query: NetworkQuery, page: Int, latest: Bool = false) throws -> NetworkPage {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("requests.sqlite").path) else { return .empty }
         let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }

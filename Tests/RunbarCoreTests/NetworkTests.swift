@@ -180,6 +180,87 @@ final class NetworkStoreTests: XCTestCase {
             XCTAssertEqual(last.records.last?.requestID, "9999")
         }
     }
+    func testVirtualListFarJumpsHaveFullRangeAndBoundedSummaries() throws {
+        var limits = NetworkLimits(); limits.databasePages = 32768
+        try networkFixture({ _, store in
+            for batch in 0..<25 {
+                try autoreleasepool {
+                    let records = try (0..<2000).map { index -> NetworkRecord in
+                        let number = batch * 2000 + index
+                        var record = try sampleRecord(String(number), start: Int64(number), url: "http://example.test/\(number)")
+                        record.requestHeaders = ""; record.responseHeaders = ""; return record
+                    }
+                    try store.upsert(records)
+                }
+            }
+            for anchor in [0, 255, 256, 12_345, 49_999, Int.max, -100] {
+                let window = try store.listWindow(around: anchor)
+                XCTAssertEqual(window.total, 50_000); XCTAssertEqual(window.matching, 50_000)
+                XCTAssertEqual(window.rows.count, NetworkListWindow.capacity)
+                let expected = min(49_999, max(0, anchor))
+                XCTAssertEqual(window.row(at: expected)?.url, "http://example.test/\(expected)")
+                XCTAssertNil(window.row(at: window.offset - 1))
+                XCTAssertNil(window.row(at: window.offset + window.rows.count))
+            }
+            // Selection reads any global row, even outside the loaded window.
+            XCTAssertEqual(try store.request(query: NetworkQuery(), row: 40_001)?.requestID, "40001")
+            XCTAssertNil(try store.request(query: NetworkQuery(), row: 50_000))
+        }, limits: limits)
+    }
+    func testVirtualFiltersEqualTimestampsAndLegacyDurations() throws {
+        try networkFixture { _, store in
+            var records = try (0..<600).map { try sampleRecord(String($0), url: $0.isMultiple(of: 2) ? "http://example.test/100%_MATCH" : "http://example.test/other", status: $0.isMultiple(of: 3) ? 500 : 200) }
+            records[0].timingVersion = nil
+            records[1].requestHeaders = String(repeating: "h", count: 32_768)
+            try store.upsert(records)
+            var query = NetworkQuery(); query.text = "100%_match"; query.status = .serverError
+            let filtered = try store.listWindow(query: query, around: 99)
+            XCTAssertEqual(filtered.total, 600); XCTAssertEqual(filtered.matching, 100)
+            XCTAssertEqual(filtered.rows.count, 100)
+            for (index, row) in filtered.rows.enumerated() {
+                let selected = try store.request(query: query, row: index)
+                XCTAssertEqual(selected?.id, row.id)
+                XCTAssertEqual(selected?.durationMS, row.durationMS)
+                XCTAssertEqual(selected?.status, 500)
+            }
+            let first = try store.listWindow(around: 0), second = try store.listWindow(around: 255)
+            for row in second.rows {
+                if let overlap = first.rows.first(where: { $0.id == row.id }) { XCTAssertEqual(overlap, row) }
+            }
+            let earliest = try store.listWindow(around: 0), latest = try store.listWindow(around: Int.max)
+            XCTAssertEqual(earliest.rows.first?.id, records.map(\.id).max())
+            XCTAssertEqual(latest.rows.last?.id, records.map(\.id).min())
+            query.text = "absent"
+            let empty = try store.listWindow(query: query, around: Int.max)
+            XCTAssertEqual(empty.offset, 0); XCTAssertEqual(empty.matching, 0); XCTAssertTrue(empty.rows.isEmpty)
+        }
+    }
+    func testVirtualReaderRefreshesCountsAndKeepsSelectedBodyIndependent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("runbar-network-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root); defer { store.close() }
+        let reader = NetworkCacheReader(), query = NetworkQuery()
+        let initial = try await reader.listWindow(directory: root, query: query, around: 0)
+        XCTAssertEqual(initial.total, 0)
+        let record = try sampleRecord("saved", start: 0)
+        try store.upsert([record]); try store.saveBodies(record.id, request: Data("{}".utf8), response: Data("{\"result\":true}".utf8))
+        let refreshed = try await reader.listWindow(directory: root, query: query, around: Int.max)
+        XCTAssertEqual(refreshed.matching, 1)
+        try store.upsert((1..<301).map { try sampleRecord(String($0), start: Int64($0)) })
+        let scrolling = try await reader.listWindow(directory: root, query: query, around: 0, refreshCounts: false)
+        XCTAssertEqual(scrolling.matching, 1) // Scrolling reuses one count snapshot.
+        let latest = try await reader.listWindow(directory: root, query: query, around: Int.max)
+        XCTAssertEqual(latest.matching, 301); XCTAssertEqual(latest.rows.count, 256)
+        XCTAssertNil(latest.rows.first(where: { $0.id == record.id }))
+        let loaded = try await reader.request(directory: root, query: query, row: 0)
+        let selected = try XCTUnwrap(loaded)
+        XCTAssertEqual(selected.bodyState, .saved)
+        let body = try await reader.body(directory: root, record: selected, response: true, page: 0)
+        XCTAssertEqual(body.text, "{\"result\":true}")
+        var filter = query; filter.text = "missing"
+        let changed = try await reader.listWindow(directory: root, query: filter, around: 0, refreshCounts: false)
+        XCTAssertEqual(changed.matching, 0) // A different filter cannot reuse stale counts.
+    }
     func testDatabaseCapacityFailureRollsBackBatch() throws {
         var limits = NetworkLimits(); limits.databasePages = 32
         try networkFixture({ _, store in
