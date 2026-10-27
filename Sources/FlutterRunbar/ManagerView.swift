@@ -6,6 +6,7 @@ struct ManagerView: View {
     @ObservedObject var model: AppModel
     @State private var commandEditor: CommandEditorRequest?
     @State private var showingSettings = false
+    @State private var showingApplicationPicker = false
     @State private var metadataHeight: CGFloat = 0
     @State private var showingLogDetails = false
     @State private var collapsedHistoryProjects = Set<String>()
@@ -17,8 +18,7 @@ struct ManagerView: View {
     @State private var showingNetwork = false
     @AppStorage("logWrapsLines") private var logWrapsLines = false
     private var projectHistory: [RunSession] {
-        guard let path = model.project?.path else { return [] }
-        return model.history.filter { $0.projectPath == path }
+        model.visibleHistory
     }
     private var historyGroups: [ProjectHistoryGroup] {
         Dictionary(grouping: projectHistory, by: \.projectPath)
@@ -67,19 +67,39 @@ struct ManagerView: View {
                     } header: {
                         HStack { Text("项目"); Spacer(); Text("\(model.config.projects.count)").monospacedDigit() }
                     }
+                    Section {
+                        ForEach(model.applications) { application in
+                            Button { model.selectApplication(application) } label: {
+                                HStack(spacing: 8) {
+                                    Image(nsImage: NSWorkspace.shared.icon(forFile: application.bundlePath)).resizable().frame(width: 22, height: 22)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(application.name).font(.system(size: 12, weight: .semibold)).lineLimit(1).help(application.bundlePath)
+                                        Text(model.applicationConnections[application.id]?.message ?? "未连接 · 本地记录")
+                                            .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
+                                }.padding(.vertical, 4).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .listRowBackground(model.selectedApplication == application.id ? Color.accentColor.opacity(0.12) : Color.clear)
+                                .accessibilityAddTraits(model.selectedApplication == application.id ? .isSelected : [])
+                                .contextMenu {
+                                    Button("从列表移除") { model.removeApplication(application.id) }
+                                        .disabled(model.applicationConnections[application.id]?.active == true)
+                                }
+                        }
+                    } header: {
+                        HStack { Text("应用监听"); Spacer(); Text("\(model.applications.count)").monospacedDigit() }
+                    }
                 }.listStyle(.sidebar)
                 Divider()
                 HStack {
-                    Button("添加项目…", systemImage: "folder.badge.plus") { model.chooseProject() }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button { pendingProjectRemoval = model.project } label: { Image(systemName: "minus") }
-                        .disabled(model.project == nil || model.selectedState.isBusy)
-                        .help("移除所选项目").accessibilityLabel("移除所选项目")
+                    Button("添加项目", systemImage: "folder.badge.plus") { model.chooseProject() }
+                    Button("连接 App", systemImage: "link") { showingApplicationPicker = true }
                 }.padding(12)
-            }.navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+            }.navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
             VStack(spacing: 0) {
-                projectHeader
+                if model.application != nil { applicationHeader } else { projectHeader }
                 Divider()
                 HSplitView {
                     if !expandedLog { historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300) }
@@ -97,6 +117,9 @@ struct ManagerView: View {
                 }
             }
             #endif
+        }
+        .sheet(isPresented: $showingApplicationPicker) {
+            ApplicationPickerView(model: model, preferredApplication: model.application)
         }
         .sheet(item: $commandEditor) { request in
             CommandEditorView(model: model, request: request)
@@ -131,13 +154,13 @@ struct ManagerView: View {
         .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("知道了") { model.error = nil }
         } message: { Text(model.error ?? "") }
-        .alert("删除 \(pendingSessionDeletion.count) 条运行记录？", isPresented: $showingSessionDeletion) {
+        .alert("删除 \(pendingSessionDeletion.count) 条记录？", isPresented: $showingSessionDeletion) {
             Button("取消", role: .cancel) { pendingSessionDeletion = [] }
             Button("移到废纸篓", role: .destructive) {
                 let ids = pendingSessionDeletion; pendingSessionDeletion = []
                 model.deleteSessions(ids)
             }
-        } message: { Text("对应日志也会一起移到废纸篓，可从废纸篓恢复。正在运行的记录不能删除。") }
+        } message: { Text("对应日志也会一起移到废纸篓，可从废纸篓恢复。正在进行的记录不能删除。") }
         .confirmationDialog("移除项目“\(pendingProjectRemoval?.name ?? "")”？", isPresented: Binding(
             get: { pendingProjectRemoval != nil }, set: { if !$0 { pendingProjectRemoval = nil } }
         ), titleVisibility: .visible) {
@@ -146,6 +169,31 @@ struct ManagerView: View {
             }
             Button("取消", role: .cancel) { pendingProjectRemoval = nil }
         } message: { Text("仅移除应用内的项目配置和命令，不删除磁盘上的项目文件或运行记录。") }
+    }
+
+    private var applicationHeader: some View {
+        HStack(spacing: 10) {
+            if let application = model.application {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: application.bundlePath)).resizable().frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(application.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                    let state = model.applicationConnections[application.id]
+                    Text(state?.active == true ? "应用监听 · macOS · PID \(state?.candidate?.processID ?? 0)" : "应用监听 · 本地历史记录")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                let state = model.applicationConnections[application.id]
+                Text(state?.message ?? "未连接").font(.caption).foregroundStyle(.secondary).lineLimit(1).help(state?.message ?? "未连接")
+                if state?.active == true {
+                    Button("DevTools", systemImage: "arrow.up.right.square") { model.openApplicationDevTools(application.id) }
+                        .disabled(state?.phase != .listening)
+                    Button(state?.phase == .disconnecting ? "正在断开…" : "断开连接") { model.disconnectApplication(application.id) }
+                        .disabled(state?.phase == .disconnecting).help("只结束监听，目标 App 继续运行")
+                } else {
+                    Button("连接", systemImage: "link") { showingApplicationPicker = true }.buttonStyle(.borderedProminent)
+                }
+            }
+        }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 12)
     }
 
     private var projectHeader: some View {
@@ -213,7 +261,7 @@ struct ManagerView: View {
     private var historyPane: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("运行记录", systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold))
+                Label(model.application == nil ? "运行记录" : "监听记录", systemImage: "clock.arrow.circlepath").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 4)
                 Text("\(projectHistory.count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 Button(selectingHistory ? "完成" : "多选") {
@@ -223,7 +271,7 @@ struct ManagerView: View {
             }.padding(.horizontal, 12).padding(.vertical, 8)
             if selectingHistory || model.historySelection.ids.count > 1 {
                 HStack {
-                    Button("全选") { model.selectAllDeletableHistory() }.help("选择当前项目的所有可删除记录")
+                    Button("全选") { model.selectAllDeletableHistory() }.help("选择当前列表的所有可删除记录")
                     Spacer(minLength: 4)
                     Button("删除 \(model.historySelection.ids.count) 项", role: .destructive) {
                         pendingSessionDeletion = model.historySelection.ids
@@ -233,14 +281,17 @@ struct ManagerView: View {
             }
             if projectHistory.isEmpty {
                 VStack(spacing: 6) {
-                    Text(model.project == nil ? "请先选择项目" : "该项目还没有运行记录").font(.caption)
-                    Text("运行所选项目的命令后，记录会显示在这里。")
+                    Text(model.application != nil ? "该应用还没有监听记录" : model.project == nil ? "请先选择项目或应用" : "该项目还没有运行记录").font(.caption)
+                    Text(model.application == nil ? "运行所选项目的命令后，记录会显示在这里。" : "连接应用后，日志和网络请求将保存在这里。")
                         .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(16)
                 Spacer()
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 8) {
+                        if model.application != nil {
+                            ForEach(projectHistory) { session in historyRow(session) }
+                        } else {
                         ForEach(historyGroups) { group in
                             VStack(alignment: .leading, spacing: 4) {
                                 Button {
@@ -264,6 +315,7 @@ struct ManagerView: View {
                                     ForEach(group.sessions) { session in historyRow(session) }
                                 }
                             }
+                        }
                         }
                     }.padding(8)
                 }
@@ -289,11 +341,11 @@ struct ManagerView: View {
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(session.command).font(.system(size: 11, design: .monospaced))
+                Text(session.attachment == nil ? session.command : session.status == .running ? "本次连接" : "应用监听") .font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
                 Text(session.startedAt, format: .dateTime.month().day().hour().minute())
                     .font(.system(size: 10)).foregroundStyle(.secondary)
-                SessionBadge(status: session.status, compact: true)
+                SessionBadge(status: session.status, compact: true, attachment: session.attachment != nil)
             }
             }
             .padding(8)
@@ -375,14 +427,14 @@ struct ManagerView: View {
                             .accessibilityLabel("当前日志文件 \(path)")
                     }
                     if model.selectedOutputFile == nil {
-                        Text("这次运行的日志文件不存在或尚未创建。").font(.caption).foregroundStyle(.secondary)
+                        Text("这条记录的日志文件不存在或尚未创建。").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "terminal").font(.system(size: 28)).foregroundStyle(.tertiary)
-                    Text("选择一次运行查看日志").font(.headline)
-                    Text("运行新命令后，输出会实时显示在这里。")
+                    Text(model.application == nil ? "选择一次运行查看日志" : "选择一次监听查看日志").font(.headline)
+                    Text(model.application == nil ? "运行新命令后，输出会实时显示在这里。" : "连接后开始接收日志；断开不会退出目标 App。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -393,17 +445,17 @@ struct ManagerView: View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(model.projectRuns.values.contains(where: { $0.isBusy && $0.session?.id == session.id }) ? "实时输出" : "历史记录")
+                    Text(model.applicationIsLive(session.id) ? "实时监听" : model.projectRuns.values.contains(where: { $0.isBusy && $0.session?.id == session.id }) ? "实时输出" : "历史记录")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("·").foregroundStyle(.tertiary)
-                    Text(URL(fileURLWithPath: session.projectPath).lastPathComponent)
+                    Text(session.sourceName)
                         .font(.caption).lineLimit(1).truncationMode(.middle).help(session.projectPath)
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) { sessionFacts(session) }
                     VStack(alignment: .leading, spacing: 3) { sessionFacts(session) }
                 }.font(.system(size: 10)).foregroundStyle(.secondary)
-                Text("本次命令  \(session.command)").font(.system(size: 10, design: .monospaced))
+                Text("\(session.attachment == nil ? "本次命令" : "监听应用")  \(session.command)").font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(session.command).textSelection(.enabled)
             }
             if let message = session.error {
@@ -438,7 +490,7 @@ struct ManagerView: View {
                 Label("日志", systemImage: "terminal").tag(false)
                 Label("网络", systemImage: "network").tag(true)
             }.pickerStyle(.segmented).labelsHidden().frame(width: 140).accessibilityLabel("日志与网络切换")
-            if let session = model.session { SessionBadge(status: session.status) }
+            if let session = model.session { SessionBadge(status: session.status, attachment: session.attachment != nil) }
             Button { expandedLog.toggle() } label: {
                 Image(systemName: expandedLog ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
             }.buttonStyle(.borderless).help(expandedLog ? "恢复运行记录列表" : "展开日志，隐藏运行记录列表")
@@ -520,12 +572,13 @@ private struct PhaseBadge: View {
 private struct SessionBadge: View {
     let status: RunStatus
     var compact = false
+    var attachment = false
     private var details: (String, String, Color) {
         switch status {
-        case .running: return ("运行中", "play.fill", .blue)
+        case .running: return (attachment ? "监听中" : "运行中", attachment ? "link" : "play.fill", .blue)
         case .succeeded: return ("已完成", "checkmark.circle.fill", .green)
         case .failed: return ("失败", "exclamationmark.circle.fill", .red)
-        case .stopped: return ("已停止", "stop.circle", .secondary)
+        case .stopped: return (attachment ? "已断开" : "已停止", "stop.circle", .secondary)
         case .cancelled: return ("已取消", "xmark.circle", .secondary)
         case .interrupted: return ("已中断", "exclamationmark.triangle", .orange)
         }

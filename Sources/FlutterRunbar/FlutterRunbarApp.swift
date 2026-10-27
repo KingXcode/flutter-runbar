@@ -26,9 +26,9 @@ private struct RunbarStatusLabel: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Label(model.busy ? "Runbar · 命令运行中" : "Runbar", systemImage: model.busy ? "terminal.fill" : "terminal")
+        Label(model.busy ? "Runbar · 命令运行中" : model.attachmentCount > 0 ? "Runbar · 应用监听中" : "Runbar", systemImage: model.busy || model.attachmentCount > 0 ? "terminal.fill" : "terminal")
             .symbolRenderingMode(.monochrome)
-            .help(model.busy ? "Runbar · \(model.activeCount) 个项目运行中" : "Runbar · 暂无运行任务")
+            .help("Runbar · \(model.activeCount) 个项目运行 · \(model.attachmentCount) 个应用监听")
             .onAppear {
                 model.installManagerOpener {
                     openWindow(id: "manager")
@@ -176,6 +176,11 @@ final class AppModel: ObservableObject {
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
     @Published var selectedProject: UUID?
+    @Published var selectedApplication: UUID?
+    @Published var applicationConnections: [UUID: ApplicationConnectionState] = [:]
+    private var applicationLoggers: [UUID: ApplicationLogSession] = [:]
+    private var applicationWatchers: [UUID: Task<Void, Never>] = [:]
+    private let devToolsServer = LocalDevToolsServer()
     @Published var historySelection = HistorySelection()
     var selectedSession: UUID? {
         get { historySelection.focusedID }
@@ -256,6 +261,7 @@ final class AppModel: ObservableObject {
             let coordinator = ProjectRunCoordinator(store: store)
             coordinator.onEvent = { [weak self] event in self?.handle(event) }
             self.coordinator = coordinator
+            if selectedProject == nil, let first = config.applications?.first { selectApplication(first) }
             if !store.warnings.isEmpty { error = store.warnings.joined(separator: "\n") }
             #if SCREENSHOT_PREVIEW
             selectedSession = history.first?.id
@@ -272,6 +278,10 @@ final class AppModel: ObservableObject {
             #endif
         } catch { self.error = "初始化失败，请检查本地数据权限：\(error.localizedDescription)" }
     }
+    var applications: [ApplicationTarget] { config.applications ?? [] }
+    var application: ApplicationTarget? { applications.first { $0.id == selectedApplication } }
+    var knownApplicationEndpoints: [VMServiceEndpoint] { network.knownEndpoints + applicationConnections.values.compactMap(\.endpoint) }
+    var attachmentCount: Int { applicationConnections.values.filter(\.active).count }
     var project: Project? { config.projects.first { $0.id == selectedProject } }
     var preset: CommandPreset? { project?.selectedPreset }
     var session: RunSession? { history.first { $0.id == selectedSession } }
@@ -374,8 +384,8 @@ final class AppModel: ObservableObject {
         let project = Project(path: path); config.projects.append(project); select(project); persist()
     }
     func select(_ project: Project) {
-        selectedProject = project.id
-        let records = history.filter { $0.projectPath == project.path }
+        selectedApplication = nil; selectedProject = project.id
+        let records = history.filter { $0.attachment == nil && $0.projectPath == project.path }
         selectedSession = records.first(where: { $0.id == state(for: project.id).session?.id })?.id ?? records.first?.id
         loadLog()
     }
@@ -390,16 +400,19 @@ final class AppModel: ObservableObject {
         if !persist() { config.projects[index] = original }
     }
     func toggleSession(_ session: RunSession, mode: HistorySelection.Mode = .single) {
-        selectedProject = config.projects.first(where: { $0.path == session.projectPath })?.id
+        selectedApplication = session.attachment?.application.id
+        selectedProject = session.attachment == nil ? config.projects.first(where: { $0.path == session.projectPath })?.id : nil
         historySelection.select(session.id, visible: visibleHistory.map(\.id), mode: mode)
         loadLog()
     }
     var visibleHistory: [RunSession] {
+        if let application { return history.filter { $0.belongs(to: application) }.sorted { $0.startedAt > $1.startedAt } }
         guard let path = project?.path else { return [] }
-        return history.filter { $0.projectPath == path }.sorted { $0.startedAt > $1.startedAt }
+        return history.filter { $0.attachment == nil && $0.projectPath == path }.sorted { $0.startedAt > $1.startedAt }
     }
     private var activeSessionIDs: Set<UUID> {
         Set(projectRuns.values.filter(\.isBusy).compactMap { $0.session?.id })
+            .union(applicationConnections.values.filter(\.active).compactMap(\.sessionID))
     }
     func canDeleteSessions(_ ids: Set<UUID>) -> Bool {
         let finishedIDs = Set(history.filter { $0.status != .running }.map(\.id))
@@ -544,6 +557,123 @@ final class AppModel: ObservableObject {
         if selectedSession == session.id { loadLog() }
     }
     func run() { if let id = selectedProject { run(projectID: id) } }
+    func selectApplication(_ target: ApplicationTarget) {
+        selectedProject = nil; selectedApplication = target.id
+        let current = applicationConnections[target.id]?.sessionID
+        selectedSession = history.first { $0.id == current }?.id ?? history.first { $0.belongs(to: target) }?.id
+        loadLog()
+    }
+    func connectedApplication(for candidate: RunningApplicationCandidate) -> ApplicationTarget? {
+        applications.first { $0.matches(candidate.application) && applicationConnections[$0.id]?.candidate?.processID == candidate.processID && applicationConnections[$0.id]?.active == true }
+    }
+    func connectApplication(_ candidate: RunningApplicationCandidate, endpoint: VMServiceEndpoint, enteredAddress: String) async throws {
+        guard !quitWhenFinished, !logShutdownStarted, let store else { throw RunbarError.message("应用正在退出或本地存储不可用。") }
+        guard ApplicationDiscovery.isCurrent(candidate) else { throw RunbarError.message("所选 App 已退出，请刷新列表。") }
+        try await ApplicationServiceProbe().validate(endpoint, processID: candidate.processID, flutterDetected: candidate.flutterDetected)
+        try Task.checkCancellation()
+        guard !logShutdownStarted, !quitWhenFinished else { throw CancellationError() }
+        guard ApplicationDiscovery.isCurrent(candidate) else { throw RunbarError.message("所选 App 已退出，请刷新列表。") }
+        let target = applications.first { $0.matches(candidate.application) }
+            ?? history.compactMap { $0.attachment?.application }.first { $0.matches(candidate.application) }
+            ?? candidate.application
+        guard applicationConnections[target.id]?.active != true else { throw RunbarError.message("该应用已有连接，请先断开原连接或查看当前记录。") }
+        let old = config.applications
+        if !applications.contains(where: { $0.id == target.id }) {
+            config.applications = applications + [target]
+            guard persist() else { config.applications = old; throw RunbarError.message("无法保存应用，请检查本地存储权限。") }
+        }
+        var state = ApplicationConnectionState(); state.phase = .connecting; state.candidate = candidate
+        state.endpoint = endpoint; state.message = "正在连接"
+        if URLComponents(string: enteredAddress)?.queryItems?.contains(where: { $0.name == "uri" }) == true {
+            state.devToolsURL = DevToolsLink.validatedURL(enteredAddress)
+        }
+        applicationConnections[target.id] = state
+        let id = target.id
+        let generation = state.generation
+        let logger = ApplicationLogSession(root: store.root, endpoint: endpoint,
+            attachment: ApplicationAttachment(application: target, processID: candidate.processID)) { [weak self] event in
+                await self?.handleAttachment(event, applicationID: id, generation: generation)
+            }
+        applicationLoggers[id] = logger; selectApplication(target)
+        await logger.start()
+        if Task.isCancelled { await logger.disconnect(); throw CancellationError() }
+        guard applicationConnections[id]?.generation == generation, applicationConnections[id]?.active == true else { return }
+        applicationWatchers[id] = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self else { return }
+                guard self.applicationConnections[id]?.generation == generation, self.applicationConnections[id]?.active == true else { return }
+                if !ApplicationDiscovery.isCurrent(candidate) {
+                    self.applicationConnections[id]?.message = "App 已退出"
+                    await logger.disconnect(); return
+                }
+            }
+        }
+    }
+    private func handleAttachment(_ event: ApplicationLogSession.Event, applicationID id: UUID, generation: UUID) {
+        guard applicationConnections[id]?.generation == generation else { return }
+        switch event {
+        case .started(let value):
+            applicationConnections[id]?.sessionID = value.id; replace(value)
+            network.started(projectID: id, sessionID: value.id, enabled: applications.first { $0.id == id }?.networkCaptureEnabled == true)
+            if let endpoint = applicationConnections[id]?.endpoint { network.discovered(endpoint, sessionID: value.id) }
+            if selectedApplication == id { selectedSession = value.id; loadLog() }
+        case .connected(let streams):
+            applicationConnections[id]?.phase = .listening
+            applicationConnections[id]?.message = streams.isEmpty ? "已连接 · 当前 VM 不提供日志事件" : "已连接"
+        case .output(let sessionID):
+            if selectedSession == sessionID { refreshLogAfterOutput() }
+        case .finished(let value):
+            network.finished(value.id); replace(value)
+            let exited = applicationConnections[id]?.message == "App 已退出" || applicationConnections[id]?.candidate.map { !ApplicationDiscovery.isCurrent($0) } == true
+            applicationConnections[id]?.phase = .idle; applicationConnections[id]?.endpoint = nil; applicationConnections[id]?.devToolsURL = nil
+            applicationConnections[id]?.message = exited ? "App 已退出" : value.error == nil ? "已断开" : "连接已中断"
+            applicationLoggers[id] = nil; applicationWatchers[id]?.cancel(); applicationWatchers[id] = nil
+            if selectedSession == value.id { loadLog() }
+        }
+    }
+    func disconnectApplication(_ id: UUID) {
+        guard let logger = applicationLoggers[id] else { return }
+        applicationConnections[id]?.phase = .disconnecting; applicationConnections[id]?.message = "正在断开"
+        Task { await logger.disconnect() }
+    }
+    func removeApplication(_ id: UUID) {
+        guard applicationConnections[id]?.active != true else { error = "请先断开该应用，再从列表移除。"; return }
+        let old = config.applications
+        config.applications = applications.filter { $0.id != id }
+        guard persist() else { config.applications = old; return }
+        applicationConnections[id] = nil
+        if selectedApplication == id {
+            selectedApplication = nil; selectedSession = nil
+            if let next = applications.first { selectApplication(next) }
+            else if let next = config.projects.first { select(next) }
+            else { loadLog() }
+        }
+    }
+    func applicationIsLive(_ sessionID: UUID) -> Bool {
+        applicationConnections.values.contains { $0.active && $0.sessionID == sessionID }
+    }
+    func networkCaptureEnabled(for session: RunSession) -> Bool {
+        if let attachment = session.attachment { return applications.first { $0.id == attachment.application.id }?.networkCaptureEnabled == true }
+        return config.projects.first { $0.path == session.projectPath }?.networkCaptureEnabled == true
+    }
+    func setNetworkCaptureEnabled(_ enabled: Bool, session: RunSession) {
+        if let id = session.attachment?.application.id, let index = config.applications?.firstIndex(where: { $0.id == id }) {
+            let old = config.applications; config.applications?[index].networkCaptureEnabled = enabled
+            guard persist() else { config.applications = old; return }; network.setEnabled(enabled, projectID: id)
+        } else if let id = config.projects.first(where: { $0.path == session.projectPath })?.id { setNetworkCaptureEnabled(enabled, projectID: id) }
+    }
+    func openApplicationDevTools(_ id: UUID) {
+        guard let state = applicationConnections[id], state.active, let endpoint = state.endpoint else { return }
+        if let url = state.devToolsURL { NSWorkspace.shared.open(url); return }
+        Task {
+            do {
+                let url = try await devToolsServer.url(for: endpoint, extraPath: config.extraPath)
+                guard applicationConnections[id]?.endpoint == endpoint, applicationConnections[id]?.active == true else { return }
+                applicationConnections[id]?.devToolsURL = url; NSWorkspace.shared.open(url)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
     func setNetworkCaptureEnabled(_ enabled: Bool, projectID: UUID) {
         guard let index = config.projects.firstIndex(where: { $0.id == projectID }) else { return }
         let old = config.projects[index].networkCaptureEnabled
@@ -580,6 +710,9 @@ final class AppModel: ObservableObject {
         Task {
             // Wait for the cancelled scan to leave its chunk, then close handles
             // and remove the current disk index before completing normal quit.
+            for watcher in self.applicationWatchers.values { watcher.cancel() }
+            for logger in Array(self.applicationLoggers.values) { await logger.disconnect() }
+            await self.devToolsServer.stop()
             await logLoader.clear()
             await network.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
@@ -896,7 +1029,7 @@ struct MenuContent: View {
     @Environment(\.openWindow) private var openWindow
     @State private var listHeight: CGFloat = 0
     private var initialListHeight: CGFloat {
-        CGFloat(model.config.projects.count) * 48 + CGFloat(model.projectRuns.values.reduce(0) { $0 + $1.liveDevToolsURLs.count }) * 18
+        CGFloat(model.config.projects.count) * 48 + CGFloat(model.applications.count) * 48 + CGFloat(model.projectRuns.values.reduce(0) { $0 + $1.liveDevToolsURLs.count }) * 18
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -904,11 +1037,11 @@ struct MenuContent: View {
                 Label("Runbar", systemImage: "terminal").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("打开主界面") { openWindow(id: "manager"); NSApp.activate(ignoringOtherApps: true) }
-                    .accessibilityHint("打开项目、命令和运行日志管理窗口")
+                    .accessibilityHint("打开项目、应用监听和日志管理窗口")
             }.padding(.horizontal, 10).padding(.vertical, 7)
             Divider()
-            if model.config.projects.isEmpty {
-                Text("还没有项目，请先在主界面添加。")
+            if model.config.projects.isEmpty && model.applications.isEmpty {
+                Text("在主界面添加项目，或连接正在运行的 App。")
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             } else {
@@ -916,6 +1049,22 @@ struct MenuContent: View {
                     VStack(spacing: 0) {
                         ForEach(model.config.projects) { project in
                             ProjectMenuRow(model: model, project: project)
+                            Divider().padding(.horizontal, 10)
+                        }
+                        ForEach(model.applications) { application in
+                            HStack(spacing: 8) {
+                                Button {
+                                    model.selectApplication(application); model.showManagerWindow()
+                                } label: {
+                                    Label(application.name, systemImage: "app.connected.to.app.below.fill").lineLimit(1)
+                                }.buttonStyle(.plain)
+                                Spacer(minLength: 0)
+                                Text(model.applicationConnections[application.id]?.message ?? "未连接").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                if model.applicationConnections[application.id]?.active == true {
+                                    Button("断开") { model.disconnectApplication(application.id) }
+                                        .disabled(model.applicationConnections[application.id]?.phase == .disconnecting)
+                                }
+                            }.padding(.horizontal, 10).padding(.vertical, 8)
                             Divider().padding(.horizontal, 10)
                         }
                     }.background(GeometryReader { geometry in
@@ -934,7 +1083,7 @@ struct MenuContent: View {
                 Divider()
             }
             HStack {
-                Text(model.busy ? "\(model.activeCount) 个项目运行中" : "就绪")
+                Text(model.busy || model.attachmentCount > 0 ? "\(model.activeCount) 个项目运行 · \(model.attachmentCount) 个应用监听" : "就绪")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("退出") { NSApp.terminate(nil) }

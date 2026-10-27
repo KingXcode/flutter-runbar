@@ -102,6 +102,11 @@ Future<void> fixture() async {
       } else {
         request.response.write(jsonEncode({'echo': body}));
       }
+    } else if (request.uri.path == '/logs') {
+      stdout.writeln('ATTACH_STDOUT_中文🚀');
+      stderr.writeln('ATTACH_STDERR_OK');
+      developer.log('ATTACH_LOGGING_${'long-value-' * 1000}', name: 'runbar.fixture');
+      request.response.write('{"ok":true}');
     } else if (request.uri.path == '/trigger') {
       final delay = request.uri.queryParameters['delay'] ?? '0';
       final call = await client.postUrl(Uri.parse('http://127.0.0.1:${server.port}/echo?delay=$delay'));

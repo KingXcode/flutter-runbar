@@ -47,6 +47,7 @@ public struct Configuration: Codable {
     public var projects: [Project] = []
     public var extraPath: String = CommandEnvironment.extraPath("")
     public var logPreferences: LogPreferences?
+    public var applications: [ApplicationTarget]?
     public init() {}
     @discardableResult
     public mutating func removeProject(_ id: UUID, activeProjectIDs: Set<UUID>) throws -> Project? {
@@ -55,8 +56,8 @@ public struct Configuration: Codable {
         return projects.remove(at: index)
     }
 }
-public enum RunStatus: String, Codable { case running, succeeded, failed, stopped, interrupted, cancelled }
-public struct RunSession: Codable, Identifiable {
+public enum RunStatus: String, Codable, Sendable { case running, succeeded, failed, stopped, interrupted, cancelled }
+public struct RunSession: Codable, Identifiable, Sendable {
     public var id: UUID
     public var projectPath: String
     public var command: String
@@ -67,10 +68,36 @@ public struct RunSession: Codable, Identifiable {
     public var status: RunStatus
     public var devToolsURLs: [String] = []
     public var error: String?
+    public var attachment: ApplicationAttachment?
+    public var sourceName: String { attachment?.application.name ?? URL(fileURLWithPath: projectPath).lastPathComponent }
+    public var sourceKey: String { attachment.map { "app:" + $0.application.id.uuidString } ?? projectPath }
+    public func belongs(to application: ApplicationTarget) -> Bool { attachment?.application.id == application.id }
     public init(projectPath: String, command: String) {
         id = UUID(); self.projectPath = projectPath; self.command = command
         startedAt = Date(); status = .running
     }
+}
+
+/// A saved application identity is independent of its current PID or source code.
+public struct ApplicationTarget: Codable, Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var bundleIdentifier: String?
+    public var bundlePath: String
+    public var networkCaptureEnabled: Bool
+    public init(id: UUID = UUID(), name: String, bundleIdentifier: String?, bundlePath: String, networkCaptureEnabled: Bool = true) {
+        self.id = id; self.name = name; self.bundleIdentifier = bundleIdentifier
+        self.bundlePath = URL(fileURLWithPath: bundlePath).standardizedFileURL.resolvingSymlinksInPath().path
+        self.networkCaptureEnabled = networkCaptureEnabled
+    }
+    public func matches(_ other: ApplicationTarget) -> Bool {
+        bundleIdentifier == other.bundleIdentifier && bundlePath == other.bundlePath
+    }
+}
+public struct ApplicationAttachment: Codable, Equatable, Sendable {
+    public var application: ApplicationTarget
+    public var processID: Int32
+    public init(application: ApplicationTarget, processID: Int32) { self.application = application; self.processID = processID }
 }
 public struct OutputEvent: Codable {
     public let sequence: Int

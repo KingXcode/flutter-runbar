@@ -19,7 +19,7 @@ public struct HTTPVMServiceTransport: VMServiceTransport {
     private let limit: Int
     public init(limit: Int = NetworkLimits().responseBytes) { self.limit = limit }
     public func call(endpoint: VMServiceEndpoint, method: String, parameters: [String: String]) async throws -> Data {
-        guard method.allSatisfy({ $0.isLetter || $0 == "." }), !method.isEmpty,
+        guard method.allSatisfy({ $0.isLetter || $0 == "." || $0 == "_" }), !method.isEmpty,
               var parts = URLComponents(url: endpoint.url.appendingPathComponent(method), resolvingAgainstBaseURL: false) else { throw VMServiceError.invalidResponse }
         parts.queryItems = parameters.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         guard let url = parts.url else { throw VMServiceError.invalidResponse }

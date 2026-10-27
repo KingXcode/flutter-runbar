@@ -110,6 +110,7 @@ public struct NetworkBodyPage: Sendable {
 public struct VMServiceEndpoint: Equatable, Sendable {
     public let url: URL
     public init?(_ value: String) {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.utf8.count <= 16_384, var parts = URLComponents(string: value) else { return nil }
         if let nested = parts.queryItems?.first(where: { $0.name == "uri" })?.value {
             guard let parsed = URLComponents(string: nested) else { return nil }; parts = parsed

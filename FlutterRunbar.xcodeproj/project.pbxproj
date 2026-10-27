@@ -12,6 +12,7 @@
 		286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC0C281B047474B3C8BE784 /* LogToolsView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
 		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
@@ -22,6 +23,7 @@
 		7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */; };
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
 		861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */; };
+		8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
 		A803486EBC6D49F61DC76278 /* LogTailReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */; };
 		B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */; };
@@ -45,6 +47,7 @@
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
+		4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentView.swift; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
 		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
@@ -59,6 +62,7 @@
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
+		ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
@@ -107,6 +111,7 @@
 		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
 			isa = PBXGroup;
 			children = (
+				ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */,
 				92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */,
 				DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */,
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
@@ -177,6 +182,7 @@
 		AF3C5D6C143F2EE52CA4BF57 /* FlutterRunbar */ = {
 			isa = PBXGroup;
 			children = (
+				4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */,
 				614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */,
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
 				2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */,
@@ -304,6 +310,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */,
 				63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */,
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
 				6326D10ABC37026E77E5AD7D /* GlobalHotKey.swift in Sources */,
@@ -320,6 +327,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */,
 				185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */,
 				4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */,
 				638995230949F6C246161705 /* CoreTests.swift in Sources */,

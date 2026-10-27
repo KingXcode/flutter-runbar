@@ -133,16 +133,19 @@ struct NetworkPanel: View {
     let session: RunSession
     @StateObject private var data = NetworkPanelModel()
     @State private var confirmingClear = false
-    private var project: Project? { model.config.projects.first { $0.path == session.projectPath } }
-    private var enabled: Bool { project?.networkCaptureEnabled == true }
+    private var enabled: Bool { model.networkCaptureEnabled(for: session) }
+    private var sourceExists: Bool {
+        if let id = session.attachment?.application.id { return model.applications.contains { $0.id == id } }
+        return model.config.projects.contains { $0.path == session.projectPath }
+    }
     private var state: NetworkMonitor.State? { monitor.states[session.id] }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 Toggle("网络采集", isOn: Binding(get: { enabled }, set: { value in
-                    if let project { model.setNetworkCaptureEnabled(value, projectID: project.id) }
-                })).toggleStyle(.checkbox).fixedSize().disabled(project == nil)
-                    .help("自动保存当前项目的开关。暂停新增请求时，已记录的正文继续补齐；关闭开关停止读取，目标缓冲可能继续记录。")
+                    model.setNetworkCaptureEnabled(value, session: session)
+                })).toggleStyle(.checkbox).fixedSize().disabled(!sourceExists)
+                    .help("自动保存当前项目或应用的采集开关。暂停新增请求时，已记录的正文继续补齐；关闭开关停止读取，目标缓冲可能继续记录。")
                 Text(state?.text ?? "本地历史缓存").font(.caption).foregroundStyle(state?.error == true ? .red : .secondary)
                     .lineLimit(1).help(state?.text ?? "已缓存的请求可在进程退出后查看")
                 Spacer(minLength: 0)

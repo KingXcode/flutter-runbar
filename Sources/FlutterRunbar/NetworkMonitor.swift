@@ -34,6 +34,7 @@ final class NetworkMonitor: ObservableObject {
     private var finishing: [UUID: Task<Void, Never>] = [:]
     private var root: URL?
     var onFinished: (() -> Void)?
+    var knownEndpoints: [VMServiceEndpoint] { runtimes.values.compactMap(\.endpoint) }
     func configure(root: URL) { self.root = root }
     func directory(_ id: UUID) -> URL? { root?.appendingPathComponent("sessions/\(id.uuidString)/network", isDirectory: true) }
     func started(projectID: UUID, sessionID: UUID, enabled: Bool) {

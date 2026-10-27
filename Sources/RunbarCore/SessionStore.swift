@@ -78,7 +78,7 @@ public final class SessionStore {
     public func recoverInterrupted() throws {
         for var session in try sessions() where session.status == .running {
             session.status = .interrupted
-            session.error = "上次应用异常结束；真实结束时间未知。请自行检查终端进程，应用不会终止历史 PID。"
+            session.error = session.attachment == nil ? "上次应用异常结束；真实结束时间未知。请自行检查终端进程，应用不会终止历史 PID。" : "上次监听异常结束；已保留本地记录，不会根据历史 PID 自动连接或退出应用。"
             try save(session)
         }
     }
