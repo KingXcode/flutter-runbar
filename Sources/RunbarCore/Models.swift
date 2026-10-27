@@ -21,6 +21,7 @@ public struct Project: Codable, Identifiable, Equatable {
     public var path: String
     public var presets: [CommandPreset] = []
     public var kind: ProjectKind
+    public var networkCaptureEnabled: Bool?
     // Optional preserves decoding of configurations written before per-project selection.
     public var selectedPresetID: UUID?
     // Virtual built-in keeps legacy JSON and saved custom commands untouched.
@@ -31,7 +32,7 @@ public struct Project: Codable, Identifiable, Equatable {
         self.path = path; self.presets = presets
         self.kind = kind ?? ProjectDetector.detect(at: path)
     }
-    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID }
+    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID, networkCaptureEnabled }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
@@ -39,6 +40,7 @@ public struct Project: Codable, Identifiable, Equatable {
         presets = try values.decode([CommandPreset].self, forKey: .presets)
         selectedPresetID = try values.decodeIfPresent(UUID.self, forKey: .selectedPresetID)
         kind = try values.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? ProjectDetector.detect(at: path)
+        networkCaptureEnabled = try values.decodeIfPresent(Bool.self, forKey: .networkCaptureEnabled)
     }
 }
 public struct Configuration: Codable {

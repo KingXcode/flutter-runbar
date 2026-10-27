@@ -9,11 +9,13 @@ macOS 26+ 的原生 SwiftUI 菜单栏项目命令工具。可为任意项目目�
 - 自动识别 Flutter、Xcode、Android、Swift Package、Node.js、Python、Rust、Go、Dart、Gradle；可手动调整项目类型或重新识别。
 - 在项目目录中执行你明确保存的命令；每个项目同一时刻只允许运行一条，不同项目可以同时运行。
 - 菜单栏项目列表：每行项目名、独立命令选择、运行、停止；本次运行识别出的 DevTools 地址显示在该项目下面，点击后打开。保留「打开主界面」。列表支持滚动、长文本省略与辅助功能标签。
+- 默认全局 F3 呼出主界面，同时前置本次运行的 macOS 应用；在设置中点击录制其他快捷键，可关闭并自动保留配置。部分键盘需配合 Fn。
 - 保存每次运行的命令快照、开始/结束时间、持续时间、状态、退出码。
 - 连续读取合并的 stdout/stderr，保存全部原始字节及有顺序号的接收时间索引。
 - 实时日志窗口、历史日志、本地日志目录入口。显示窗口有内存上限，磁盘日志不截断。
 - 可勾选显示 / 隐藏每行输出的接收时间，时间侧栏不影响正文搜索或复制。运行详细信息默认折叠。
 - 日志使用最多 1 MB 的滚动窗口；上下滚动会自动读取相邻内容，右侧滚动条表示整份日志的字节进度，可直接拖到任意位置、最早或最新。自动跟随、换行和展开日志均可切换。
+- 日志状态仅显示原始日志总大小和当前阅读位置百分比；应用筛选时百分比按筛选结果计算，总大小仍为原始日志。
 - 输出支持多个包含、排除关键词和起止时间筛选。小浮层内回车生效，点 × 移除；最近关键词和整组方案可一键复用、删除，条件自动保存。
 - `⌘F` 搜索完整日志，显示总数和当前序号，支持上一个 / 下一个、Enter / Shift+Enter 和命中高亮。搜索不受筛选限制，查看隐藏行时明确显示搜索上下文，可返回筛选结果。
 - 筛选与搜索在后台按 64 KB 分块扫描，结果位置索引保存在磁盘；运行中只扫描新增内容，超长行与海量命中不会整份驻留内存。详见 [日志筛选与搜索](docs/log-query.md)。
@@ -21,6 +23,8 @@ macOS 26+ 的原生 SwiftUI 菜单栏项目命令工具。可为任意项目目�
 - DevTools 由你点击打开或复制，不自动打开；历史运行的打开按钮禁用。
 - 停止采用独立进程组 SIGINT → 3 秒后 SIGTERM → 6 秒后 SIGKILL，不使用 killall。
 - 退出时若仍有命令运行，明确询问并等待所有项目停止和各自日志保存；异常退出留下的记录标为中断，不追杀历史 PID。
+
+DevTools 网络请求采集的接口与独立原型验证见 [可行性分析](docs/devtools-network-capture.md)。当前尚未在应用界面启用网络采集。
 
 ## 运行环境
 
@@ -149,7 +153,7 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 
 | 项目类型 | 模板来源及示例 |
 | --- | --- |
-| Flutter | `pubspec.yaml` 中的 Flutter SDK 依赖；运行 macOS/Chrome、依赖、检查、测试、格式化及各平台构建。FVM 仅是这一类模板的可选前缀。 |
+| Flutter | `pubspec.yaml` 中的 Flutter SDK 依赖；运行 macOS/Chrome 可选 Debug、Profile、Release，另有依赖、检查、测试、格式化及各平台构建。FVM 仅是这一类模板的可选前缀。 |
 | Xcode | 根目录 `.xcodeproj` / `.xcworkspace`；列出 Scheme、查看模拟器，为找到的共享 Scheme 生成构建命令。多个容器时不猜测目标，需自行补充参数。 |
 | Android | Android Manifest 或 Gradle Android 插件；列出任务、Debug APK、Lint、测试、清理。存在 `gradlew` 时优先使用 Wrapper。 |
 | Swift Package | `Package.swift`；构建、Release、测试、解析依赖和清理。 |
@@ -164,6 +168,8 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 
 命令参考：[Flutter CLI](https://docs.flutter.dev/reference/flutter-cli)、[Xcode 命令行工具](https://developer.apple.com/documentation/xcode/xcode-command-line-tool-reference)、[Gradle CLI](https://docs.gradle.org/current/userguide/command_line_interface.html)、[Swift Package](https://docs.swift.org/swiftpm/documentation/packagemanagerdocs/)、[npm scripts](https://docs.npmjs.com/cli/v7/commands/npm-run-script/)。
 
+Flutter 项目添加命令时，选择运行模板和运行模式，再点「填入下方编辑区」，会生成带 `--debug` / `--profile` / `--release` 的命令和对应名称。三个模式可分别保存，也可继续编辑设备 ID、flavor、入口文件等参数；已有命令不会被自动改写。模式支持范围以当前 Flutter 工具链和目标设备为准，参考 [Flutter 构建模式](https://docs.flutter.dev/testing/build-modes)。
+
 
 ### 清空 macOS App 沙盒（内置操作）
 
@@ -177,3 +183,9 @@ Flutter 类型项目的命令列表（主界面与菜单栏）提供「清空 ma
 - 操作结果保存在本地历史与日志中，取消显示「已取消」，不是成功。原生操作没有 shell 退出码。移到废纸篓不等于彻底恢复出厂；下次启动通常重建容器。恢复前先退出 App，再在 Finder 中从废纸篓放回。
 
 验证时只使用临时测试容器和替身签名/运行/废纸篓服务，不操作真实应用数据。真实 macOS 容器访问和恢复行为仍需在用户明确同意的测试 App 上验收。
+
+### 网络请求采集
+
+输出面板切换到「网络」，勾选「网络采集」即可记住当前项目的开关。连接到运行进程的 Dart VM Service 后，显示 HTTP / HTTPS 请求、Headers、请求 / 响应正文，并提供地址、方法、状态筛选和分页历史。已缓存数据绑定运行记录，程序退出后仍可查看。默认每个方向的正文最多 1 MiB，每次运行正文合计 128 MiB、摘要最多 50,000 条；缺失和超限内容有明确标记。
+
+支持范围、启动阶段采集、暂停 / 清理目标缓冲的区别及容量验证见 [网络采集说明](docs/devtools-network-capture.md)。Flutter Web、WebView、未接入 profiling 的原生网络请求和 WebSocket 不在本版采集范围。

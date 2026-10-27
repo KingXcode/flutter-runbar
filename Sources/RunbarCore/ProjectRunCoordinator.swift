@@ -30,6 +30,10 @@ public enum DevToolsLink {
 public protocol ProjectCommandRunning: AnyObject {
     func start(project: Project, preset: CommandPreset, extraPath: String)
     func stop()
+    func runningProcessID() async -> Int32?
+}
+public extension ProjectCommandRunning {
+    func runningProcessID() async -> Int32? { nil }
 }
 extension ProcessRunner: ProjectCommandRunning {
     public func start(project: Project, preset: CommandPreset, extraPath: String) {
@@ -48,6 +52,7 @@ public final class ProjectRunCoordinator {
         case updated(UUID, RunSession)
         case finished(UUID, RunSession)
         case failure(UUID, String)
+        case service(projectID: UUID, sessionID: UUID, endpoint: VMServiceEndpoint)
     }
     public typealias Factory = (SessionStore, @escaping (ProcessRunner.Event) -> Void) -> ProjectCommandRunning
     public var onEvent: ((Event) -> Void)?
@@ -103,6 +108,18 @@ public final class ProjectRunCoordinator {
     public func stopAll() {
         for id in Array(runners.keys) { stop(projectID: id) }
     }
+    public func activeProcesses() async -> [ActiveProjectProcess] {
+        var result: [ActiveProjectProcess] = []
+        let snapshots = runners.compactMap { id, runner -> (UUID, UUID, RunSession, ProjectCommandRunning)? in
+            guard state(for: id).isBusy, let session = state(for: id).session, let generation = generations[id] else { return nil }
+            return (id, generation, session, runner)
+        }
+        for (id, generation, session, runner) in snapshots {
+            guard let pid = await runner.runningProcessID(), pid > 1, generations[id] == generation, state(for: id).isBusy else { continue }
+            result.append(ActiveProjectProcess(projectID: id, sessionID: session.id, projectPath: session.projectPath, startedAt: session.startedAt, processID: pid))
+        }
+        return result
+    }
     private func update(_ id: UUID, _ state: ProjectRunState) {
         states[id] = state; onEvent?(.stateChanged(id, state))
     }
@@ -131,6 +148,9 @@ public final class ProjectRunCoordinator {
         case .updated(let session):
             guard state.session?.id == session.id else { return }
             state.session = session; update(projectID, state); onEvent?(.updated(projectID, session))
+        case .service(let endpoint):
+            guard state.phase == .running, let session = state.session else { return }
+            onEvent?(.service(projectID: projectID, sessionID: session.id, endpoint: endpoint))
         case .finished(let session):
             // Launch failure can finish without .started; generation still owns it.
             clear(projectID, error: session.error); onEvent?(.finished(projectID, session))

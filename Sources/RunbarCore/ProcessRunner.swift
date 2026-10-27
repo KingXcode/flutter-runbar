@@ -7,7 +7,7 @@ import Glibc
 #endif
 
 public final class ProcessRunner: @unchecked Sendable {
-    public enum Event { case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String) }
+    public enum Event { case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String), service(VMServiceEndpoint) }
     private let queue = DispatchQueue(label: "runbar.process")
     private let outputLock = NSLock()
     private var pendingOutput = ""
@@ -21,6 +21,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var log: RunLog?
     private var parser = OutputParser()
+    private var serviceDiscovery = VMServiceDiscovery()
     private var start = DispatchTime.now()
     private var stopTime: DispatchTime?
     private var stopStage = 0
@@ -60,7 +61,7 @@ public final class ProcessRunner: @unchecked Sendable {
             let error = rb_spawn(shell, preset.command, project.path, CommandEnvironment.extraPath(extraPath), &child, &output)
             guard error == 0 else { throw RunbarError.message("启动失败：\(String(cString: strerror(error)))") }
             pid = child; session = next; pipeEnded = false; stopped = false
-            parser = OutputParser(); start = .now(); stopTime = nil; stopStage = 0
+            parser = OutputParser(); serviceDiscovery = VMServiceDiscovery(); start = .now(); stopTime = nil; stopStage = 0
             emit(.started(next))
             let source = DispatchSource.makeTimerSource(queue: queue)
             source.schedule(deadline: .now(), repeating: .milliseconds(100))
@@ -102,6 +103,7 @@ public final class ProcessRunner: @unchecked Sendable {
         do { try log?.append(data) } catch { loggingFailed("日志写入失败，正在停止命令。日志可能不完整：\(error.localizedDescription)") }
         let parsed = parser.consume(data)
         emit(.output(parsed.text)); addURLs(parsed.urls)
+        for endpoint in serviceDiscovery.consume(parsed.text) { emit(.service(endpoint)) }
     }
     private func addURLs(_ urls: [String]) {
         guard !urls.isEmpty, var value = session, value.devToolsURLs.count < 32 else { return }
@@ -116,6 +118,11 @@ public final class ProcessRunner: @unchecked Sendable {
         session?.error = message; emit(.failure(message)); requestStop()
     }
     public func stop() { queue.async { self.requestStop() } }
+    public func runningProcessID() async -> Int32? {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: self.session != nil && self.pid > 1 ? self.pid : nil) }
+        }
+    }
     private func requestStop() {
         guard session != nil, stopTime == nil else { return }
         stopped = true; stopTime = .now(); stopStage = 1
@@ -148,6 +155,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private func finish(code: Int32?) {
         timer?.cancel(); timer = nil
         let final = parser.consume(Data(), final: true); emit(.output(final.text)); addURLs(final.urls)
+        for endpoint in serviceDiscovery.consume(final.text, final: true) { emit(.service(endpoint)) }
         guard var value = session else { return }
         value.endedAt = Date(); value.duration = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e9
         value.exitCode = code

@@ -4,15 +4,7 @@ import RunbarCore
 
 struct ManagerView: View {
     @ObservedObject var model: AppModel
-    @State private var editing = false
-    @State private var editingID: UUID?
-    @State private var editingProjectID: UUID?
-    @State private var presetName = ""
-    @State private var command = ""
-    @State private var templates: [CommandTemplate] = []
-    @State private var templateID: String?
-    @State private var useFVM = true
-    @State private var editorError: String?
+    @State private var commandEditor: CommandEditorRequest?
     @State private var showingSettings = false
     @State private var metadataHeight: CGFloat = 0
     @State private var showingLogDetails = false
@@ -22,6 +14,7 @@ struct ManagerView: View {
     @State private var showingSessionDeletion = false
     @State private var pendingProjectRemoval: Project?
     @State private var expandedLog = false
+    @State private var showingNetwork = false
     @AppStorage("logWrapsLines") private var logWrapsLines = false
     private var projectHistory: [RunSession] {
         guard let path = model.project?.path else { return [] }
@@ -105,21 +98,8 @@ struct ManagerView: View {
             }
             #endif
         }
-        .sheet(isPresented: $editing) {
-            VStack(alignment: .leading, spacing: 12) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                Text(editingID == nil ? "添加命令" : "编辑命令").font(.title2)
-                if editingID == nil { templatePicker }
-                TextField("名称", text: $presetName)
-                TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
-                Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let editorError { Text(editorError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(height: editingID == nil ? 420 : 280)
-                HStack { Spacer(); Button("取消") { editing = false }; Button("保存") { if model.savePreset(name: presetName, command: command, id: editingID, projectID: editingProjectID) { editing = false } else { editorError = model.error ?? "项目正在运行或不可用，暂时无法保存。"; model.error = nil } }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-            }.padding(24).frame(width: 520)
+        .sheet(item: $commandEditor) { request in
+            CommandEditorView(model: model, request: request)
         }
         .sheet(isPresented: $showingSettings) {
             VStack(alignment: .leading, spacing: 16) {
@@ -128,6 +108,17 @@ struct ManagerView: View {
                 Toggle("在 Dock 中显示", isOn: Binding(get: { model.showInDock }, set: { model.setDockVisibility($0) }))
                 Text("切换立即生效并自动保存。关闭后仍可从菜单栏打开 Runbar。")
                     .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Text("全局快捷键").font(.headline)
+                HStack {
+                    Toggle("呼出 Runbar 与运行中的应用", isOn: Binding(get: { model.globalShortcut.enabled }, set: model.setGlobalShortcutEnabled))
+                    Spacer()
+                    GlobalShortcutRecorder(shortcut: model.globalShortcut.shortcut, onChange: model.setGlobalShortcut, onRecording: model.setShortcutRecording)
+                        .frame(width: 190, height: 26)
+                }
+                Text("默认 F3；点击右侧录制新快捷键，Esc 取消。部分键盘需配合 Fn。仅前置本次运行的 macOS 应用，终端任务没有独立窗口。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let message = model.globalShortcutError { Text(message).font(.caption).foregroundStyle(.red) }
                 Divider()
                 Text("命令环境").font(.headline)
                 Text("额外 PATH（冒号分隔；支持完整路径和 ~/）")
@@ -194,11 +185,11 @@ struct ManagerView: View {
                         if project.presets.isEmpty { Text("选择命令").tag(Optional<UUID>.none) }
                         ForEach(project.availablePresets) { preset in Text(preset.name).tag(Optional(preset.id)) }
                     }.labelsHidden().frame(minWidth: 110, maxWidth: 160).disabled(model.selectedState.isBusy)
-                    Button { beginAddingCommand(for: project) } label: { Image(systemName: "plus") }
+                    Button { commandEditor = CommandEditorRequest(project: project) } label: { Image(systemName: "plus") }
                         .disabled(model.selectedState.isBusy).help("添加常用模板或自定义命令").accessibilityLabel("添加命令或常用模板")
                     Button {
                         guard let preset = model.preset else { return }
-                        editorError = nil; editingProjectID = project.id; editingID = preset.id; presetName = preset.name; command = preset.command; editing = true
+                        commandEditor = CommandEditorRequest(project: project, preset: preset)
                     } label: { Image(systemName: "pencil") }
                         .disabled(model.preset == nil || model.preset?.builtInAction != nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
                     Text(model.preset?.displayCommand ?? "尚未配置命令")
@@ -217,43 +208,6 @@ struct ManagerView: View {
                 }.controlSize(.small)
             }
         }.padding(.horizontal, 12).padding(.vertical, 10)
-    }
-
-    private func beginAddingCommand(for project: Project) {
-        editorError = nil; editingProjectID = project.id; editingID = nil
-        presetName = ""; command = ""
-        templates = CommandTemplate.templates(for: project)
-        templateID = templates.first?.id; useFVM = project.kind == .flutter
-        editing = true
-    }
-
-    @ViewBuilder
-    private var templatePicker: some View {
-        if templates.isEmpty {
-            Text("此项目没有预设模板，请直接填写自定义命令。")
-                .font(.caption).foregroundStyle(.secondary)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Picker("常用模板", selection: $templateID) {
-                        ForEach(templates) { template in Text(template.name).tag(Optional(template.id)) }
-                    }
-                    if templates.first(where: { $0.id == templateID })?.supportsFVM == true {
-                        Toggle("使用 FVM", isOn: $useFVM).fixedSize()
-                    }
-                }
-                if let template = templates.first(where: { $0.id == templateID }) {
-                    Text(template.command(useFVM: useFVM)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    Text(template.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("填入下方编辑区") {
-                        presetName = template.name; command = template.command(useFVM: useFVM)
-                    }.help("替换下方草稿，不保存也不执行；可继续编辑")
-                }
-                Text("模板仅供选择和编辑，保存后仍需手动运行；所需工具链请自行安装。")
-                    .font(.caption2).foregroundStyle(.secondary)
-                Divider()
-            }
-        }
     }
 
     private var historyPane: some View {
@@ -396,28 +350,33 @@ struct ManagerView: View {
                 } else if let error = session.error {
                     Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red).lineLimit(1).help(error)
                 }
-                LogToolsView(model: model)
-                logNavigation
-                LogView(page: model.logPage, totalBytes: model.logTotalBytes, wrapsLines: logWrapsLines,
-                        scrollRevision: model.logScrollRevision, placement: model.logScrollPlacement,
-                        followsOutput: model.logFollowing, loading: model.logNavigating, highlight: model.logSearchHighlight,
-                        showsTimestamps: model.logShowsTimestamps, timeMarks: model.logTimeMarks,
-                        onScrollAway: model.pauseLogFollowing, onLoadWindow: model.shiftLogWindow, onSeek: model.seekLog)
-                    .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.65)))
-                    .overlay {
-                        if model.logPage?.text.isEmpty == true, !model.logQueryBusy, !model.logFilter.isEmpty, !model.logSearchContext {
-                            Text("没有匹配的日志，请调整筛选条件").font(.caption).foregroundStyle(.secondary).allowsHitTesting(false)
+                if showingNetwork {
+                    NetworkPanel(model: model, monitor: model.network, session: session)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    LogToolsView(model: model) { logNavigation }
+                    LogView(page: model.logPage, totalBytes: model.logTotalBytes, wrapsLines: logWrapsLines,
+                            scrollRevision: model.logScrollRevision, placement: model.logScrollPlacement,
+                            followsOutput: model.logFollowing, loading: model.logNavigating, highlight: model.logSearchHighlight,
+                            showsTimestamps: model.logShowsTimestamps, timeMarks: model.logTimeMarks,
+                            onScrollAway: model.pauseLogFollowing, onLoadWindow: model.shiftLogWindow, onSeek: model.seekLog,
+                            onProgress: { model.reportLogPosition($0, sessionID: session.id) })
+                        .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(nsColor: .separatorColor).opacity(0.65)))
+                        .overlay {
+                            if model.logPage?.text.isEmpty == true, !model.logQueryBusy, !model.logFilter.isEmpty, !model.logSearchContext {
+                                Text("没有匹配的日志，请调整筛选条件").font(.caption).foregroundStyle(.secondary).allowsHitTesting(false)
+                            }
                         }
+                    if let path = model.selectedOutputPath {
+                        Text(path).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(path)
+                            .accessibilityLabel("当前日志文件 \(path)")
                     }
-                if let path = model.selectedOutputPath {
-                    Text(path).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(path)
-                        .accessibilityLabel("当前日志文件 \(path)")
-                }
-                if model.selectedOutputFile == nil {
-                    Text("这次运行的日志文件不存在或尚未创建。").font(.caption).foregroundStyle(.secondary)
+                    if model.selectedOutputFile == nil {
+                        Text("这次运行的日志文件不存在或尚未创建。").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 VStack(spacing: 10) {
@@ -475,7 +434,10 @@ struct ManagerView: View {
 
     private var logTitle: some View {
         HStack(spacing: 8) {
-            Label("输出日志", systemImage: "terminal").font(.system(size: 13, weight: .semibold))
+            Picker("输出内容", selection: $showingNetwork) {
+                Label("日志", systemImage: "terminal").tag(false)
+                Label("网络", systemImage: "network").tag(true)
+            }.pickerStyle(.segmented).labelsHidden().frame(width: 140).accessibilityLabel("日志与网络切换")
             if let session = model.session { SessionBadge(status: session.status) }
             Button { expandedLog.toggle() } label: {
                 Image(systemName: expandedLog ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
@@ -497,10 +459,10 @@ struct ManagerView: View {
             Button(model.logHasNewOutput ? "最新 · 有新输出" : "最新") { model.showLog(.latest) }
                 .disabled(model.logNavigating)
             if model.logShowsLoading { ProgressView().controlSize(.mini) }
-            if let page = model.logPage {
-                Text("\(!model.logFilter.isEmpty && !model.logSearchContext ? "筛选结果 " : "")\(logSize(page.startOffset))–\(logSize(page.endOffset)) / \(logSize(model.logTotalBytes))")
+            if model.logPage != nil {
+                Text("总 \(logSize(model.logSourceBytes)) · \(model.logPositionPercent)%")
                     .monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-                    .help("内存中的范围 / 当前显示内容总大小；应用筛选时按筛选结果计算进度。上下滚动自动读取，原始日志保留完整输出。")
+                    .help("原始日志总大小；百分比表示当前阅读位置，应用筛选时按筛选结果计算位置。最早为 0%，最新为 100%。")
             }
         }
     }

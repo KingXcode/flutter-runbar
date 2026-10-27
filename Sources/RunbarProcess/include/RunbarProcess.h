@@ -8,4 +8,6 @@ int rb_signal(pid_t pid, int signal_number);
 int rb_wait(pid_t pid, int *exit_code);
 // 0: running, 1: reaped, negative errno: error.
 int rb_poll(pid_t pid, int *exit_code);
+// Read-only parent lookup. Returns 0 if the process is gone or unavailable.
+pid_t rb_parent_process(pid_t pid);
 #endif

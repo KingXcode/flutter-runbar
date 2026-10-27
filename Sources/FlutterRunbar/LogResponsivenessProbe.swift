@@ -24,6 +24,9 @@ final class LogResponsivenessProbe {
         let report: [String: Any] = [
             "activationPolicy": NSApp.activationPolicy().rawValue,
             "showInDock": UserDefaults.standard.bool(forKey: "showInDock"),
+            "shortcutInvocations": AppModel.shared.shortcutInvocationCount,
+            "shortcutRegistrationError": AppModel.shared.globalShortcutError ?? "",
+            "appActive": NSApp.isActive,
             "samples": samples.count, "ticks": ticks,
             "p95DelayMs": sorted[Int(Double(sorted.count - 1) * 0.95)],
             "maxDelayMs": sorted.last ?? 0,

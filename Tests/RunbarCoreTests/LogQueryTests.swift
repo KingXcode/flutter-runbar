@@ -143,6 +143,96 @@ final class LogQueryTests: XCTestCase {
         }.value
         XCTAssertEqual(try worker.update(url, filter: LogFilter(), query: "A", isLive: false).matchCount, 4 * UInt64(LogQueryProcessor.chunkBytes))
     }
+    func testMultiplePresetsUnionAndDeselectPreserveSharedCustomConditions() throws {
+        var preferences = LogPreferences()
+        let base = LogFilter(includes: ["custom", "shared"], excludes: ["base-hidden"])
+        try preferences.apply(base)
+        let first = LogFilterPreset(name: "一", filter: LogFilter(includes: ["shared", "WARN"], excludes: ["debug"]))
+        let second = LogFilterPreset(name: "二", filter: LogFilter(includes: ["ERROR", "WARN"], excludes: ["secret", "debug"]))
+        preferences.presets = [first, second]
+        try preferences.togglePreset(first.id); try preferences.togglePreset(second.id)
+        XCTAssertEqual(preferences.selectedPresetIDs, [first.id, second.id])
+        XCTAssertEqual(preferences.filter.includes, ["custom", "shared", "WARN", "ERROR"])
+        XCTAssertEqual(preferences.filter.excludes, ["base-hidden", "debug", "secret"])
+        XCTAssertTrue(preferences.keywords.contains("ERROR"))
+        var restored = try JSONDecoder().decode(LogPreferences.self, from: JSONEncoder().encode(preferences))
+        XCTAssertEqual(restored, preferences)
+        try restored.togglePreset(first.id)
+        XCTAssertEqual(restored.filter.includes, ["custom", "shared", "ERROR", "WARN"])
+        XCTAssertEqual(restored.filter.excludes, ["base-hidden", "secret", "debug"])
+        try restored.togglePreset(second.id)
+        XCTAssertEqual(restored.filter, base)
+        XCTAssertTrue(restored.selectedPresetIDs.isEmpty)
+    }
+    func testCombinedPresetTimeIntersectionRejectsConflictAtomically() throws {
+        func time(_ value: Double) -> Date { Date(timeIntervalSince1970: value) }
+        var preferences = LogPreferences()
+        try preferences.apply(LogFilter(from: time(100), through: time(300)))
+        let a = LogFilterPreset(name: "A", filter: LogFilter(from: time(150), through: time(250)))
+        let b = LogFilterPreset(name: "B", filter: LogFilter(from: time(200), through: time(280)))
+        let conflict = LogFilterPreset(name: "无交集", filter: LogFilter(from: time(301)))
+        preferences.presets = [a, b, conflict]
+        try preferences.togglePreset(a.id); try preferences.togglePreset(b.id)
+        XCTAssertEqual(preferences.filter, LogFilter(from: time(200), through: time(250)))
+        XCTAssertTrue(preferences.filter.contains(time(200)))
+        XCTAssertTrue(preferences.filter.contains(time(250)))
+        let old = preferences
+        XCTAssertThrowsError(try preferences.togglePreset(conflict.id))
+        XCTAssertEqual(preferences, old)
+        try preferences.togglePreset(a.id)
+        XCTAssertEqual(preferences.filter, LogFilter(from: time(200), through: time(280)))
+        try preferences.removePreset(b.id)
+        XCTAssertEqual(preferences.filter, LogFilter(from: time(100), through: time(300)))
+        XCTAssertTrue(preferences.selectedPresetIDs.isEmpty)
+    }
+    func testPresetSelectionLimitsAndManualEditAndClear() throws {
+        var preferences = LogPreferences()
+        let a = LogFilterPreset(name: "A", filter: LogFilter(includes: (0..<32).map(String.init)))
+        let b = LogFilterPreset(name: "B", filter: LogFilter(includes: ["overflow"]))
+        preferences.presets = [a, b]
+        try preferences.togglePreset(a.id)
+        let old = preferences
+        XCTAssertThrowsError(try preferences.togglePreset(b.id))
+        XCTAssertEqual(preferences, old)
+        XCTAssertThrowsError(try preferences.togglePreset(UUID()))
+        XCTAssertEqual(preferences, old)
+        var edited = preferences.filter; edited.includes.removeLast()
+        try preferences.apply(edited)
+        XCTAssertTrue(preferences.selectedPresetIDs.isEmpty)
+        XCTAssertEqual(preferences.presets[0], a)
+        try preferences.togglePreset(b.id)
+        XCTAssertEqual(preferences.filter.includes.count, 32)
+        try preferences.apply(LogFilter())
+        XCTAssertTrue(preferences.filter.isEmpty)
+        XCTAssertTrue(preferences.selectedPresetIDs.isEmpty)
+        try preferences.togglePreset(b.id)
+        XCTAssertEqual(preferences.filter.includes, ["overflow"])
+    }
+    func testLegacyPreferencesAndActivePresetSaveAndDelete() throws {
+        let legacy = Data("{\"filter\":{\"includes\":[\"WARN\"],\"excludes\":[]},\"keywords\":[\"WARN\"],\"presets\":[]}".utf8)
+        var preferences = try JSONDecoder().decode(LogPreferences.self, from: legacy)
+        XCTAssertEqual(preferences.filter.includes, ["WARN"])
+        XCTAssertTrue(preferences.selectedPresetIDs.isEmpty)
+        try preferences.savePreset(name: "诊断")
+        let id = try XCTUnwrap(preferences.presets.first?.id)
+        try preferences.apply(LogFilter())
+        try preferences.togglePreset(id)
+        try preferences.savePreset(name: "诊断")
+        XCTAssertEqual(preferences.selectedPresetIDs, [id])
+        try preferences.removePreset(id)
+        XCTAssertTrue(preferences.filter.isEmpty)
+        XCTAssertTrue(preferences.presets.isEmpty)
+        XCTAssertTrue(preferences.selectedPresetIDs.isEmpty)
+    }
+    func testCombinedPresetsMatchAnyIncludesAndExcludesTakePriority() throws {
+        let combined = try LogFilter.combining([LogFilter(includes: ["WARN"], excludes: ["secret"]),
+                                                LogFilter(includes: ["ERROR"], excludes: ["debug"])])
+        try fixture() { url, worker in
+            try Data("INFO hello\nWARN hello\nERROR hello\nWARN secret\nERROR debug\n".utf8).write(to: url)
+            let result = try worker.update(url, filter: combined, query: "", isLive: false)
+            XCTAssertEqual(try String(contentsOf: result.filteredURL, encoding: .utf8), "WARN hello\nERROR hello\n")
+        }
+    }
     func testSavedPreferencesRoundTripAndLegacyConfigurationAndLimits() throws {
         var preferences = LogPreferences()
         try preferences.apply(LogFilter(includes: ["WARN", "WARN", "错误"], excludes: ["debug"]))

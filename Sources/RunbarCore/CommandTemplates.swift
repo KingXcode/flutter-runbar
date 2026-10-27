@@ -1,5 +1,12 @@
 import Foundation
 
+public enum FlutterRunMode: String, CaseIterable, Identifiable {
+    case debug, profile, release
+    public var id: String { rawValue }
+    public var name: String { rawValue.capitalized }
+    public var argument: String { "--" + rawValue }
+}
+
 /// Opt-in copies only. Reading this catalogue never changes a saved project or runs a command.
 public struct CommandTemplate: Identifiable, Equatable {
     public let id: String
@@ -7,11 +14,17 @@ public struct CommandTemplate: Identifiable, Equatable {
     public let invocation: String
     public let detail: String
     public var supportsFVM = false
-    public func command(useFVM: Bool = true) -> String { (useFVM && supportsFVM ? "fvm " : "") + invocation }
+    public var supportsFlutterRunMode: Bool { supportsFVM && invocation.hasPrefix("flutter run ") }
+    public func command(useFVM: Bool = true, runMode: FlutterRunMode = .debug) -> String {
+        (useFVM && supportsFVM ? "fvm " : "") + invocation + (supportsFlutterRunMode ? " " + runMode.argument : "")
+    }
+    public func presetName(runMode: FlutterRunMode = .debug) -> String {
+        supportsFlutterRunMode ? "\(name)（\(runMode.name)）" : name
+    }
 
     public static let flutter: [CommandTemplate] = [
-        CommandTemplate(id: "run-macos", name: "运行 macOS", invocation: "flutter run -d macos", detail: "启动 macOS 调试应用。需要 Xcode 与项目的 macOS 平台支持。"),
-        .init(id: "run-chrome", name: "运行 Chrome", invocation: "flutter run -d chrome", detail: "启动 Web 调试应用并打开 Chrome。需要安装 Chrome。"),
+        CommandTemplate(id: "run-macos", name: "运行 macOS", invocation: "flutter run -d macos", detail: "构建并启动 macOS 应用，可选 Debug、Profile、Release。需要 Xcode 与项目的 macOS 平台支持。"),
+        .init(id: "run-chrome", name: "运行 Chrome", invocation: "flutter run -d chrome", detail: "构建并启动 Web 应用，可选 Debug、Profile、Release。需要安装 Chrome。"),
         .init(id: "pub-get", name: "获取依赖", invocation: "flutter pub get", detail: "下载项目依赖，可能访问网络并更新锁文件和生成的依赖配置。"),
         .init(id: "pub-outdated", name: "检查依赖更新", invocation: "flutter pub outdated", detail: "查询依赖可用版本，可能访问网络；不会自动升级项目依赖。"),
         .init(id: "clean", name: "清理构建缓存", invocation: "flutter clean", detail: "会删除项目 build/ 和 .dart_tool/ 生成目录；下次运行需要重新获取依赖并构建。"),

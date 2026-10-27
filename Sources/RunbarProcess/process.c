@@ -16,6 +16,18 @@
 #endif
 extern char **environ;
 
+pid_t rb_parent_process(pid_t pid) {
+#ifdef __APPLE__
+    int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    if (pid <= 1 || sysctl(name, 4, &info, &size, NULL, 0) < 0 || size != sizeof(info)) return 0;
+    return info.kp_eproc.e_ppid;
+#else
+    return pid == getpid() ? getppid() : 0;
+#endif
+}
+
 #ifdef __APPLE__
 static int group_has_no_live_processes(pid_t pgid) {
     int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid};

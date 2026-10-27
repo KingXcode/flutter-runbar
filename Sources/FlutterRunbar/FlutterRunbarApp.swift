@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Let SwiftUI finish its initial application/window setup first.
-        DispatchQueue.main.async { AppModel.shared.restoreDockVisibility() }
+        DispatchQueue.main.async { AppModel.shared.restoreDockVisibility(); AppModel.shared.installGlobalShortcut() }
         #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
         let arguments = ProcessInfo.processInfo.arguments
         if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
@@ -190,6 +190,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var logScrollRevision = 0
     private(set) var logScrollPlacement = LogScrollPlacement.end
     @Published private(set) var logTotalBytes: UInt64 = 0
+    @Published private(set) var logSourceBytes: UInt64 = 0
+    @Published private(set) var logPositionPercent = 0
     @Published var logSearchText = "" { didSet { if logSearchText != oldValue { scheduleLogQuery() } } }
     @Published private(set) var logMatchCount: UInt64 = 0
     @Published private(set) var logMatchOrdinal: UInt64 = 0
@@ -218,6 +220,15 @@ final class AppModel: ObservableObject {
     @Published var error: String?
     @Published var nativeActionProjectID: UUID?
     @Published private(set) var showInDock = UserDefaults.standard.bool(forKey: "showInDock")
+    @Published private(set) var globalShortcut = UserDefaults.standard.data(forKey: "globalShortcutPreferences")
+        .flatMap { try? JSONDecoder().decode(GlobalShortcutPreferences.self, from: $0) } ?? GlobalShortcutPreferences()
+    @Published private(set) var globalShortcutError: String?
+    private let hotkeyController = GlobalHotKeyController()
+    private var shortcutRecording = false
+    private var raisingManagedWindows = false
+    #if LIVE_LOG_VALIDATION
+    private(set) var shortcutInvocationCount = 0
+    #endif
     private var managerOpener: (() -> Void)?
     private var pendingManagerOpen = false
     private var installedInitialManagerOpener = false
@@ -225,6 +236,7 @@ final class AppModel: ObservableObject {
     private var quitReplySent = false
     private var logShutdownStarted = false
     private var store: SessionStore?
+    let network = NetworkMonitor()
     private var coordinator: ProjectRunCoordinator?
     var busy: Bool { projectRuns.values.contains(where: \.isBusy) }
     var activeCount: Int { projectRuns.values.filter(\.isBusy).count }
@@ -238,6 +250,8 @@ final class AppModel: ObservableObject {
             let store = try SessionStore()
             config = try store.loadConfiguration(); try store.recoverInterrupted(); history = try store.sessions()
             self.store = store
+            network.configure(root: store.root)
+            network.onFinished = { [weak self] in self?.objectWillChange.send() }
             selectedProject = config.projects.first?.id
             let coordinator = ProjectRunCoordinator(store: store)
             coordinator.onEvent = { [weak self] event in self?.handle(event) }
@@ -296,6 +310,55 @@ final class AppModel: ObservableObject {
     func showManagerWindow() {
         if let managerOpener { managerOpener() }
         else { pendingManagerOpen = true }
+        DispatchQueue.main.async {
+            for window in NSApp.windows where window.title == "Runbar" && window.canBecomeMain {
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.makeKeyAndOrderFront(nil)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+    func installGlobalShortcut() {
+        hotkeyController.action = { [weak self] in self?.raiseManagedWindows() }
+        do {
+            try hotkeyController.register(globalShortcut.enabled && !shortcutRecording ? globalShortcut.shortcut : nil)
+            globalShortcutError = nil
+        } catch { globalShortcutError = error.localizedDescription }
+    }
+    func setGlobalShortcut(_ value: GlobalShortcut) {
+        do {
+            let value = try value.validated()
+            try hotkeyController.register(value)
+            globalShortcut = GlobalShortcutPreferences(enabled: true, shortcut: value)
+            saveGlobalShortcut(); globalShortcutError = nil
+        } catch { globalShortcutError = error.localizedDescription }
+    }
+    func setGlobalShortcutEnabled(_ enabled: Bool) {
+        do {
+            try hotkeyController.register(enabled ? globalShortcut.shortcut : nil)
+            globalShortcut.enabled = enabled; saveGlobalShortcut(); globalShortcutError = nil
+        } catch { globalShortcutError = error.localizedDescription }
+    }
+    func setShortcutRecording(_ recording: Bool) {
+        shortcutRecording = recording
+        installGlobalShortcut()
+    }
+    private func saveGlobalShortcut() {
+        if let data = try? JSONEncoder().encode(globalShortcut) { UserDefaults.standard.set(data, forKey: "globalShortcutPreferences") }
+    }
+    private func raiseManagedWindows() {
+        #if LIVE_LOG_VALIDATION
+        shortcutInvocationCount += 1
+        #endif
+        showManagerWindow()
+        guard !raisingManagedWindows, !quitWhenFinished else { return }
+        raisingManagedWindows = true
+        Task {
+            let processes = await coordinator?.activeProcesses() ?? []
+            let current = processes.filter { state(for: $0.projectID).session?.id == $0.sessionID && state(for: $0.projectID).isBusy }
+            await ManagedApplicationActivator.raise(current)
+            showManagerWindow(); raisingManagedWindows = false
+        }
     }
     @discardableResult
     func persist() -> Bool {
@@ -340,7 +403,7 @@ final class AppModel: ObservableObject {
     }
     func canDeleteSessions(_ ids: Set<UUID>) -> Bool {
         let finishedIDs = Set(history.filter { $0.status != .running }.map(\.id))
-        return !ids.isEmpty && ids.isDisjoint(with: activeSessionIDs) && ids.isSubset(of: finishedIDs)
+        return !ids.isEmpty && ids.isDisjoint(with: activeSessionIDs.union(network.writingSessionIDs)) && ids.isSubset(of: finishedIDs)
     }
     func deletionIDs(for session: RunSession) -> Set<UUID> {
         historySelection.ids.contains(session.id) ? historySelection.ids : [session.id]
@@ -481,6 +544,13 @@ final class AppModel: ObservableObject {
         if selectedSession == session.id { loadLog() }
     }
     func run() { if let id = selectedProject { run(projectID: id) } }
+    func setNetworkCaptureEnabled(_ enabled: Bool, projectID: UUID) {
+        guard let index = config.projects.firstIndex(where: { $0.id == projectID }) else { return }
+        let old = config.projects[index].networkCaptureEnabled
+        config.projects[index].networkCaptureEnabled = enabled
+        guard persist() else { config.projects[index].networkCaptureEnabled = old; return }
+        network.setEnabled(enabled, projectID: projectID)
+    }
     func stop(projectID: UUID) {
         #if SCREENSHOT_PREVIEW
         projectRuns[projectID] = ProjectRunState()
@@ -511,6 +581,7 @@ final class AppModel: ObservableObject {
             // Wait for the cancelled scan to leave its chunk, then close handles
             // and remove the current disk index before completing normal quit.
             await logLoader.clear()
+            await network.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
     }
@@ -518,13 +589,16 @@ final class AppModel: ObservableObject {
         switch event {
         case .stateChanged(let id, let state): projectRuns[id] = state
         case .started(let id, let value):
+            network.started(projectID: id, sessionID: value.id, enabled: config.projects.first { $0.id == id }?.networkCaptureEnabled == true)
             replace(value)
             // Another project's start or finish must not steal the viewed log.
             if selectedProject == id { selectedSession = value.id; loadLog() }
         case .output(_, let sessionID, _):
             if selectedSession == sessionID { refreshLogAfterOutput() }
         case .updated(_, let value): replace(value)
+        case .service(_, let sessionID, let endpoint): network.discovered(endpoint, sessionID: sessionID)
         case .finished(let id, let value):
+            network.finished(value.id)
             let hadStarted = history.contains { $0.id == value.id }
             replace(value)
             if selectedSession == value.id { loadLog() }
@@ -546,7 +620,7 @@ final class AppModel: ObservableObject {
             logQueryTask?.cancel(); logQueryTask = nil
             logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
             logReadToken = UUID(); finishLogLoading(); logRefreshNeeded = false
-            displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0; logTimeMarks = []
+            displayedLogSession = selectedSession; logPage = nil; logTotalBytes = 0; logSourceBytes = 0; logTimeMarks = []; logPositionPercent = 0
             logFollowing = true; logHasNewOutput = false
             logMatchCount = 0; logMatchOrdinal = 0; logSearchContext = false; logSearchHighlight = nil
             logQueryBusy = false
@@ -566,13 +640,28 @@ final class AppModel: ObservableObject {
             scheduleLogQuery(); return true
         } catch { self.error = error.localizedDescription; return false }
     }
-    func saveLogFilterPreset(_ name: String) {
+    /// Expected combination errors stay in the preset popover, so a rejected
+    /// selection leaves both the active conditions and the popover in place.
+    func toggleLogFilterPreset(_ id: UUID) -> String? {
+        do {
+            let old = config.logPreferences
+            var preferences = logPreferences; try preferences.togglePreset(id)
+            config.logPreferences = preferences
+            guard persist() else { config.logPreferences = old; return error ?? "无法保存筛选方案选择。" }
+            if old?.filter != preferences.filter { scheduleLogQuery() }
+            return nil
+        } catch { return error.localizedDescription }
+    }
+    @discardableResult
+    func saveLogFilterPreset(_ name: String) -> Bool {
         do {
             let old = config.logPreferences
             var preferences = logPreferences; try preferences.savePreset(name: name)
             config.logPreferences = preferences
-            if !persist() { config.logPreferences = old }
-        } catch { self.error = error.localizedDescription }
+            guard persist() else { config.logPreferences = old; return false }
+            if old?.filter != preferences.filter { scheduleLogQuery() }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
     func deleteLogKeyword(_ keyword: String) {
         let old = config.logPreferences
@@ -581,10 +670,13 @@ final class AppModel: ObservableObject {
         if !persist() { config.logPreferences = old }
     }
     func deleteLogFilterPreset(_ id: UUID) {
-        let old = config.logPreferences
-        var preferences = logPreferences; preferences.presets.removeAll { $0.id == id }
-        config.logPreferences = preferences
-        if !persist() { config.logPreferences = old }
+        do {
+            let old = config.logPreferences
+            var preferences = logPreferences; try preferences.removePreset(id)
+            config.logPreferences = preferences
+            guard persist() else { config.logPreferences = old; return }
+            if old?.filter != preferences.filter { scheduleLogQuery() }
+        } catch { self.error = error.localizedDescription }
     }
     private func scheduleLogQuery() {
         logQueryTask?.cancel(); logReadTask?.cancel(); logRefreshTask?.cancel(); logRefreshTask = nil
@@ -610,6 +702,12 @@ final class AppModel: ObservableObject {
         readLog(.first, placement: .anchor, matchOrdinal: ordinal)
     }
     func returnToFilteredLog() { showLog(.latest) }
+    func reportLogPosition(_ value: Double, sessionID: UUID) {
+        guard selectedSession == sessionID else { return }
+        let fraction = LogScrollMetrics.clamp(value)
+        let percent = fraction == 1 ? 100 : min(99, Int(fraction * 100))
+        if logPositionPercent != percent { logPositionPercent = percent }
+    }
     private func refreshTimestampMarks() {
         guard !logReading, let page = logPage, let url = selectedOutputFile else { return }
         let token = logReadToken
@@ -684,6 +782,7 @@ final class AppModel: ObservableObject {
         let url = store.directory(id).appendingPathComponent("output.raw")
         if let size = try? await logLoader.size(url), !Task.isCancelled, selectedSession == id, logReadToken == token {
             logTotalBytes = size
+            if logSourceBytes != size { logSourceBytes = size }
         }
     }
     private func readLog(_ location: LogPageLocation, placement: LogScrollPlacement?, matchOrdinal: UInt64? = nil, refreshOnly: Bool = false) {
@@ -731,6 +830,7 @@ final class AppModel: ObservableObject {
                 else if result.matchCount == 0 { self.logMatchOrdinal = 0 }
                 // Scrolling away pauses live updates, including an in-flight read.
                 self.logTotalBytes = result.totalBytes
+                if self.logSourceBytes != result.sourceBytes { self.logSourceBytes = result.sourceBytes }
                 if let page = result.page, placement != nil || self.logFollowing {
                     self.logPage = page
                     if self.logTimeMarks != result.timeMarks { self.logTimeMarks = result.timeMarks }
@@ -947,7 +1047,8 @@ private actor LogPageLoader {
             targetTimes = fullContext ? snapshot.fullTimesURL : snapshot.filteredTimesURL
         } else { processor.reset(); filterRevision = 0 }
         let total = try size(target)
-        if refreshOnly { return LogReadResult(page: nil, totalBytes: total, matchCount: count, ordinal: nil, highlight: nil, timeMarks: []) }
+        let sourceBytes = try size(url)
+        if refreshOnly { return LogReadResult(page: nil, totalBytes: total, sourceBytes: sourceBytes, matchCount: count, ordinal: nil, highlight: nil, timeMarks: []) }
         let page: LogFilePage
         if case .latest = location { page = try tail.read(target, isLive: isLive) }
         else { tail.reset(); page = try LogFileReader.read(target, at: location, isLive: isLive) }
@@ -957,13 +1058,14 @@ private actor LogPageLoader {
         if !showTimestamps { marks = [] }
         else if let targetTimes { marks = try timestampReader.projected(targetTimes, page: page) }
         else { marks = try timestampReader.raw(url, page: page, times: receiveTimes) }
-        return LogReadResult(page: page, totalBytes: total, matchCount: count, ordinal: ordinal, highlight: highlight, timeMarks: marks)
+        return LogReadResult(page: page, totalBytes: total, sourceBytes: sourceBytes, matchCount: count, ordinal: ordinal, highlight: highlight, timeMarks: marks)
     }
 }
 
 private struct LogReadResult: Sendable {
     let page: LogFilePage?
     let totalBytes: UInt64
+    let sourceBytes: UInt64
     let matchCount: UInt64
     let ordinal: UInt64?
     let highlight: NSRange?

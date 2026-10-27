@@ -17,6 +17,7 @@ struct LogView: NSViewRepresentable {
     var onScrollAway: () -> Void
     var onLoadWindow: (UInt64) -> Void
     var onSeek: (Double) -> Void
+    var onProgress: (Double) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> LogViewport {
@@ -106,6 +107,7 @@ struct LogView: NSViewRepresentable {
         if page == nil {
             coordinator.pendingSeek = nil; coordinator.pendingWindow = false
             host.bar.setProgress(0, proportion: 1)
+            coordinator.reportProgress(0)
         }
         if newNavigation {
             coordinator.revision = scrollRevision
@@ -145,6 +147,8 @@ struct LogView: NSViewRepresentable {
         var highlight: NSRange?
         var revealHighlight: NSRange?
         var observer: NSObjectProtocol?
+        var pendingProgress: Double = 0
+        var progressScheduled = false
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
         func viewportResized() {
@@ -190,6 +194,18 @@ struct LogView: NSViewRepresentable {
                                            visibleFraction: range?.visible ?? Double(min(1, visible / height)))
             let atEnd = parent.totalBytes > 0 && page.endOffset >= parent.totalBytes && y + visible >= host.text.bounds.height - 1
             host.bar.setProgress(atEnd ? 1 : metrics.value, proportion: metrics.knobProportion)
+            reportProgress(atEnd ? 1 : metrics.value)
+        }
+        func reportProgress(_ value: Double) {
+            pendingProgress = value
+            guard !progressScheduled else { return }
+            progressScheduled = true
+            // Coalesce scroll events and publish outside the SwiftUI update.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.progressScheduled = false
+                self.parent?.onProgress(self.pendingProgress)
+            }
         }
         func clipChanged() {
             guard let host else { return }
@@ -209,6 +225,7 @@ struct LogView: NSViewRepresentable {
         func seek(_ value: Double) {
             guard !updating else { return }
             pendingSeek = LogScrollMetrics.clamp(value)
+            reportProgress(value)
             pendingWindow = false
             parent?.onSeek(value)
         }

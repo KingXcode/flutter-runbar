@@ -37,6 +37,9 @@ static void *parallel_spawn(void *argument) {
     return NULL;
 }
 int main(void) {
+    assert(rb_parent_process(getpid()) == getppid());
+    assert(rb_parent_process(0) == 0);
+    puts("PASS read-only parent process lookup");
     char directory[] = "/tmp/runbar test.XXXXXX"; assert(mkdtemp(directory));
     pid_t pid; int fd, code; char output[8192];
     assert(rb_spawn("/bin/sh", "printf 'stdout\\n'; printf 'stderr\\n' >&2; pwd; exit 7", directory, "/usr/bin:/bin", &pid, &fd) == 0);

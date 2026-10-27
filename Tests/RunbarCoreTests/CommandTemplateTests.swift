@@ -33,6 +33,31 @@ final class CommandTemplateTests: XCTestCase {
         XCTAssertThrowsError(try project.savePreset(name: "missing", command: "echo ok", id: UUID()))
         XCTAssertThrowsError(try project.savePreset(name: "duplicate edit", command: original[0].command, id: added.id))
     }
+    func testFlutterRunModesGenerateIndependentEditablePresets() throws {
+        for id in ["run-macos", "run-chrome"] {
+            let template = try XCTUnwrap(CommandTemplate.flutter.first { $0.id == id })
+            let device = id == "run-macos" ? "macos" : "chrome"
+            var project = Project(path: "/fixture", kind: .flutter)
+            for mode in FlutterRunMode.allCases {
+                XCTAssertEqual(template.command(useFVM: false, runMode: mode), "flutter run -d \(device) --\(mode.rawValue)")
+                XCTAssertEqual(template.command(runMode: mode), "fvm flutter run -d \(device) --\(mode.rawValue)")
+                try project.savePreset(name: template.presetName(runMode: mode), command: template.command(runMode: mode))
+            }
+            XCTAssertEqual(project.presets.count, 3)
+            let profile = project.presets[1]
+            XCTAssertTrue(profile.name.contains("Profile"))
+            // A generated mode is plain editable shell text after insertion.
+            try project.savePreset(name: profile.name, command: profile.command + " --flavor staging -t lib/staging.dart", id: profile.id)
+            XCTAssertTrue(project.presets[1].command.hasSuffix("--profile --flavor staging -t lib/staging.dart"))
+            XCTAssertEqual(try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(project)), project)
+        }
+        let dependency = try XCTUnwrap(CommandTemplate.flutter.first { $0.id == "pub-get" })
+        let build = try XCTUnwrap(CommandTemplate.flutter.first { $0.id == "build-macos" })
+        XCTAssertFalse(dependency.supportsFlutterRunMode)
+        XCTAssertEqual(dependency.command(runMode: .release), "fvm flutter pub get")
+        XCTAssertEqual(build.command(runMode: .debug), "fvm flutter build macos --release")
+        XCTAssertEqual(CommandTemplate.flutter[0].command(), "fvm flutter run -d macos --debug")
+    }
     func testExistingAndLegacyConfigurationNotPopulatedOrReSelected() throws {
         var project = Project(path: "/fictional/legacy")
         project.presets = [CommandPreset(name: "Custom", command: "flutter test --coverage")]

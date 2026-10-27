@@ -6,12 +6,60 @@ private final class FakeProjectDriver: ProjectCommandRunning {
     var starts = 0
     var stops = 0
     var command: String?
+    var processID: Int32?
+    var onReadProcessID: (@MainActor () -> Void)?
     init(_ send: @escaping (ProcessRunner.Event) -> Void) { self.send = send }
     func start(project: Project, preset: CommandPreset, extraPath: String) { starts += 1; command = preset.command }
     func stop() { stops += 1 }
+    func runningProcessID() async -> Int32? { await onReadProcessID?(); return processID }
 }
 
 final class CoordinatorTests: XCTestCase {
+    @MainActor
+    func testServiceDiscoveryOnlyRoutesCurrentRunningGeneration() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(root: root)
+        var drivers: [FakeProjectDriver] = []
+        let coordinator = ProjectRunCoordinator(store: store) { _, send in
+            let driver = FakeProjectDriver(send); drivers.append(driver); return driver
+        }
+        var received: [UUID] = []
+        coordinator.onEvent = { if case .service(_, let session, _) = $0 { received.append(session) } }
+        let project = Project(path: root.path), command = CommandPreset(command: "fixture")
+        let endpoint = try XCTUnwrap(VMServiceEndpoint("http://localhost:5555/test/"))
+        _ = coordinator.start(project: project, preset: command, extraPath: "")
+        drivers[0].send(.service(endpoint)); XCTAssertTrue(received.isEmpty)
+        let first = RunSession(projectPath: root.path, command: command.command)
+        drivers[0].send(.started(first)); drivers[0].send(.service(endpoint))
+        XCTAssertEqual(received, [first.id])
+        coordinator.stop(projectID: project.id); drivers[0].send(.service(endpoint))
+        XCTAssertEqual(received, [first.id])
+        var ended = first; ended.status = .stopped; drivers[0].send(.finished(ended))
+        _ = coordinator.start(project: project, preset: command, extraPath: "")
+        let second = RunSession(projectPath: root.path, command: command.command)
+        drivers[1].send(.started(second)); drivers[0].send(.service(endpoint)); drivers[1].send(.service(endpoint))
+        XCTAssertEqual(received, [first.id, second.id])
+    }
+    @MainActor
+    func testActiveProcessSnapshotDropsRunsThatFinishDuringPIDLookup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try SessionStore(root: root)
+        var driver: FakeProjectDriver!
+        let coordinator = ProjectRunCoordinator(store: store) { _, send in let value = FakeProjectDriver(send); driver = value; return value }
+        let project = Project(path: root.path), command = CommandPreset(command: "example")
+        _ = coordinator.start(project: project, preset: command, extraPath: "")
+        let session = RunSession(projectPath: project.path, command: command.command)
+        driver.processID = 4321; driver.send(.started(session))
+        let active = await coordinator.activeProcesses()
+        XCTAssertEqual(active.count, 1); XCTAssertEqual(active.first?.processID, 4321)
+        XCTAssertEqual(active.first?.sessionID, session.id)
+        let sendingDriver = driver!
+        sendingDriver.onReadProcessID = { [weak sendingDriver] in var ended = session; ended.status = .succeeded; sendingDriver?.send(.finished(ended)) }
+        let stale = await coordinator.activeProcesses()
+        XCTAssertTrue(stale.isEmpty)
+    }
     @MainActor
     func testBuiltInCannotCreateShellDriverEvenWithCommandText() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

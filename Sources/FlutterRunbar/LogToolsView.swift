@@ -1,14 +1,18 @@
 import SwiftUI
 import RunbarCore
 
-struct LogToolsView: View {
+struct LogToolsView<Navigation: View>: View {
     @ObservedObject var model: AppModel
+    @ViewBuilder var navigation: Navigation
     @State private var editingFilter = false
     @State private var choosingPreset = false
     @FocusState private var searchFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) { filterButton; presetButton; searchField; searchNavigation }
+            LogToolbarLayout {
+                HStack(spacing: 6) { filterButton; presetButton; searchField; searchNavigation }
+                navigation
+            }
             if model.logQueryBusy {
                 HStack(spacing: 8) {
                     ProgressView(value: model.logQueryProgress).frame(maxWidth: 120)
@@ -24,7 +28,6 @@ struct LogToolsView: View {
             }
         }
         .controlSize(.small)
-        .popover(isPresented: $editingFilter, arrowEdge: .bottom) { LogFilterPopover(model: model) }
         .background {
             Button("") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden()
         }
@@ -35,6 +38,9 @@ struct LogToolsView: View {
                 Label(model.logFilter.isEmpty ? "筛选" : "筛选 \(model.logFilter.includes.count + model.logFilter.excludes.count + (model.logFilter.hasTimeRange ? 1 : 0))",
                       systemImage: model.logFilter.isEmpty ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill")
             }.accessibilityLabel("编辑日志筛选").help("关键词回车生效，支持时间段筛选")
+                .popover(isPresented: $editingFilter, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                    LogFilterPopover(model: model)
+                }
             if !model.logFilter.isEmpty {
                 Button { _ = model.applyLogFilter(LogFilter()) } label: { Image(systemName: "xmark.circle") }
                     .buttonStyle(.borderless).help("清除当前筛选，保留关键词缓存和方案").accessibilityLabel("清除日志筛选")
@@ -42,8 +48,10 @@ struct LogToolsView: View {
         }.fixedSize()
     }
     private var presetButton: some View {
-        Button { choosingPreset.toggle() } label: { Image(systemName: "bookmark") }
-            .accessibilityLabel("筛选方案").help("一键使用或保存筛选方案")
+        Button { choosingPreset.toggle() } label: {
+            Image(systemName: model.logPreferences.selectedPresetIDs.isEmpty ? "bookmark" : "bookmark.fill")
+        }
+            .accessibilityLabel("筛选方案").help("多选方案联合使用，点击已选方案可取消；也可保存当前条件")
             .popover(isPresented: $choosingPreset, arrowEdge: .bottom) { LogFilterPresets(model: model) }
     }
     private var searchField: some View {
@@ -74,6 +82,35 @@ struct LogToolsView: View {
             Button { model.moveLogSearch(1) } label: { Image(systemName: "chevron.down") }
                 .help("下一个结果（Enter）").accessibilityLabel("下一个搜索结果")
         }.disabled(model.logQueryBusy || model.logMatchCount == 0).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Measure the controls rather than the window: keep a useful search field on
+/// wide panes, and use two rows only when the combined controls no longer fit.
+/// A Layout keeps one instance of each control (and its focused popover).
+private struct LogToolbarLayout: Layout {
+    private let spacing: CGFloat = 8
+    private let rowSpacing: CGFloat = 5
+    private func metrics(_ proposal: ProposedViewSize, _ views: Subviews) -> (CGFloat, CGSize, CGSize, Bool) {
+        let navigation = views[1].sizeThatFits(.unspecified)
+        let minimumQuery = views[0].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width
+        let width = proposal.width ?? minimumQuery + 100 + spacing + navigation.width
+        let single = width >= minimumQuery + 100 + spacing + navigation.width
+        let query = views[0].sizeThatFits(ProposedViewSize(width: single ? width - navigation.width - spacing : width, height: nil))
+        let controls = views[1].sizeThatFits(ProposedViewSize(width: single ? navigation.width : width, height: nil))
+        return (width, query, controls, single)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let (width, query, controls, single) = metrics(proposal, subviews)
+        return CGSize(width: width, height: single ? max(query.height, controls.height) : query.height + rowSpacing + controls.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (_, query, controls, single) = metrics(ProposedViewSize(width: bounds.width, height: nil), subviews)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + (single ? (bounds.height - query.height) / 2 : 0)),
+                          proposal: ProposedViewSize(width: single ? bounds.width - controls.width - spacing : bounds.width, height: query.height))
+        subviews[1].place(at: CGPoint(x: single ? bounds.maxX - controls.width : bounds.minX,
+                                     y: single ? bounds.minY + (bounds.height - controls.height) / 2 : bounds.minY + query.height + rowSpacing),
+                          proposal: ProposedViewSize(width: single ? controls.width : bounds.width, height: controls.height))
     }
 }
 
@@ -112,6 +149,10 @@ private struct LogFilterPopover: View {
             }
             Text("回车添加，点 × 移除，自动生效并保存。排除优先，区分大小写。")
                 .font(.caption).foregroundStyle(.secondary)
+            if !model.logPreferences.selectedPresetIDs.isEmpty {
+                Text("正在联合使用方案；手动修改后将转为自定义条件，原方案保持不变。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }.padding(14).frame(width: 410).controlSize(.small)
     }
     private func dateBinding(start: Bool) -> Binding<Date> {
@@ -194,31 +235,36 @@ private struct LogKeywordField: View {
 
 private struct LogFilterPresets: View {
     @ObservedObject var model: AppModel
-    @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+    @State private var validation: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("筛选方案").font(.headline)
+            Text("可多选，包含 / 排除词分别合并，时间取交集。")
+                .font(.caption).foregroundStyle(.secondary)
             if model.logPreferences.presets.isEmpty { Text("保存当前条件，下次一键使用").font(.caption).foregroundStyle(.secondary) }
             ScrollView {
                 LazyVStack(spacing: 5) {
                     ForEach(model.logPreferences.presets) { preset in
                         HStack {
                             Button {
-                                if model.applyLogFilter(preset.filter) { dismiss() }
+                                validation = model.toggleLogFilterPreset(preset.id)
                             } label: {
                                 HStack {
+                                    Image(systemName: model.logPreferences.selectedPresetIDs.contains(preset.id) ? "checkmark.square.fill" : "square")
+                                        .foregroundStyle(model.logPreferences.selectedPresetIDs.contains(preset.id) ? Color.accentColor : .secondary)
                                     Text(preset.name).lineLimit(1)
                                     Spacer()
-                                    if preset.filter == model.logFilter { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityLabel("使用筛选方案 \(preset.name)")
-                            Button { model.deleteLogFilterPreset(preset.id) } label: { Image(systemName: "trash") }
+                                .accessibilityValue(model.logPreferences.selectedPresetIDs.contains(preset.id) ? "已选中" : "未选中")
+                            Button { model.deleteLogFilterPreset(preset.id); validation = nil } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless).accessibilityLabel("删除方案 \(preset.name)")
                         }.padding(.vertical, 4)
                     }
                 }
             }.frame(height: min(190, CGFloat(model.logPreferences.presets.count) * 29))
+            if let validation { Text(validation).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             Divider()
             HStack {
                 TextField("新方案名称", text: $name).onSubmit { save() }.accessibilityLabel("筛选方案名称")
@@ -228,7 +274,7 @@ private struct LogFilterPresets: View {
     }
     private func save() {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        model.saveLogFilterPreset(name); name = ""
+        if model.saveLogFilterPreset(name) { name = ""; validation = nil }
     }
 }
 
