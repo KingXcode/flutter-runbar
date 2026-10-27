@@ -11,11 +11,71 @@ private func sampleRecord(_ id: String, start: Int64 = 1_000_000, end: Bool = tr
     var value: [String: Any] = ["id": id, "method": method, "uri": url, "startTime": start,
                                 "request": ["contentLength": 2, "headers": ["content-type": ["application/json"]]],
                                 "response": ["statusCode": status, "contentLength": 2, "headers": ["content-type": ["application/json"]]]]
-    if end { value["endTime"] = start + 50_000 }
+    value["endTime"] = start + 100
+    if end {
+        var response = value["response"] as! [String: Any]
+        response["endTime"] = start + 50_000; value["response"] = response
+    }
     return try NetworkRecord.parse(value, epoch: epoch, isolate: isolate)
 }
 
 final class NetworkStoreTests: XCTestCase {
+    func testChronologicalPagesAndFollowingLatestAcrossBoundary() throws {
+        try networkFixture { _, store in
+            try store.upsert((0..<250).map { try sampleRecord(String($0), start: Int64($0)) })
+            let latest = try store.page(latest: true)
+            XCTAssertEqual(latest.page, 2)
+            XCTAssertEqual(latest.records.first?.requestID, "200"); XCTAssertEqual(latest.records.last?.requestID, "249")
+            try store.upsert((250..<301).map { try sampleRecord(String($0), start: Int64($0)) })
+            let following = try store.page(page: latest.page, latest: true)
+            XCTAssertEqual(following.page, 3); XCTAssertEqual(following.records.map(\.requestID), ["300"])
+            let stopped = try store.page(page: 1)
+            XCTAssertEqual(stopped.page, 1); XCTAssertEqual(stopped.records.first?.requestID, "100")
+            XCTAssertEqual(stopped.records.last?.requestID, "199")
+            var query = NetworkQuery(); query.text = "/missing"
+            XCTAssertTrue(try store.page(query: query, latest: true).records.isEmpty)
+            XCTAssertEqual(try store.page(query: query, latest: true).page, 0)
+        }
+    }
+    func testFormattingFullBodyPagesWithoutChangingOriginal() throws {
+        try networkFixture { root, store in
+            let record = try sampleRecord("formatted")
+            try store.upsert([record])
+            let raw = Data(("{\"text\":\"" + String(repeating: "中🚀", count: 30_000) + "\",\"large\":900719925474099312345}").utf8)
+            try store.saveBodies(record.id, request: Data(), response: raw)
+            let saved = try XCTUnwrap(try store.request(record.id))
+            let first = try store.bodyPage(saved, response: true, page: 0, format: .json)
+            var combined = first.text
+            for page in 1..<first.pages { combined += try store.bodyPage(saved, response: true, page: page, format: .json).text }
+            XCTAssertFalse(combined.contains("�")); XCTAssertTrue(combined.contains("900719925474099312345"))
+            XCTAssertEqual(combined, String(decoding: try NetworkBodyFormatter.format(raw, as: .json), as: UTF8.self))
+            XCTAssertEqual(first.bytes, raw.count)
+            XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("bodies/\(saved.id).response")), raw)
+            let request = try store.bodyPage(saved, response: false, page: 0)
+            XCTAssertEqual(request.text, "（正文为空）")
+        }
+    }
+    func testJSONAndXMLFormattingValidationAndLimits() throws {
+        let json = Data(#"{"number":900719925474099312345,"text":"a\\\"b {} []","empty":[],"nested":{"x":true}}"#.utf8)
+        let formatted = try NetworkBodyFormatter.format(json, as: .json)
+        let text = String(decoding: formatted, as: UTF8.self)
+        XCTAssertTrue(text.contains("\n  \"number\": 900719925474099312345,"))
+        XCTAssertTrue(text.contains("\"empty\": []"))
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: formatted) as? NSDictionary, try JSONSerialization.jsonObject(with: json) as? NSDictionary)
+        let xml = try NetworkBodyFormatter.format(Data("<root><item id=\"1\">你好</item><item><![CDATA[a<b]]></item></root>".utf8), as: .xml)
+        XCTAssertNotNil(String(decoding: xml, as: UTF8.self).range(of: "\n +<item", options: .regularExpression))
+        XCTAssertTrue(String(decoding: xml, as: UTF8.self).contains("<![CDATA[a<b]]>"))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data("not json".utf8), as: .json))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data("<invalid>".utf8), as: .xml))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data("<!DOCTYPE root SYSTEM 'file:///private/test'><root/>".utf8), as: .xml))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(try XCTUnwrap("{\"a\":1}".data(using: .utf16LittleEndian)), as: .json))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(try XCTUnwrap("<!DOCTYPE root [<!ENTITY a 'x'>]><root>&a;</root>".data(using: .utf16LittleEndian)), as: .xml))
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data(repeating: 32, count: NetworkBodyFormatter.inputLimit + 1), as: .json))
+        let deep = String(repeating: "[", count: 129) + "0" + String(repeating: "]", count: 129)
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data(deep.utf8), as: .json))
+        let expanded = String(repeating: "[", count: 60) + Array(repeating: "0", count: 50_000).joined(separator: ",") + String(repeating: "]", count: 60)
+        XCTAssertThrowsError(try NetworkBodyFormatter.format(Data(expanded.utf8), as: .json))
+    }
     func testPagesLiteralFiltersStatusAndUpsertsPreserveBodies() throws {
         try networkFixture { root, store in
             var records: [NetworkRecord] = []
@@ -27,7 +87,7 @@ final class NetworkStoreTests: XCTestCase {
             }
             try store.upsert(records)
             XCTAssertEqual(try store.page().records.count, 100)
-            XCTAssertEqual(try store.page().records.first?.requestID, "249")
+            XCTAssertEqual(try store.page().records.first?.requestID, "0")
             XCTAssertEqual(try store.page(page: 1).records.count, 100)
             XCTAssertEqual(try store.page(page: 2).records.count, 50)
             XCTAssertEqual(try store.page(page: 99).page, 2)
@@ -38,7 +98,7 @@ final class NetworkStoreTests: XCTestCase {
             let record = records[0]
             try store.saveBodies(record.id, request: Data("{}".utf8), response: Data("[]".utf8))
             try store.upsert([record])
-            let persisted = try XCTUnwrap(try store.page(page: 2).records.last)
+            let persisted = try XCTUnwrap(try store.page().records.first)
             XCTAssertEqual(persisted.bodyState, .saved)
             XCTAssertEqual(try store.bodyPage(persisted, response: true, page: 0).text, "[]")
             let reader = try NetworkStore(directory: root, readOnly: true); defer { reader.close() }
@@ -116,8 +176,8 @@ final class NetworkStoreTests: XCTestCase {
             }
             let last = try store.page(page: 99)
             XCTAssertEqual(last.total, 10_000); XCTAssertEqual(last.records.count, 100)
-            XCTAssertEqual(last.records.first?.requestID, "99")
-            XCTAssertEqual(last.records.last?.requestID, "0")
+            XCTAssertEqual(last.records.first?.requestID, "9900")
+            XCTAssertEqual(last.records.last?.requestID, "9999")
         }
     }
     func testDatabaseCapacityFailureRollsBackBatch() throws {
@@ -162,13 +222,26 @@ private actor FakeNetworkVM: VMServiceTransport {
     var clears = 0
     var resumes = 0
     var cursors: [String] = []
-    func configure(complete: Bool? = nil, restart: Bool = false, missing: Bool = false, oversized: Bool = false, delay: Bool = false, supported: Bool = true, clockJitter: Int = 0) {
+    var requestCount = 1
+    var bodyDelay: UInt64 = 0
+    var bodyIDs: [String] = []
+    var summaries = 0
+    var activeBodies = 0
+    var peakBodies = 0
+    func configure(complete: Bool? = nil, restart: Bool = false, missing: Bool = false, oversized: Bool = false, delay: Bool = false, supported: Bool = true, clockJitter: Int = 0, requestCount: Int = 1, bodyDelay: UInt64 = 0) {
         if let complete { self.complete = complete }; if restart { start += 1 }
         missingBodies = missing; self.oversized = oversized; self.delay = delay; self.supported = supported
-        self.clockJitter = clockJitter
+        self.clockJitter = clockJitter; self.requestCount = requestCount; self.bodyDelay = bodyDelay
     }
     func counts() -> (Int, Int, Int) { (bodyCalls, clears, resumes) }
     func cursorValues() -> [String] { cursors }
+    func work() -> (summaries: Int, bodyIDs: [String], peakBodies: Int) { (summaries, bodyIDs, peakBodies) }
+    private func request(_ id: Int) -> [String: Any] {
+        var response: [String: Any] = ["statusCode": 200, "contentLength": 2]
+        if complete { response["endTime"] = 2_010_000 + id * 100 }
+        return ["id": String(id), "method": "POST", "uri": "http://example.test/echo", "startTime": 2_000_000 + id * 100,
+                "endTime": 2_000_100 + id * 100, "response": response]
+    }
     func call(endpoint: VMServiceEndpoint, method: String, parameters: [String: String]) async throws -> Data {
         if delay { try await Task.sleep(for: .seconds(10)) }
         if oversized { return Data(repeating: 65, count: 1025) }
@@ -179,12 +252,15 @@ private actor FakeNetworkVM: VMServiceTransport {
         case "ext.dart.io.httpEnableTimelineLogging": result = ["enabled": true]
         case "ext.dart.io.getHttpProfile":
             cursors.append(parameters["updatedSince"] ?? "")
-            var request: [String: Any] = ["id": "1", "method": "POST", "uri": "http://example.test/echo", "startTime": 2_000_000]
-            if complete { request["endTime"] = 2_010_000; request["response"] = ["statusCode": 200, "contentLength": 2] }
-            result = ["timestamp": 3_000_000, "requests": parameters["updatedSince"] == String(Int64.max) ? [] : [request]]
+            summaries += 1
+            result = ["timestamp": 3_000_000, "requests": parameters["updatedSince"] == String(Int64.max) ? [] : (1...requestCount).map { request($0) }]
         case "ext.dart.io.getHttpProfileRequest":
-            bodyCalls += 1
-            result = missingBodies ? [:] : ["requestBody": [123, 125], "responseBody": [91, 93]]
+            bodyCalls += 1; activeBodies += 1; peakBodies = max(peakBodies, activeBodies)
+            defer { activeBodies -= 1 }
+            let id = parameters["id"] ?? "1"; bodyIDs.append(id)
+            if bodyDelay > 0 { try await Task.sleep(nanoseconds: bodyDelay) }
+            result = request(Int(id) ?? 1)
+            if !missingBodies { result["requestBody"] = [123, 125]; result["responseBody"] = [91, 93] }
         case "ext.dart.io.clearHttpProfile": clears += 1
         case "resume": resumes += 1
         default: throw VMServiceError.unsupported
@@ -220,6 +296,82 @@ final class NetworkCaptureTests: XCTestCase {
         let history = try await reader.page(directory: root, query: NetworkQuery(), page: 0); XCTAssertEqual(history.total, 2)
         let dbBytes = try Data(contentsOf: root.appendingPathComponent("requests.sqlite"))
         XCTAssertNil(dbBytes.range(of: Data("PRIVATE_TEST_TOKEN".utf8)))
+    }
+    func testResponseCompletionAndLegacyTiming() throws {
+        var value: [String: Any] = ["id": "timing", "uri": "http://example.test/slow", "method": "POST",
+                                    "startTime": 1_000_000, "endTime": 1_000_100,
+                                    "response": ["startTime": 1_100_000, "statusCode": 200]]
+        let pending = try NetworkRecord.parse(value, epoch: "epoch", isolate: "main")
+        XCTAssertFalse(pending.isComplete); XCTAssertNil(pending.durationMS); XCTAssertNil(pending.endMicros)
+        value["response"] = ["startTime": 1_100_000, "endTime": 1_250_000, "statusCode": 200]
+        let completed = try NetworkRecord.parse(value, epoch: "epoch", isolate: "main")
+        XCTAssertTrue(completed.isComplete); XCTAssertEqual(completed.durationMS, 250)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(completed)) as? [String: Any])
+        legacy.removeValue(forKey: "timingVersion"); legacy["endMicros"] = 1_000_100
+        let old = try JSONDecoder().decode(NetworkRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(old.durationMS); XCTAssertFalse(old.isComplete)
+        value.removeValue(forKey: "response"); value["request"] = ["error": "connection failed"]
+        let failed = try NetworkRecord.parse(value, epoch: "epoch", isolate: "main")
+        XCTAssertTrue(failed.isComplete); XCTAssertEqual(failed.durationMS, 0.1)
+    }
+    func testBacklogDrainsWithoutNewSummariesAndSelectedRequestHasPriority() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = FakeNetworkVM(), endpoint = try XCTUnwrap(VMServiceEndpoint("http://localhost:5555/auth/"))
+        await vm.configure(complete: true, requestCount: 100, bodyDelay: 20_000_000)
+        let capture = NetworkCaptureSession(directory: root, endpoint: endpoint, transport: vm)
+        let metadata = try await capture.poll(cacheBodies: false)
+        XCTAssertEqual(metadata.pendingBodies, 100)
+        let reader = NetworkCacheReader()
+        let page = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        let newest = try XCTUnwrap(page.records.last), oldest = try XCTUnwrap(page.records.first)
+        let background = Task { try await capture.drainPendingBodies() }
+        try await Task.sleep(for: .milliseconds(5))
+        let duplicate = try await capture.cacheBody(oldest.id)
+        XCTAssertFalse(duplicate)
+        let selected = try await capture.cacheBody(newest.id)
+        XCTAssertTrue(selected)
+        let selectedPage = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        XCTAssertEqual(selectedPage.records.last?.bodyState, .saved)
+        let batch = try await background.value
+        XCTAssertEqual(batch.processed, 8); XCTAssertEqual(batch.pending, 91)
+        let before = await vm.work()
+        // A paused intake never asks for another summary, but bodies still catch up.
+        await vm.configure(complete: true, requestCount: 130)
+        var remaining = batch.pending
+        while remaining > 0 { remaining = try await capture.drainPendingBodies().pending }
+        let after = await vm.work()
+        XCTAssertEqual(after.summaries, before.summaries)
+        XCTAssertEqual(after.bodyIDs.count, 100)
+        XCTAssertEqual(Set(after.bodyIDs).count, 100)
+        XCTAssertLessThanOrEqual(after.peakBodies, 2)
+        let saved = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        XCTAssertEqual(saved.total, 100); XCTAssertTrue(saved.records.allSatisfy { $0.bodyState == .saved })
+        try await capture.finish()
+    }
+    func testUploadingFinishedDoesNotCacheIncompleteResponse() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = FakeNetworkVM(), endpoint = try XCTUnwrap(VMServiceEndpoint("http://localhost:5555/auth/"))
+        let capture = NetworkCaptureSession(directory: root, endpoint: endpoint, transport: vm)
+        _ = try await capture.poll()
+        let counts = await vm.counts(); XCTAssertEqual(counts.0, 0)
+        let reader = NetworkCacheReader()
+        let page = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        let record = try XCTUnwrap(page.records.first)
+        XCTAssertNil(record.durationMS); XCTAssertEqual(record.bodyState, .pending)
+        _ = try await capture.cacheBody(record.id)
+        let stillPending = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        XCTAssertEqual(stillPending.records.first?.bodyState, .pending)
+        await vm.configure(complete: true)
+        let before = await vm.work()
+        _ = try await capture.drainPendingBodies(refreshIncomplete: true)
+        let after = await vm.work()
+        XCTAssertEqual(after.summaries, before.summaries)
+        let completed = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        XCTAssertEqual(completed.records.first?.bodyState, .saved)
+        XCTAssertEqual(completed.records.first?.durationMS, 10)
+        try await capture.finish()
     }
     func testMissingBodiesUnsupportedSizeAndCancellation() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -283,7 +435,7 @@ extension NetworkCaptureTests {
         let update = try await capture.poll()
         XCTAssertTrue(update.supported, "The real Dart VM must advertise the supported HTTP extension")
         let transport = HTTPVMServiceTransport()
-        _ = try await transport.call(endpoint: connection.1, method: "trigger", parameters: ["value": "SWIFT_FIRST"])
+        _ = try await transport.call(endpoint: connection.1, method: "trigger", parameters: ["value": "SWIFT_FIRST", "delay": "160"])
         _ = try await capture.poll()
         _ = try await transport.call(endpoint: connection.1, method: "trigger", parameters: ["value": "SWIFT_SECOND"])
         _ = try await capture.poll()
@@ -291,10 +443,32 @@ extension NetworkCaptureTests {
         let page = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
         XCTAssertEqual(page.total, 2, page.records.map { "\($0.requestID) \($0.isolateID) \($0.method) \($0.url)" }.joined(separator: "\n"))
         XCTAssertTrue(page.records.allSatisfy { $0.status == 200 && $0.bodyState == .saved })
-        let first = try XCTUnwrap(page.records.last)
+        let first = try XCTUnwrap(page.records.first)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(first.durationMS), 140)
         let request = try await reader.body(directory: root, record: first, response: false, page: 0)
         let response = try await reader.body(directory: root, record: first, response: true, page: 0)
         XCTAssertTrue(request.text.contains("SWIFT_FIRST")); XCTAssertTrue(response.text.contains("SWIFT_FIRST"))
+        let streaming = Task {
+            try await transport.call(endpoint: connection.1, method: "trigger", parameters: ["value": "SWIFT_STREAMING", "delay": "1000"])
+        }
+        var partial: NetworkRecord?
+        for _ in 0..<8 {
+            _ = try await capture.poll(cacheBodies: false)
+            let current = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+            partial = current.records.first { record in !page.records.contains { $0.id == record.id } }
+            if partial != nil { break }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        let unfinished = try XCTUnwrap(partial)
+        XCTAssertNil(unfinished.endMicros); XCTAssertNil(unfinished.durationMS)
+        XCTAssertEqual(unfinished.bodyState, .pending)
+        _ = try await streaming.value
+        // No new summaries: complete this already-recorded response while paused.
+        _ = try await capture.drainPendingBodies(refreshIncomplete: true)
+        let completed = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
+        let cached = try XCTUnwrap(completed.records.first { $0.id == unfinished.id })
+        XCTAssertEqual(cached.bodyState, .saved)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(cached.durationMS), 900)
         let limited = HTTPVMServiceTransport(limit: 1024)
         do { _ = try await limited.call(endpoint: connection.1, method: "oversized", parameters: [:]); XCTFail("Expected wire size limit") }
         catch VMServiceError.responseTooLarge {} catch { XCTFail("Unexpected size error") }
@@ -303,7 +477,7 @@ extension NetworkCaptureTests {
         _ = try await transport.call(endpoint: connection.1, method: "stop", parameters: [:])
         process.waitUntilExit(); try await capture.finish()
         let history = try await reader.page(directory: root, query: NetworkQuery(), page: 0)
-        XCTAssertEqual(history.total, 2)
+        XCTAssertEqual(history.total, 3)
         let offline = try await reader.body(directory: root, record: first, response: true, page: 0)
         XCTAssertEqual(offline.text, response.text)
     }

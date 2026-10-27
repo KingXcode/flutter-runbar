@@ -92,9 +92,19 @@ Future<void> fixture() async {
       request.response.headers.set(HttpHeaders.locationHeader, 'http://not-used.invalid/');
     } else if (request.uri.path == '/echo') {
       final body = await utf8.decodeStream(request);
-      request.response.write(jsonEncode({'echo': body}));
+      final delay = int.tryParse(request.uri.queryParameters['delay'] ?? '') ?? 0;
+      if (delay > 0) {
+        request.response.bufferOutput = false;
+        request.response.write('{"echo":');
+        await request.response.flush();
+        await Future<void>.delayed(Duration(milliseconds: delay.clamp(0, 2000)));
+        request.response.write('${jsonEncode(body)}}');
+      } else {
+        request.response.write(jsonEncode({'echo': body}));
+      }
     } else if (request.uri.path == '/trigger') {
-      final call = await client.postUrl(Uri.parse('http://127.0.0.1:${server.port}/echo'));
+      final delay = request.uri.queryParameters['delay'] ?? '0';
+      final call = await client.postUrl(Uri.parse('http://127.0.0.1:${server.port}/echo?delay=$delay'));
       call.headers.contentType = ContentType.json;
       call.write(jsonEncode({'probe': request.uri.queryParameters['value']}));
       final response = await call.close(); await response.drain<void>();

@@ -17,6 +17,10 @@ final class NetworkMonitor: ObservableObject {
         var paused = false
         var capture: NetworkCaptureSession?
         var task: Task<Void, Never>?
+        var bodyTask: Task<Void, Never>?
+        var bodyRequestID: String?
+        var bodyGeneration = UUID()
+        var latestUpdate: NetworkCaptureUpdate?
         var generation = UUID()
         init(projectID: UUID, sessionID: UUID, enabled: Bool) {
             self.projectID = projectID; self.sessionID = sessionID; self.enabled = enabled
@@ -24,6 +28,8 @@ final class NetworkMonitor: ObservableObject {
     }
     @Published private(set) var states: [UUID: State] = [:]
     @Published private(set) var revision = 0
+    @Published private(set) var loadingBodies = Set<String>()
+    @Published private(set) var bodyErrors: [String: String] = [:]
     private var runtimes: [UUID: Runtime] = [:]
     private var finishing: [UUID: Task<Void, Never>] = [:]
     private var root: URL?
@@ -37,12 +43,14 @@ final class NetworkMonitor: ObservableObject {
     func discovered(_ endpoint: VMServiceEndpoint, sessionID: UUID) {
         guard let runtime = runtimes[sessionID], runtime.endpoint != endpoint else { return }
         let oldTask = runtime.task, oldCapture = runtime.capture
+        let oldBodyTask = cancelBody(runtime)
         runtime.generation = UUID(); runtime.task?.cancel(); runtime.task = nil; runtime.capture = nil
         runtime.endpoint = endpoint
         // Joining the old operation prevents a previous connection from writing
         // into the same SQLite cache after the new one starts.
         runtime.task = Task { [weak self, weak runtime] in
             await oldTask?.value
+            await oldBodyTask?.value
             try? await oldCapture?.finish()
             guard let self, let runtime, !Task.isCancelled, self.runtimes[sessionID] === runtime else { return }
             runtime.task = nil
@@ -54,6 +62,7 @@ final class NetworkMonitor: ObservableObject {
             runtime.enabled = enabled
             if enabled { runtime.paused = false }
             else {
+                _ = cancelBody(runtime)
                 states[runtime.sessionID] = State(text: "未开启接收 · 目标采集缓冲可能仍在记录")
             }
             transition(runtime)
@@ -78,7 +87,7 @@ final class NetworkMonitor: ObservableObject {
         }
     }
     private func startReading(_ runtime: Runtime) {
-        guard runtime.enabled, !runtime.paused, runtime.task == nil else { return }
+        guard runtime.enabled, runtime.task == nil else { return }
         guard let endpoint = runtime.endpoint, let directory = directory(runtime.sessionID) else {
             states[runtime.sessionID] = State(text: "等待 VM Service · Release / Web 可能不支持"); return
         }
@@ -87,16 +96,34 @@ final class NetworkMonitor: ObservableObject {
         let generation = UUID(); runtime.generation = generation
         states[runtime.sessionID] = State(text: "正在连接")
         runtime.task = Task { [weak self, weak runtime] in
-            var failures = 0
+            var failures = 0, nextSummary = Date.distantPast, lastPublication = Date.distantPast
+            var unpublished = false
             while !Task.isCancelled {
                 guard let runtime else { return }
+                var pending = 0
                 do {
-                    let update = try await capture.poll()
+                    var refreshed = false
+                    if !runtime.paused && Date() >= nextSummary {
+                        runtime.latestUpdate = try await capture.poll(cacheBodies: false)
+                        nextSummary = Date().addingTimeInterval(1); refreshed = true
+                        unpublished = unpublished || (runtime.latestUpdate?.requestsUpdated ?? 0) > 0
+                    }
+                    let drain = try await capture.drainPendingBodies(refreshIncomplete: runtime.paused)
                     guard !Task.isCancelled, runtime.generation == generation else { return }
-                    failures = 0
-                    self?.states[runtime.sessionID] = State(text: update.supported ? "采集中" : "等待 HTTP 采集扩展 · 当前进程可能不支持",
-                                                          canResumeApplication: !update.pausedIsolates.isEmpty)
-                    self?.revision += 1
+                    failures = 0; pending = drain.pending
+                    unpublished = unpublished || drain.processed > 0
+                    let suffix = pending > 0 ? " · 正文待缓存 \(pending) 条" : ""
+                    let text = runtime.paused ? "已暂停接收" + suffix :
+                        runtime.latestUpdate?.supported == true ? "采集中" + suffix : "等待 HTTP 采集扩展 · 当前进程可能不支持"
+                    // Catch up in small continuous batches, but never redraw the
+                    // main window at the per-request / per-batch frequency.
+                    if refreshed || Date().timeIntervalSince(lastPublication) >= 0.25 || (pending == 0 && drain.processed > 0) {
+                        let state = State(text: text, paused: runtime.paused,
+                                          canResumeApplication: runtime.latestUpdate?.pausedIsolates.isEmpty == false)
+                        if self?.states[runtime.sessionID] != state { self?.states[runtime.sessionID] = state }
+                        if unpublished { self?.revision += 1; unpublished = false }
+                        lastPublication = Date()
+                    }
                 } catch is CancellationError { return }
                 catch {
                     guard !Task.isCancelled, runtime.generation == generation else { return }
@@ -107,10 +134,39 @@ final class NetworkMonitor: ObservableObject {
                     self?.revision += 1
                     if !retry { runtime.paused = true; runtime.task = nil; return }
                 }
-                do { try await Task.sleep(for: .seconds(failures > 0 ? 3 : 1)) } catch { return }
+                do { try await Task.sleep(for: .milliseconds(failures > 0 ? 3000 : pending > 0 ? 10 : 200)) } catch { return }
             }
         }
     }
+    /// One cancellable priority slot, independent of receiving new summaries.
+    /// Selecting while paused may retrieve this already-recorded request.
+    func prioritizeBody(_ id: String, sessionID: UUID) {
+        guard let runtime = runtimes[sessionID], runtime.enabled, let capture = runtime.capture,
+              runtime.bodyRequestID != id || runtime.bodyTask == nil else { return }
+        let old = cancelBody(runtime), generation = UUID()
+        runtime.bodyGeneration = generation; runtime.bodyRequestID = id
+        loadingBodies.insert(id)
+        runtime.bodyTask = Task { [weak self, weak runtime] in
+            await old?.value
+            guard let self, let runtime, !Task.isCancelled, runtime.bodyGeneration == generation else { return }
+            do {
+                _ = try await capture.cacheBody(id)
+                guard !Task.isCancelled, runtime.bodyGeneration == generation else { return }
+            } catch {
+                guard !Task.isCancelled, runtime.bodyGeneration == generation else { return }
+                self.bodyErrors[id] = error.localizedDescription
+            }
+            self.loadingBodies.remove(id); runtime.bodyTask = nil
+            self.revision += 1
+        }
+    }
+    @discardableResult
+    private func cancelBody(_ runtime: Runtime) -> Task<Void, Never>? {
+        let old = runtime.bodyTask; old?.cancel(); runtime.bodyTask = nil; runtime.bodyGeneration = UUID()
+        if let id = runtime.bodyRequestID { loadingBodies.remove(id); bodyErrors[id] = nil }
+        runtime.bodyRequestID = nil; return old
+    }
+
     func clearTargetBuffer(_ id: UUID) {
         perform(id) { try await $0.clearTargetBuffer() }
     }
@@ -119,16 +175,17 @@ final class NetworkMonitor: ObservableObject {
     }
     private func perform(_ id: UUID, operation: @escaping (NetworkCaptureSession) async throws -> Void) {
         guard let runtime = runtimes[id], let capture = runtime.capture else { return }
-        let old = runtime.task
+        let old = runtime.task, oldBody = cancelBody(runtime)
         runtime.generation = UUID(); runtime.task?.cancel(); runtime.task = nil
         runtime.task = Task { [weak self, weak runtime] in
             await old?.value
+            await oldBody?.value
             guard let self, let runtime, self.runtimes[id] === runtime, !Task.isCancelled else { return }
             do {
                 try await operation(capture)
                 guard !Task.isCancelled else { return }
                 runtime.task = nil; self.revision += 1
-                if !runtime.paused { self.startReading(runtime) }
+                self.startReading(runtime)
             } catch {
                 guard !Task.isCancelled else { return }
                 runtime.task = nil; runtime.paused = true
@@ -141,10 +198,11 @@ final class NetworkMonitor: ObservableObject {
     func hasConnection(_ id: UUID) -> Bool { runtimes[id]?.capture != nil }
     func finished(_ id: UUID) {
         guard let runtime = runtimes.removeValue(forKey: id) else { return }
-        let old = runtime.task; runtime.generation = UUID(); old?.cancel()
+        let old = runtime.task, oldBody = cancelBody(runtime); runtime.generation = UUID(); old?.cancel()
         states[id] = nil
         finishing[id] = Task { [weak self] in
             await old?.value
+            await oldBody?.value
             do { try await runtime.capture?.finish() }
             catch { self?.states[id] = State(text: "采集已结束；网络缓存收尾失败", error: true) }
             self?.finishing[id] = nil; self?.revision += 1

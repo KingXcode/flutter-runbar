@@ -41,11 +41,14 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
     public var requestHeaders: String
     public var responseHeaders: String
     public var failure: String?
+    /// Version 1 stored the end of sending the request as the full duration.
+    /// Missing means that an old cache cannot provide a reliable total time.
+    public var timingVersion: Int?
     public var bodyState: NetworkBodyState = .pending
     public var bodyNote = ""
     public var startDate: Date { Date(timeIntervalSince1970: Double(startMicros) / 1_000_000) }
-    public var durationMS: Double? { endMicros.map { Double(max(0, $0 - startMicros)) / 1000 } }
-    public var isComplete: Bool { endMicros != nil || failure != nil }
+    public var durationMS: Double? { timingVersion == 2 ? endMicros.map { Double(max(0, $0 - startMicros)) / 1000 } : nil }
+    public var isComplete: Bool { (timingVersion == 2 && endMicros != nil) || failure != nil }
     public static func identity(epoch: String, isolate: String, request: String) -> String {
         SHA256.hash(data: Data("\(epoch.utf8.count):\(epoch)\(isolate.utf8.count):\(isolate)\(request)".utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -56,6 +59,10 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
               let start = value["startTime"] as? NSNumber else { throw RunbarError.message("网络摘要格式不受支持。") }
         let request = value["request"] as? [String: Any] ?? [:]
         let response = value["response"] as? [String: Any] ?? [:]
+        let failure = (response["error"] as? String ?? request["error"] as? String).map { String($0.prefix(2048)) }
+        // Dart's top-level endTime only finishes the upload; the response can
+        // still be arriving. Cache complete bodies after response.endTime.
+        let end = (response["endTime"] as? NSNumber)?.int64Value ?? (request["error"] == nil ? nil : (value["endTime"] as? NSNumber)?.int64Value)
         func headers(_ object: Any?) throws -> String {
             guard let object else { return "" }
             let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .prettyPrinted, .fragmentsAllowed])
@@ -67,12 +74,12 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
         let contentType = (type as? [String])?.joined(separator: ", ") ?? type as? String ?? ""
         return try NetworkRecord(id: identity(epoch: epoch, isolate: isolate, request: requestID), epoch: epoch,
                                  isolateID: isolate, requestID: requestID, method: method, url: url,
-                                 startMicros: start.int64Value, endMicros: (value["endTime"] as? NSNumber)?.int64Value,
+                                 startMicros: start.int64Value, endMicros: end,
                                  status: (response["statusCode"] as? NSNumber)?.intValue, contentType: String(contentType.prefix(512)),
                                  requestBytes: (request["contentLength"] as? NSNumber)?.int64Value,
                                  responseBytes: (response["contentLength"] as? NSNumber)?.int64Value,
                                  requestHeaders: headers(request["headers"]), responseHeaders: headers(response["headers"]),
-                                 failure: (response["error"] as? String ?? request["error"] as? String).map { String($0.prefix(2048)) })
+                                 failure: failure, timingVersion: 2)
     }
 }
 

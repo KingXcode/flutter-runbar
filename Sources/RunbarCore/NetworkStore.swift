@@ -109,7 +109,7 @@ public final class NetworkStore {
         record.bodyState = NetworkBodyState(rawValue: text(stmt, 1)) ?? .unavailable
         record.bodyNote = text(stmt, 2); return record
     }
-    public func page(query: NetworkQuery = NetworkQuery(), page: Int = 0) throws -> NetworkPage {
+    public func page(query: NetworkQuery = NetworkQuery(), page: Int = 0, latest: Bool = false) throws -> NetworkPage {
         var clauses = ["1=1"], values: [String] = []
         if !query.text.isEmpty { clauses.append("instr(lower(url),lower(?))>0"); values.append(String(query.text.prefix(1024))) }
         if !query.method.isEmpty { clauses.append("method=?"); values.append(query.method) }
@@ -125,8 +125,9 @@ public final class NetworkStore {
         let predicate = clauses.joined(separator: " AND ")
         let total = try number("SELECT count(*) FROM requests")
         let matching = try number("SELECT count(*) FROM requests WHERE " + predicate, values)
-        let page = min(max(0, page), max(0, (matching - 1) / NetworkPage.pageSize))
-        let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE \(predicate) ORDER BY started DESC,id LIMIT \(NetworkPage.pageSize) OFFSET \(page * NetworkPage.pageSize)", values)
+        let lastPage = max(0, (matching - 1) / NetworkPage.pageSize)
+        let page = latest ? lastPage : min(max(0, page), lastPage)
+        let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE \(predicate) ORDER BY started ASC,id ASC LIMIT \(NetworkPage.pageSize) OFFSET \(page * NetworkPage.pageSize)", values)
         defer { sqlite3_finalize(stmt) }
         var records: [NetworkRecord] = []
         var step = sqlite3_step(stmt)
@@ -141,6 +142,29 @@ public final class NetworkStore {
         var step = sqlite3_step(stmt)
         while step == SQLITE_ROW { result.append(try record(stmt)); step = sqlite3_step(stmt) }
         guard step == SQLITE_DONE else { throw storageError() }; return result
+    }
+    public func request(_ id: String) throws -> NetworkRecord? {
+        let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE id=?", [id])
+        defer { sqlite3_finalize(stmt) }
+        let step = sqlite3_step(stmt)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { throw storageError() }
+        return try record(stmt)
+    }
+    public func pendingBodyCount(epoch: String) throws -> Int {
+        try number("SELECT count(*) FROM requests WHERE epoch=? AND body_state='pending' AND (ended IS NOT NULL OR failed=1)", [epoch])
+    }
+    public func inProgressBodies(epoch: String, isolate: String, after: String) throws -> [NetworkRecord] {
+        let stmt = try statement("SELECT metadata,body_state,body_note FROM requests WHERE epoch=? AND isolate=? AND body_state='pending' AND ended IS NULL AND failed=0 AND id>? ORDER BY id LIMIT \(limits.bodiesPerPoll)", [epoch, isolate, after])
+        defer { sqlite3_finalize(stmt) }
+        var records: [NetworkRecord] = []
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW { records.append(try record(stmt)); step = sqlite3_step(stmt) }
+        guard step == SQLITE_DONE else { throw storageError() }; return records
+    }
+    public func finalizePending(epoch: String, isolate: String, note: String) throws {
+        let stmt = try statement("UPDATE requests SET body_state='unavailable',body_note=? WHERE epoch=? AND isolate=? AND body_state='pending'", [note, epoch, isolate])
+        defer { sqlite3_finalize(stmt) }; guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
     }
     public func markBody(_ id: String, state: NetworkBodyState, note: String = "") throws {
         let stmt = try statement("UPDATE requests SET body_state=?,body_note=? WHERE id=?", [state.rawValue, note, id])
@@ -184,12 +208,21 @@ public final class NetworkStore {
     private func bodyURL(_ id: String, response: Bool) -> URL {
         directory.appendingPathComponent("bodies/\(id).\(response ? "response" : "request")")
     }
-    public func bodyPage(_ record: NetworkRecord, response: Bool, page: Int) throws -> NetworkBodyPage {
+    public func bodyPage(_ record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw) throws -> NetworkBodyPage {
         guard record.bodyState == .saved, record.id.count == 64, record.id.allSatisfy({ $0.isHexDigit }) else {
-            return NetworkBodyPage(text: record.bodyNote.isEmpty ? record.bodyState.title : record.bodyNote, page: 0, pages: 1, bytes: 0)
+            let pending = record.isComplete ? "正文正在排队缓存，选中后会优先加载。" : "响应尚未接收完成，完成后将缓存正文。"
+            return NetworkBodyPage(text: record.bodyNote.isEmpty ? (record.bodyState == .pending ? pending : record.bodyState.title) : record.bodyNote, page: 0, pages: 1, bytes: 0)
         }
         let handle = try FileHandle(forReadingFrom: bodyURL(record.id, response: response)); defer { try? handle.close() }
         let bytes = Int(try handle.seekToEnd()), chunk = 128 * 1024
+        if format != .raw {
+            guard bytes <= NetworkBodyFormatter.inputLimit else { throw RunbarError.message("正文超过 1 MB，无法格式化。") }
+            try handle.seek(toOffset: 0)
+            let raw = try handle.read(upToCount: NetworkBodyFormatter.inputLimit + 1) ?? Data()
+            let formatted = try NetworkBodyFormatter.format(raw, as: format)
+            let display = NetworkBodyFormatter.page(formatted, page: page, chunk: chunk)
+            return NetworkBodyPage(text: display.text, page: display.page, pages: display.pages, bytes: bytes)
+        }
         let pages = max(1, (bytes + chunk - 1) / chunk), page = min(max(0, page), pages - 1)
         let offset = page * chunk, start = max(0, offset - 3)
         try handle.seek(toOffset: UInt64(start))
@@ -207,13 +240,17 @@ public final class NetworkStore {
 
 public actor NetworkCacheReader {
     public init() {}
-    public func page(directory: URL, query: NetworkQuery, page: Int) throws -> NetworkPage {
+    public func page(directory: URL, query: NetworkQuery, page: Int, latest: Bool = false) throws -> NetworkPage {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("requests.sqlite").path) else { return .empty }
         let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
-        return try store.page(query: query, page: page)
+        return try store.page(query: query, page: page, latest: latest)
     }
-    public func body(directory: URL, record: NetworkRecord, response: Bool, page: Int) throws -> NetworkBodyPage {
+    public func request(directory: URL, id: String) throws -> NetworkRecord? {
         let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
-        return try store.bodyPage(record, response: response, page: page)
+        return try store.request(id)
+    }
+    public func body(directory: URL, record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw) throws -> NetworkBodyPage {
+        let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
+        return try store.bodyPage(record, response: response, page: page, format: format)
     }
 }
