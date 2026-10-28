@@ -7,8 +7,7 @@ let package = Package(
     targets: [
         .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
         .target(name: "RunbarProcess"),
-        .target(name: "RunbarCore", dependencies: ["RunbarProcess", "CSQLite"],
-                linkerSettings: [.linkedLibrary("dns_sd", .when(platforms: [.macOS]))]),
+        .target(name: "RunbarCore", dependencies: ["RunbarProcess", "CSQLite"]),
         .testTarget(name: "RunbarCoreTests", dependencies: ["RunbarCore"])
     ],
     swiftLanguageModes: [.v5]
