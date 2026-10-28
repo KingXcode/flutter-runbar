@@ -7,6 +7,7 @@ public struct ProjectRunState {
     public var session: RunSession?
     public var command: String?
     public var error: String?
+    public var flutterControls: FlutterRunControls?
     public var isBusy: Bool { phase != .idle }
     // Links are valid only for the owning run, never during stop or from history.
     public var liveDevToolsURLs: [String] {
@@ -31,9 +32,11 @@ public protocol ProjectCommandRunning: AnyObject {
     func start(project: Project, preset: CommandPreset, extraPath: String)
     func stop()
     func runningProcessID() async -> Int32?
+    func sendFlutterAction(_ action: FlutterRunAction, sessionID: UUID)
 }
 public extension ProjectCommandRunning {
     func runningProcessID() async -> Int32? { nil }
+    func sendFlutterAction(_ action: FlutterRunAction, sessionID: UUID) {}
 }
 extension ProcessRunner: ProjectCommandRunning {
     public func start(project: Project, preset: CommandPreset, extraPath: String) {
@@ -108,6 +111,16 @@ public final class ProjectRunCoordinator {
     public func stopAll() {
         for id in Array(runners.keys) { stop(projectID: id) }
     }
+    @discardableResult
+    public func sendFlutterAction(_ action: FlutterRunAction, projectID: UUID, sessionID: UUID) -> Bool {
+        var state = state(for: projectID)
+        guard state.phase == .running, state.session?.id == sessionID,
+              var controls = state.flutterControls, controls.canSend(action), let runner = runners[projectID] else { return false }
+        // Reserve the action on the main actor before the runner queue writes.
+        controls.isSending = true; state.flutterControls = controls; update(projectID, state)
+        runner.sendFlutterAction(action, sessionID: sessionID)
+        return true
+    }
     public func activeProcesses() async -> [ActiveProjectProcess] {
         var result: [ActiveProjectProcess] = []
         let snapshots = runners.compactMap { id, runner -> (UUID, UUID, RunSession, ProjectCommandRunning)? in
@@ -151,6 +164,13 @@ public final class ProjectRunCoordinator {
         case .service(let endpoint):
             guard state.phase == .running, let session = state.session else { return }
             onEvent?(.service(projectID: projectID, sessionID: session.id, endpoint: endpoint))
+        case .flutterControls(let controls):
+            guard state.phase == .running else { return }
+            state.flutterControls = controls; update(projectID, state)
+        case .interactionRejected(let message):
+            // An input failure must not terminate the user's running app.
+            guard state.phase == .running else { return }
+            onEvent?(.failure(projectID, message))
         case .finished(let session):
             // Launch failure can finish without .started; generation still owns it.
             clear(projectID, error: session.error); onEvent?(.finished(projectID, session))

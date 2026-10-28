@@ -10,6 +10,7 @@
 #include <spawn.h>
 #include <pthread.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
 #ifdef __APPLE__
 #include <sys/proc.h>
 #include <sys/sysctl.h>
@@ -50,27 +51,47 @@ static int group_has_no_live_processes(pid_t pgid) {
 }
 #endif
 
-static int rb_spawn_unlocked(const char *shell, const char *command, const char *directory,
-             const char *path, pid_t *pid, int *output_fd) {
-    int output[2];
-    if (pipe(output) < 0) return errno;
+static int owned_descriptors(int descriptors[2]) {
     // GUI processes can inherit closed standard descriptors. Keep pipes above 2
     // so subsequent dup/close actions cannot accidentally close redirected I/O.
     for (int i = 0; i < 2; ++i) {
-        if (output[i] <= STDERR_FILENO) {
-            int replacement = fcntl(output[i], F_DUPFD_CLOEXEC, 3);
-            if (replacement < 0) { int e = errno; close(output[0]); close(output[1]); return e; }
-            close(output[i]); output[i] = replacement;
-        } else if (fcntl(output[i], F_SETFD, FD_CLOEXEC) < 0) {
-            int e = errno; close(output[0]); close(output[1]); return e;
+        if (descriptors[i] <= STDERR_FILENO) {
+            int replacement = fcntl(descriptors[i], F_DUPFD_CLOEXEC, 3);
+            if (replacement < 0) { int e = errno; close(descriptors[0]); close(descriptors[1]); return e; }
+            close(descriptors[i]); descriptors[i] = replacement;
+        } else if (fcntl(descriptors[i], F_SETFD, FD_CLOEXEC) < 0) {
+            int e = errno; close(descriptors[0]); close(descriptors[1]); return e;
         }
+    }
+    return 0;
+}
+
+static int rb_spawn_unlocked(const char *shell, const char *command, const char *directory,
+             const char *path, pid_t *pid, int *output_fd, int *input_fd) {
+    int output[2], input[2] = {-1, -1};
+    if (pipe(output) < 0) return errno;
+    int error = owned_descriptors(output);
+    if (error) return error;
+    if (input_fd) {
+        // A socket pair provides stdin bytes without changing terminal/output
+        // buffering. Suppress SIGPIPE on a closed child without global signals.
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, input) < 0) { error = errno; close(output[0]); close(output[1]); return error; }
+        error = owned_descriptors(input);
+        if (error) { close(output[0]); close(output[1]); return error; }
+        int flags = fcntl(input[1], F_GETFL);
+        if (flags < 0 || fcntl(input[1], F_SETFL, flags | O_NONBLOCK) < 0) error = errno;
+#ifdef __APPLE__
+        int yes = 1;
+        if (!error && setsockopt(input[1], SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) < 0) error = errno;
+#endif
+        if (error) { close(output[0]); close(output[1]); close(input[0]); close(input[1]); return error; }
     }
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attributes;
-    int error = posix_spawn_file_actions_init(&actions);
-    if (error) { close(output[0]); close(output[1]); return error; }
+    error = posix_spawn_file_actions_init(&actions);
+    if (error) { close(output[0]); close(output[1]); if (input_fd) { close(input[0]); close(input[1]); } return error; }
     error = posix_spawnattr_init(&attributes);
-    if (error) { posix_spawn_file_actions_destroy(&actions); close(output[0]); close(output[1]); return error; }
+    if (error) { posix_spawn_file_actions_destroy(&actions); close(output[0]); close(output[1]); if (input_fd) { close(input[0]); close(input[1]); } return error; }
 #define CHECK(call) do { if (!error) error = (call); } while (0)
 #ifdef __APPLE__
     // macOS 26 implements the standardized API; the _np spelling is deprecated.
@@ -82,7 +103,11 @@ static int rb_spawn_unlocked(const char *shell, const char *command, const char 
     CHECK(posix_spawn_file_actions_adddup2(&actions, output[1], STDERR_FILENO));
     CHECK(posix_spawn_file_actions_addclose(&actions, output[0]));
     CHECK(posix_spawn_file_actions_addclose(&actions, output[1]));
-    CHECK(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0));
+    if (input_fd) {
+        CHECK(posix_spawn_file_actions_adddup2(&actions, input[0], STDIN_FILENO));
+        CHECK(posix_spawn_file_actions_addclose(&actions, input[0]));
+        CHECK(posix_spawn_file_actions_addclose(&actions, input[1]));
+    } else { CHECK(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)); }
     sigset_t defaults, mask;
     sigemptyset(&mask); sigemptyset(&defaults);
     sigaddset(&defaults, SIGINT); sigaddset(&defaults, SIGTERM); sigaddset(&defaults, SIGPIPE);
@@ -95,8 +120,21 @@ static int rb_spawn_unlocked(const char *shell, const char *command, const char 
     if (!error) error = posix_spawn(pid, shell, &actions, &attributes, argv, environ);
     posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
     close(output[1]);
+    if (input_fd) { close(input[0]); if (error) close(input[1]); else *input_fd = input[1]; }
     if (error) { close(output[0]); return error; }
     *output_fd = output[0]; return 0;
+}
+int rb_send_key(int input_fd, char key) {
+    if (input_fd <= STDERR_FILENO) return EINVAL;
+    ssize_t count;
+    do {
+#ifdef __APPLE__
+        count = send(input_fd, &key, 1, 0);
+#else
+        count = send(input_fd, &key, 1, MSG_NOSIGNAL);
+#endif
+    } while (count < 0 && errno == EINTR);
+    return count == 1 ? 0 : count < 0 ? errno : EIO;
 }
 int rb_signal(pid_t pid, int sig) {
     if (pid <= 1) return EINVAL;
@@ -132,7 +170,17 @@ int rb_spawn(const char *shell, const char *command, const char *directory,
              const char *path, pid_t *pid, int *output_fd) {
     int error = pthread_mutex_lock(&spawn_mutex);
     if (error) return error;
-    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd);
+    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd, NULL);
+    pthread_mutex_unlock(&spawn_mutex);
+    return result;
+}
+int rb_spawn_interactive(const char *shell, const char *command, const char *directory,
+                         const char *path, pid_t *pid, int *output_fd, int *input_fd) {
+    if (!input_fd) return EINVAL;
+    *input_fd = -1;
+    int error = pthread_mutex_lock(&spawn_mutex);
+    if (error) return error;
+    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd, input_fd);
     pthread_mutex_unlock(&spawn_mutex);
     return result;
 }

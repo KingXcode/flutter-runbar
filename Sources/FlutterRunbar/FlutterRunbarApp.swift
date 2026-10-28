@@ -695,6 +695,13 @@ final class AppModel: ObservableObject {
         #endif
     }
     func stop() { if let id = selectedProject { stop(projectID: id) } }
+    func sendFlutterAction(_ action: FlutterRunAction, projectID: UUID, sessionID: UUID) {
+        guard !quitWhenFinished, nativeActionProjectID == nil,
+              config.projects.first(where: { $0.id == projectID })?.kind == .flutter else { return }
+        if coordinator?.sendFlutterAction(action, projectID: projectID, sessionID: sessionID) != true {
+            report("当前 Flutter 运行不支持此操作，或正在处理其他操作。", projectID: projectID)
+        }
+    }
     func stopAllForQuit() {
         quitWhenFinished = true
         coordinator?.stopAll()

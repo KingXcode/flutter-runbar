@@ -210,6 +210,10 @@ struct ManagerView: View {
                         .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "尚未选择项目")
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if let project = model.project {
+                    if model.selectedState.phase == .running, let controls = model.selectedState.flutterControls,
+                       let sessionID = model.selectedState.session?.id {
+                        flutterRunButtons(projectID: project.id, sessionID: sessionID, controls: controls)
+                    }
                     Menu {
                         ForEach(ProjectKind.allCases) { kind in
                             Button(kind.displayName) { model.setProjectKind(kind, for: project.id) }
@@ -256,6 +260,33 @@ struct ManagerView: View {
                 }.controlSize(.small)
             }
         }.padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func flutterRunButtons(projectID: UUID, sessionID: UUID, controls: FlutterRunControls) -> some View {
+        HStack(spacing: 5) {
+            Button(controls.workingAction == .hotReload ? "重载中…" : "热重载", systemImage: "bolt.fill") {
+                model.sendFlutterAction(.hotReload, projectID: projectID, sessionID: sessionID)
+            }.disabled(!controls.canSend(.hotReload) || model.quitWhenFinished)
+                .help(controls.isReady ? "r · 加载 Dart 修改并保留当前状态；仅支持 Debug，结果见日志" : "等待 Flutter 输出交互命令后启用")
+                .accessibilityLabel("Flutter 热重载")
+            Button(controls.workingAction == .hotRestart ? "重启中…" : "热重启", systemImage: "arrow.counterclockwise") {
+                model.sendFlutterAction(.hotRestart, projectID: projectID, sessionID: sessionID)
+            }.disabled(!controls.canSend(.hotRestart) || model.quitWhenFinished)
+                .help(controls.isReady ? "R · 从 main 重新运行 Dart 代码，会重置当前状态；仅支持 Debug" : "等待 Flutter 输出交互命令后启用")
+                .accessibilityLabel("Flutter 热重启")
+            Menu {
+                Button(controls.isDetaching ? "正在分离…" : "分离运行，保留 App", systemImage: "arrow.up.right.square") {
+                    model.sendFlutterAction(.detach, projectID: projectID, sessionID: sessionID)
+                }.disabled(!controls.canSend(.detach))
+                    .help("d · 结束 flutter run / attach 命令，App 继续运行；当前运行的日志和网络采集结束")
+                Button("显示 Flutter 运行帮助", systemImage: "questionmark.circle") {
+                    model.sendFlutterAction(.help, projectID: projectID, sessionID: sessionID)
+                }.disabled(!controls.canSend(.help))
+                    .help("h · 在输出日志中列出当前 Flutter 版本支持的全部交互命令")
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize().disabled(model.quitWhenFinished)
+                .help("Flutter 运行操作").accessibilityLabel("更多 Flutter 操作")
+        }.controlSize(.small).fixedSize()
     }
 
     private var historyPane: some View {
@@ -581,6 +612,7 @@ private struct SessionBadge: View {
         case .stopped: return (attachment ? "已断开" : "已停止", "stop.circle", .secondary)
         case .cancelled: return ("已取消", "xmark.circle", .secondary)
         case .interrupted: return ("已中断", "exclamationmark.triangle", .orange)
+        case .detached: return ("已分离", "arrow.up.right.square", .secondary)
         }
     }
     var body: some View { StatusTag(title: details.0, icon: details.1, color: details.2, compact: compact) }

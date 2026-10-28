@@ -56,7 +56,7 @@ public struct Configuration: Codable {
         return projects.remove(at: index)
     }
 }
-public enum RunStatus: String, Codable, Sendable { case running, succeeded, failed, stopped, interrupted, cancelled }
+public enum RunStatus: String, Codable, Sendable { case running, succeeded, failed, stopped, interrupted, cancelled, detached }
 public struct RunSession: Codable, Identifiable, Sendable {
     public var id: UUID
     public var projectPath: String

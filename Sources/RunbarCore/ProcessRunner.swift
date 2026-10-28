@@ -7,7 +7,7 @@ import Glibc
 #endif
 
 public final class ProcessRunner: @unchecked Sendable {
-    public enum Event { case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String), service(VMServiceEndpoint) }
+    public enum Event { case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String), service(VMServiceEndpoint), flutterControls(FlutterRunControls?), interactionRejected(String) }
     private let queue = DispatchQueue(label: "runbar.process")
     private let outputLock = NSLock()
     private var pendingOutput = ""
@@ -25,7 +25,14 @@ public final class ProcessRunner: @unchecked Sendable {
     private var start = DispatchTime.now()
     private var stopTime: DispatchTime?
     private var stopStage = 0
+    private var inputFD: Int32 = -1
+    private var flutterControls: FlutterRunControls?
+    private var flutterOutput = FlutterRunOutput()
+    private var requestedDetach = false
+    private var flutterOperation: UUID?
+    private var flutterReply = ""
     public init(store: SessionStore, handler: @escaping (Event) -> Void) { self.store = store; self.handler = handler }
+    deinit { if inputFD >= 0 { close(inputFD) } }
     private func emit(_ event: Event) {
         guard case .output(let text) = event else { DispatchQueue.main.async { self.handler(event) }; return }
         guard !text.isEmpty else { return }
@@ -57,12 +64,20 @@ public final class ProcessRunner: @unchecked Sendable {
         do {
             try store.save(next)
             log = try RunLog(directory: store.directory(next.id))
-            var child: pid_t = 0; var output: Int32 = -1
-            let error = rb_spawn(shell, preset.command, project.path, CommandEnvironment.extraPath(extraPath), &child, &output)
+            var child: pid_t = 0; var output: Int32 = -1; var input: Int32 = -1
+            let interactive = FlutterRunInput.enabled(project: project, preset: preset)
+            let path = CommandEnvironment.extraPath(extraPath)
+            let error = interactive
+                ? rb_spawn_interactive(shell, preset.command, project.path, path, &child, &output, &input)
+                : rb_spawn(shell, preset.command, project.path, path, &child, &output)
             guard error == 0 else { throw RunbarError.message("启动失败：\(String(cString: strerror(error)))") }
             pid = child; session = next; pipeEnded = false; stopped = false
             parser = OutputParser(); serviceDiscovery = VMServiceDiscovery(); start = .now(); stopTime = nil; stopStage = 0
+            inputFD = input; flutterOutput = FlutterRunOutput(); requestedDetach = false
+            flutterControls = interactive ? FlutterRunControls() : nil
+            flutterOperation = nil; flutterReply = ""
             emit(.started(next))
+            if interactive { emit(.flutterControls(flutterControls)) }
             let source = DispatchSource.makeTimerSource(queue: queue)
             source.schedule(deadline: .now(), repeating: .milliseconds(100))
             source.setEventHandler { [weak self] in self?.tick() }
@@ -102,6 +117,24 @@ public final class ProcessRunner: @unchecked Sendable {
     private func receive(_ data: Data) {
         do { try log?.append(data) } catch { loggingFailed("日志写入失败，正在停止命令。日志可能不完整：\(error.localizedDescription)") }
         let parsed = parser.consume(data)
+        if var controls = flutterControls {
+            let previous = controls
+            flutterOutput.consume(parsed.text)
+            if controls.workingAction != nil {
+                flutterReply += parsed.text
+                // Read chunks are 16 KiB. Retain just a small boundary tail;
+                // completed operations stop inspecting application output.
+                let pattern = "(?m)^(?:\\[[^\\]\\r\\n]*\\]\\s*)?(?:Reloaded [0-9]+[^\\r\\n]*libraries|Restarted application in |Hot reload was rejected:|Try again after fixing the above error\\(s\\)\\.)"
+                if flutterReply.range(of: pattern, options: .regularExpression) != nil {
+                    controls.workingAction = nil; flutterOperation = nil; flutterReply = ""
+                } else { flutterReply = String(decoding: flutterReply.utf8.suffix(8192), as: UTF8.self) }
+            }
+            controls.actions = flutterOutput.actions
+            flutterControls = controls
+            if controls != previous {
+                emit(.flutterControls(controls))
+            }
+        }
         emit(.output(parsed.text)); addURLs(parsed.urls)
         for endpoint in serviceDiscovery.consume(parsed.text) { emit(.service(endpoint)) }
     }
@@ -118,6 +151,55 @@ public final class ProcessRunner: @unchecked Sendable {
         session?.error = message; emit(.failure(message)); requestStop()
     }
     public func stop() { queue.async { self.requestStop() } }
+    public func sendFlutterAction(_ action: FlutterRunAction, sessionID: UUID) {
+        queue.async {
+            guard self.session?.id == sessionID, self.stopTime == nil else { return }
+            guard self.inputFD >= 0, var controls = self.flutterControls, controls.canSend(action) else {
+                self.emit(.flutterControls(self.flutterControls))
+                self.emit(.interactionRejected("Flutter 尚未就绪、正在接收操作或不支持此功能。")); return
+            }
+            controls.isSending = true; self.flutterControls = controls
+            self.emit(.flutterControls(controls))
+            let error = rb_send_key(self.inputFD, CChar(bitPattern: action.rawValue.utf8.first!))
+            guard error == 0 else {
+                self.closeInput(); self.flutterControls = nil; self.emit(.flutterControls(nil))
+                self.emit(.interactionRejected("无法向当前 Flutter 运行发送操作：\(String(cString: strerror(error)))")); return
+            }
+            if action == .hotReload || action == .hotRestart {
+                controls.workingAction = action; self.flutterControls = controls; self.flutterReply = ""
+                let token = UUID(); self.flutterOperation = token
+                self.emit(.flutterControls(controls))
+                self.queue.asyncAfter(deadline: .now() + .seconds(120)) { [weak self] in
+                    guard let self, self.session?.id == sessionID, self.stopTime == nil,
+                          self.flutterOperation == token, var value = self.flutterControls else { return }
+                    self.flutterOperation = nil; self.flutterReply = ""; value.workingAction = nil
+                    self.flutterControls = value; self.emit(.flutterControls(value))
+                    self.emit(.interactionRejected("Flutter 尚未返回重载完成信息，请查看日志后重试。"))
+                }
+            }
+            if action == .detach {
+                self.requestedDetach = true; controls.isDetaching = true; self.flutterControls = controls
+                self.emit(.flutterControls(controls))
+                self.queue.asyncAfter(deadline: .now() + .seconds(15)) { [weak self] in
+                    guard let self, self.session?.id == sessionID, self.stopTime == nil,
+                          var value = self.flutterControls, value.isDetaching else { return }
+                    self.requestedDetach = false; value.isDetaching = false
+                    self.flutterControls = value; self.emit(.flutterControls(value))
+                    self.emit(.interactionRejected("Flutter 命令尚未退出，请查看分离操作的输出后重试。"))
+                }
+            }
+            // Flutter consumes a byte chunk as one key. Space out clicks to
+            // reduce coalescing; reloads also wait for their completion output.
+            // This indicates input delivery only; Flutter logs report results.
+            self.queue.asyncAfter(deadline: .now() + .milliseconds(600)) { [weak self] in
+                guard let self, self.session?.id == sessionID, self.stopTime == nil, var value = self.flutterControls else { return }
+                value.isSending = false; self.flutterControls = value; self.emit(.flutterControls(value))
+            }
+        }
+    }
+    private func closeInput() {
+        if inputFD >= 0 { close(inputFD); inputFD = -1 }
+    }
     public func runningProcessID() async -> Int32? {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume(returning: self.session != nil && self.pid > 1 ? self.pid : nil) }
@@ -126,6 +208,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private func requestStop() {
         guard session != nil, stopTime == nil else { return }
         stopped = true; stopTime = .now(); stopStage = 1
+        closeInput()
         signal(SIGINT)
     }
     private func signal(_ signal: Int32) {
@@ -154,6 +237,8 @@ public final class ProcessRunner: @unchecked Sendable {
     }
     private func finish(code: Int32?) {
         timer?.cancel(); timer = nil
+        closeInput(); flutterControls = nil
+        flutterOperation = nil; flutterReply = ""
         let final = parser.consume(Data(), final: true); emit(.output(final.text)); addURLs(final.urls)
         for endpoint in serviceDiscovery.consume(final.text, final: true) { emit(.service(endpoint)) }
         guard var value = session else { return }
@@ -161,7 +246,7 @@ public final class ProcessRunner: @unchecked Sendable {
         value.exitCode = code
         do { try log?.close() } catch { value.error = "日志落盘失败，日志可能不完整：\(error.localizedDescription)" }
         log = nil
-        value.status = value.error != nil ? .failed : stopped ? .stopped : code == 0 ? .succeeded : .failed
+        value.status = value.error != nil ? .failed : stopped ? .stopped : code == 0 ? (requestedDetach ? .detached : .succeeded) : .failed
         do { try store.save(value) } catch { value.error = "保存运行记录失败：\(error.localizedDescription)"; value.status = .failed }
         session = nil; pid = 0; emit(.finished(value))
     }
