@@ -40,6 +40,9 @@ targets:
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHighResolutionCapable: true
         NSAppDataUsageDescription: Runbar 需要核验您选择的 App 沙盒归属，并在您确认后将整个容器移到废纸篓。
+        NSBonjourServices:
+          - _dartVmService._tcp
+        NSLocalNetworkUsageDescription: Runbar 使用本机服务发现查找您选择的 Flutter App 调试地址，用于日志和网络监听。
     settings:
       base:
         PRODUCT_NAME: Runbar

@@ -21,11 +21,11 @@ public enum ApplicationDiscovery {
             let flutter = ["FlutterMacOS.framework", "Flutter.framework"].contains {
                 FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
             }
-            guard app.activationPolicy == .regular || flutter else { return nil }
+            guard flutter else { return nil }
             return RunningApplicationCandidate(processID: app.processIdentifier,
                 application: ApplicationTarget(name: name, bundleIdentifier: app.bundleIdentifier, bundlePath: url.path),
                 launchedAt: app.launchDate, flutterDetected: flutter)
-        }.sorted { $0.flutterDetected != $1.flutterDetected ? $0.flutterDetected : $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending }
+        }.sorted { $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending }
     }
     @MainActor public static func isCurrent(_ candidate: RunningApplicationCandidate) -> Bool {
         guard let app = NSRunningApplication(processIdentifier: candidate.processID), !app.isTerminated,
@@ -61,6 +61,28 @@ public enum ApplicationDiscovery {
         }
         return ports
     }
+
+    /// Race known / unauthenticated addresses against locally published Dart
+    /// services. Authentication is preserved and every result is PID-validated.
+    public static func serviceEndpoint(for candidate: RunningApplicationCandidate, known: [VMServiceEndpoint]) async throws -> VMServiceEndpoint? {
+        let ports = await listeningPorts(processID: candidate.processID)
+        try Task.checkCancellation()
+        let probe = ApplicationServiceProbe()
+        return try await withThrowingTaskGroup(of: VMServiceEndpoint?.self) { group in
+            group.addTask {
+                try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: known, ports: ports)
+            }
+            group.addTask {
+                let advertised = await LocalDartVMServices.endpoints(ports: ports)
+                try Task.checkCancellation()
+                return try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: advertised, ports: [])
+            }
+            for try await result in group {
+                if let result { group.cancelAll(); return result }
+            }
+            return nil
+        }
+    }
 }
 
 public struct ApplicationServiceProbe: Sendable {
@@ -84,8 +106,10 @@ public struct ApplicationServiceProbe: Sendable {
     }
     public func discover(processID: Int32, flutterDetected: Bool, known: [VMServiceEndpoint] = [], ports: [Int]) async throws -> VMServiceEndpoint? {
         var endpoints: [VMServiceEndpoint] = []
-        for endpoint in known + ports.compactMap({ VMServiceEndpoint("http://127.0.0.1:\($0)/") }) where !endpoints.contains(endpoint) {
-            endpoints.append(endpoint); if endpoints.count == 8 { break }
+        let relevant = known.filter { ports.isEmpty || ports.contains($0.url.port ?? ($0.url.scheme == "https" ? 443 : 80)) }
+        let local = ports.flatMap { port in ["127.0.0.1", "[::1]"].compactMap { VMServiceEndpoint("http://\($0):\(port)/") } }
+        for endpoint in relevant + local where !endpoints.contains(endpoint) {
+            endpoints.append(endpoint); if endpoints.count == 16 { break }
         }
         return try await withThrowingTaskGroup(of: VMServiceEndpoint?.self) { group in
             for endpoint in endpoints {
