@@ -491,6 +491,7 @@ final class AppModel: ObservableObject {
         var session = RunSession(projectPath: project.path, command: state.command!)
         var log: RunLog?
         var didTrash = false
+        var permissionContainer: String?
         func append(_ text: String) throws {
             try log?.append(Data((text + "\n").utf8))
             if selectedSession == session.id { refreshLogAfterOutput() }
@@ -546,7 +547,10 @@ final class AppModel: ObservableObject {
             session.status = .failed
             session.error = didTrash ? "容器已移到废纸篓，但记录结果失败：\(error.localizedDescription)" : error.localizedDescription
             try? append("未完成：\(session.error!)")
-            self.error = session.error
+            if !didTrash, let resetError = error as? SandboxResetError,
+               case .permissionDenied(let path) = resetError {
+                permissionContainer = path
+            } else { self.error = session.error }
         }
         session.endedAt = Date()
         session.duration = session.endedAt!.timeIntervalSince(session.startedAt)
@@ -555,6 +559,7 @@ final class AppModel: ObservableObject {
         catch { self.error = "\(didTrash ? "容器已移到废纸篓；" : "")保存操作记录失败：\(error.localizedDescription)" }
         replace(session)
         if selectedSession == session.id { loadLog() }
+        if let permissionContainer { SandboxResetPermissionAlert.present(containerPath: permissionContainer) }
     }
     func run() { if let id = selectedProject { run(projectID: id) } }
     func selectApplication(_ target: ApplicationTarget) {

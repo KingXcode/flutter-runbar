@@ -6,10 +6,13 @@ import Darwin
 public enum SandboxResetError: LocalizedError, Equatable {
     case cancelled
     case unsafe(String)
+    case permissionDenied(containerPath: String)
     public var errorDescription: String? {
         switch self {
         case .cancelled: return "已取消，未移动沙盒。"
         case .unsafe(let reason): return reason
+        case .permissionDenied(let path):
+            return "没有权限访问 App 沙盒：\(path)。请在系统设置的“完全磁盘访问权限”中允许 Runbar，退出并重新打开后再试。本次未清理沙盒。"
         }
     }
 }
@@ -113,17 +116,19 @@ public final class SandboxResetService {
         let library = home.appendingPathComponent("Library", isDirectory: true)
         _ = try directoryIdentity(library)
         let containers = library.appendingPathComponent("Containers", isDirectory: true)
-        _ = try directoryIdentity(containers)
         let container = containers.appendingPathComponent(identifier, isDirectory: true)
-        let identity = try directoryIdentity(container)
-        guard identity.owner == owner else { throw SandboxResetError.unsafe("沙盒容器不属于当前用户，已停止。") }
-        let metadata = try plist(container.appendingPathComponent(".com.apple.containermanagerd.metadata.plist"))
-        guard metadata["MCMMetadataIdentifier"] as? String == identifier else {
-            throw SandboxResetError.unsafe("无法核实沙盒元数据归属，已停止；不会猜测或强制删除。")
+        return try accessingContainer(container) {
+            _ = try directoryIdentity(containers)
+            let identity = try directoryIdentity(container)
+            guard identity.owner == owner else { throw SandboxResetError.unsafe("沙盒容器不属于当前用户，已停止。") }
+            let metadata = try plist(container.appendingPathComponent(".com.apple.containermanagerd.metadata.plist"))
+            guard metadata["MCMMetadataIdentifier"] as? String == identifier else {
+                throw SandboxResetError.unsafe("无法核实沙盒元数据归属，已停止；不会猜测或强制删除。")
+            }
+            return SandboxResetPlan(projectPath: project.path, applicationURL: app,
+                                    bundleIdentifier: identifier, containerURL: container,
+                                    containerIdentity: identity, applicationIdentity: appIdentity, signature: signed)
         }
-        return SandboxResetPlan(projectPath: project.path, applicationURL: app,
-                                bundleIdentifier: identifier, containerURL: container,
-                                containerIdentity: identity, applicationIdentity: appIdentity, signature: signed)
     }
 
     /// Revalidates the app, signing identity, container identity and stopped state after approval.
@@ -141,10 +146,34 @@ public final class SandboxResetService {
         }
         // Last cheap checks immediately before the one OS trash operation. There is no
         // recursive traversal and no fallback to removeItem, shell deletion, or sudo.
-        guard !isRunning(plan.bundleIdentifier), try directoryIdentity(plan.containerURL) == plan.containerIdentity else {
-            throw SandboxResetError.unsafe("App 已启动或容器发生变化，已停止清理。")
+        return try accessingContainer(plan.containerURL) {
+            guard !isRunning(plan.bundleIdentifier), try directoryIdentity(plan.containerURL) == plan.containerIdentity else {
+                throw SandboxResetError.unsafe("App 已启动或容器发生变化，已停止清理。")
+            }
+            return try trash(plan.containerURL)
         }
-        return try trash(plan.containerURL)
+    }
+
+    // Only failures while accessing the selected container offer the privacy
+    // settings shortcut. A failed log write or invalid signature must not do so.
+    private func accessingContainer<T>(_ container: URL, _ operation: () throws -> T) throws -> T {
+        do { return try operation() }
+        catch {
+            guard Self.isPermissionDenied(error) else { throw error }
+            throw SandboxResetError.permissionDenied(containerPath: container.path)
+        }
+    }
+
+    static func isPermissionDenied(_ error: Error) -> Bool {
+        var current = error as NSError
+        for _ in 0..<16 {
+            if current.domain == NSCocoaErrorDomain,
+               [CocoaError.fileReadNoPermission.rawValue, CocoaError.fileWriteNoPermission.rawValue].contains(current.code) { return true }
+            if current.domain == NSPOSIXErrorDomain, [Int(EACCES), Int(EPERM)].contains(current.code) { return true }
+            guard let underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError else { break }
+            current = underlying
+        }
+        return false
     }
 
     static func validIdentifier(_ value: String) -> Bool {
@@ -166,8 +195,12 @@ public final class SandboxResetService {
 
     private func directoryIdentity(_ url: URL) throws -> SandboxFileIdentity {
         var info = stat()
-        guard lstat(url.path, &info) == 0,
-              (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else {
+        if lstat(url.path, &info) != 0 {
+            let code = errno
+            if code == EACCES || code == EPERM { throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: url.path]) }
+            throw SandboxResetError.unsafe("目录不存在、不可访问或是符号链接：\(url.path)。未清理。")
+        }
+        guard (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else {
             throw SandboxResetError.unsafe("目录不存在、不可访问或是符号链接：\(url.path)。未清理。")
         }
         return .init(device: UInt64(info.st_dev), inode: UInt64(info.st_ino), owner: info.st_uid)
@@ -175,8 +208,12 @@ public final class SandboxResetService {
 
     private func plist(_ url: URL) throws -> [String: Any] {
         var info = stat()
-        guard lstat(url.path, &info) == 0,
-              (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG) else {
+        if lstat(url.path, &info) != 0 {
+            let code = errno
+            if code == EACCES || code == EPERM { throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: url.path]) }
+            throw SandboxResetError.unsafe("无法安全读取身份文件：\(url.path)。未清理。")
+        }
+        guard (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG) else {
             throw SandboxResetError.unsafe("无法安全读取身份文件：\(url.path)。未清理。")
         }
         guard let value = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), options: [], format: nil) as? [String: Any] else {

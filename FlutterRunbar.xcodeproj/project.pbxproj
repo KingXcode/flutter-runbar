@@ -16,6 +16,7 @@
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
 		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
+		5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */; };
 		6326D10ABC37026E77E5AD7D /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */; };
 		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
 		63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */; };
@@ -52,6 +53,7 @@
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
 		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
 		75CB9B8540936580652BC9EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetPermissionAlert.swift; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
@@ -192,6 +194,7 @@
 				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
 				DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */,
 				1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */,
+				7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */,
 			);
 			path = FlutterRunbar;
 			sourceTree = "<group>";
@@ -320,6 +323,7 @@
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 				F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */,
 				861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */,
+				5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

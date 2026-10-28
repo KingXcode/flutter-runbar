@@ -26,5 +26,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSAppDataUsageDescription</key>
+	<string>Runbar 需要核验您选择的 App 沙盒归属，并在您确认后将整个容器移到废纸篓。</string>
 </dict>
 </plist>

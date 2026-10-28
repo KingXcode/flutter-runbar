@@ -174,4 +174,93 @@ final class SandboxResetTests: XCTestCase {
         XCTAssertEqual(attempts, 1)
         XCTAssertTrue(fm.fileExists(atPath: f.container.path))
     }
+
+    func testUnreadableMetadataOffersPermissionGuidanceWithoutTrash() throws {
+        guard getuid() != 0 else { throw XCTSkip("POSIX read-denial fixture requires a non-root user") }
+        let f = try Fixture()
+        let metadata = f.container.appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+        try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: metadata.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: metadata.path) }
+        XCTAssertThrowsError(try f.plan(f.service())) { error in
+            XCTAssertEqual(error as? SandboxResetError, .permissionDenied(containerPath: f.container.path))
+            XCTAssertTrue(error.localizedDescription.contains("完全磁盘访问权限"))
+        }
+        XCTAssertTrue(f.trashed.isEmpty)
+        XCTAssertTrue(fm.fileExists(atPath: f.container.path))
+    }
+
+    func testUnreadableContainerPreservesPOSIXPermissionFailure() throws {
+        guard getuid() != 0 else { throw XCTSkip("POSIX access-denial fixture requires a non-root user") }
+        let f = try Fixture()
+        try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: f.container.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.container.path) }
+        XCTAssertThrowsError(try f.plan(f.service())) { error in
+            XCTAssertEqual(error as? SandboxResetError, .permissionDenied(containerPath: f.container.path))
+        }
+        XCTAssertTrue(f.trashed.isEmpty)
+    }
+
+    func testPermissionLostAfterConfirmationNeverCallsTrash() throws {
+        guard getuid() != 0 else { throw XCTSkip("POSIX read-denial fixture requires a non-root user") }
+        let f = try Fixture(), service = f.service()
+        let plan = try f.plan(service)
+        let metadata = f.container.appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+        try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: metadata.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: metadata.path) }
+        XCTAssertThrowsError(try service.reset(plan, approved: true)) { error in
+            XCTAssertEqual(error as? SandboxResetError, .permissionDenied(containerPath: f.container.path))
+        }
+        XCTAssertTrue(f.trashed.isEmpty)
+    }
+
+    func testTrashPermissionDenialOffersGuidanceWithoutRetry() throws {
+        let f = try Fixture()
+        var attempts = 0
+        let service = SandboxResetService(home: f.home,
+            signature: { _ in .init(identifier: self.identifier, sandboxed: true, codeHash: Data([1])) },
+            isRunning: { _ in false }, trash: { _ in
+                attempts += 1
+                throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteUnknown.rawValue,
+                              userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))])
+            })
+        let plan = try f.plan(service)
+        XCTAssertThrowsError(try service.reset(plan, approved: true)) { error in
+            XCTAssertEqual(error as? SandboxResetError, .permissionDenied(containerPath: f.container.path))
+        }
+        XCTAssertEqual(attempts, 1)
+        XCTAssertTrue(fm.fileExists(atPath: f.container.path))
+    }
+
+    func testPermissionClassifierDoesNotRelyOnErrorText() {
+        for error in [NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoPermission.rawValue),
+                      NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteNoPermission.rawValue),
+                      NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)),
+                      NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))] {
+            XCTAssertTrue(SandboxResetService.isPermissionDenied(error))
+        }
+        for error: Error in [NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileNoSuchFile.rawValue),
+                             NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)),
+                             SandboxResetError.unsafe("permission denied: unverified identity")] {
+            XCTAssertFalse(SandboxResetService.isPermissionDenied(error))
+        }
+    }
+
+    func testInvalidMetadataDoesNotOfferPermissionGuidance() throws {
+        let f = try Fixture()
+        try Data("invalid property list".utf8).write(to: f.container.appendingPathComponent(".com.apple.containermanagerd.metadata.plist"))
+        XCTAssertThrowsError(try f.plan(f.service())) { error in
+            if case .permissionDenied = error as? SandboxResetError { XCTFail("Invalid data is not a permission failure") }
+        }
+        XCTAssertTrue(f.trashed.isEmpty)
+    }
+
+    func testPermissionFailureOutsideContainerDoesNotOfferContainerAccess() throws {
+        let f = try Fixture()
+        let service = SandboxResetService(home: f.home,
+            signature: { _ in throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoPermission.rawValue) },
+            isRunning: { _ in false }, trash: { _ in XCTFail("Must not trash"); return nil })
+        XCTAssertThrowsError(try f.plan(service)) { error in
+            XCTAssertNil(error as? SandboxResetError)
+        }
+    }
 }
