@@ -31,6 +31,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private var requestedDetach = false
     private var flutterOperation: UUID?
     private var flutterReply = ""
+    private var flutterSandboxDiagnostic: FlutterSandboxDiagnostic?
     public init(store: SessionStore, handler: @escaping (Event) -> Void) { self.store = store; self.handler = handler }
     deinit { if inputFD >= 0 { close(inputFD) } }
     private func emit(_ event: Event) {
@@ -76,6 +77,7 @@ public final class ProcessRunner: @unchecked Sendable {
             inputFD = input; flutterOutput = FlutterRunOutput(); requestedDetach = false
             flutterControls = interactive ? FlutterRunControls() : nil
             flutterOperation = nil; flutterReply = ""
+            flutterSandboxDiagnostic = nil
             emit(.started(next))
             if interactive { emit(.flutterControls(flutterControls)) }
             let source = DispatchSource.makeTimerSource(queue: queue)
@@ -117,6 +119,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private func receive(_ data: Data) {
         do { try log?.append(data) } catch { loggingFailed("日志写入失败，正在停止命令。日志可能不完整：\(error.localizedDescription)") }
         let parsed = parser.consume(data)
+        flutterSandboxDiagnostic?.consume(parsed.text)
         if var controls = flutterControls {
             let previous = controls
             flutterOutput.consume(parsed.text)
@@ -127,6 +130,7 @@ public final class ProcessRunner: @unchecked Sendable {
                 let pattern = "(?m)^(?:\\[[^\\]\\r\\n]*\\]\\s*)?(?:Reloaded [0-9]+[^\\r\\n]*libraries|Restarted application in |Hot reload was rejected:|Try again after fixing the above error\\(s\\)\\.)"
                 if flutterReply.range(of: pattern, options: .regularExpression) != nil {
                     controls.workingAction = nil; flutterOperation = nil; flutterReply = ""
+                    flutterSandboxDiagnostic = nil
                 } else { flutterReply = String(decoding: flutterReply.utf8.suffix(8192), as: UTF8.self) }
             }
             controls.actions = flutterOutput.actions
@@ -167,12 +171,14 @@ public final class ProcessRunner: @unchecked Sendable {
             }
             if action == .hotReload || action == .hotRestart {
                 controls.workingAction = action; self.flutterControls = controls; self.flutterReply = ""
+                self.flutterSandboxDiagnostic = FlutterSandboxDiagnostic()
                 let token = UUID(); self.flutterOperation = token
                 self.emit(.flutterControls(controls))
                 self.queue.asyncAfter(deadline: .now() + .seconds(120)) { [weak self] in
                     guard let self, self.session?.id == sessionID, self.stopTime == nil,
                           self.flutterOperation == token, var value = self.flutterControls else { return }
                     self.flutterOperation = nil; self.flutterReply = ""; value.workingAction = nil
+                    self.flutterSandboxDiagnostic = nil
                     self.flutterControls = value; self.emit(.flutterControls(value))
                     self.emit(.interactionRejected("Flutter 尚未返回重载完成信息，请查看日志后重试。"))
                 }
@@ -240,14 +246,22 @@ public final class ProcessRunner: @unchecked Sendable {
         closeInput(); flutterControls = nil
         flutterOperation = nil; flutterReply = ""
         let final = parser.consume(Data(), final: true); emit(.output(final.text)); addURLs(final.urls)
+        flutterSandboxDiagnostic?.consume(final.text, final: true)
         for endpoint in serviceDiscovery.consume(final.text, final: true) { emit(.service(endpoint)) }
         guard var value = session else { return }
         value.endedAt = Date(); value.duration = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e9
         value.exitCode = code
         do { try log?.close() } catch { value.error = "日志落盘失败，日志可能不完整：\(error.localizedDescription)" }
         log = nil
+        if !stopped, let code, code != 0, value.error == nil, let failure = flutterSandboxDiagnostic?.failure {
+            value.flutterSandboxAccessFailure = failure; value.error = failure.message
+        }
+        flutterSandboxDiagnostic = nil
         value.status = value.error != nil ? .failed : stopped ? .stopped : code == 0 ? (requestedDetach ? .detached : .succeeded) : .failed
-        do { try store.save(value) } catch { value.error = "保存运行记录失败：\(error.localizedDescription)"; value.status = .failed }
+        do { try store.save(value) } catch {
+            value.error = "保存运行记录失败：\(error.localizedDescription)"; value.status = .failed
+            value.flutterSandboxAccessFailure = nil
+        }
         session = nil; pid = 0; emit(.finished(value))
     }
 }

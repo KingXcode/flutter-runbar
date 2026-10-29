@@ -15,10 +15,12 @@
 ## 发现与认证
 
 - 候选列表通过 App 内的 Flutter 框架识别，只包含 Flutter App（包括 Flutter 菜单栏 App）。框架存在不代表一定开放调试服务，Release 版本通常仍无法连接。
-- 自动连接并行尝试本次 Runbar 已知的完整 VM 地址与所选 PID 的 TCP 监听端口，以及本机公告的 Dart VM 服务。每组最多检查 16 个候选地址，兼容 IPv4 / IPv6 回环；单次 HTTP 返回上限 256 KiB。`lsof` 自身有超时与输出上限，不读取进程环境变量或整份系统日志。
-- 本机服务发现使用 DNS-SD 的 `kDNSServiceInterfaceIndexLocalOnly` 浏览和解析 `_dartVmService._tcp`，只读取这台 Mac 已注册的公告，不浏览局域网设备。一次最多解析 32 条公告、返回 16 个地址，3 秒后结束；取消、切换所选 App 或关闭窗口都会释放发现句柄。若能获取所选进程端口，则先按端口排除无关公告，随后核对 PID。
+- 自动连接并行尝试本次 Runbar 已知的完整 VM 地址、所选 PID 的 TCP 监听端口、本机公告的 Dart VM 服务和同一 Flutter 启动器的 DDS 参数。每组最多检查 16 个候选地址，兼容 IPv4 / IPv6 回环；单次 HTTP 返回上限 256 KiB。`lsof` 自身有超时与输出上限，不读取进程环境变量或整份系统日志。
+- 本机服务发现使用 DNS-SD 的 `kDNSServiceInterfaceIndexLocalOnly` 浏览和解析 `_dartVmService._tcp`，只读取这台 Mac 已注册的公告，不浏览局域网设备。一次最多解析 32 条公告、返回 16 个地址，3 秒后结束；取消、切换所选 App 或关闭窗口都会释放发现句柄。所选 App 的端口只用于排序：DDS 可能是独立进程，不能据此丢弃其他本机服务地址，最终始终核对 VM PID。
+- 部分 macOS Debug App 不发布 Bonjour。此时只读检查所选 App 的直接父进程；仅当它是运行 `flutter_tools` 的 `run` / `attach` 启动器时，才检查其最多 16 个其他直属子进程。只接受官方 Dart `development-service` / DDS snapshot 的 `--vm-service-uri` 参数，并再次核对当前父子关系、上游端口及 VM PID。`ps` / `pgrep` 仅接收指定 PID，单次输出最多 64 KiB、2 秒超时；不读取目标环境、终端历史或所有进程命令行。由 Finder / Xcode 独立启动且没有公告或可识别 DDS 参数时，仍可手动粘贴链接。
+- 原始 VM 与 DDS 地址可能不同。先验证原始地址的 `getVM.pid`，然后只读取 `index.html` 的官方 DevTools 重定向头，提取本机服务 URI，不自动跟随页面跳转；每个新地址都重新核对 PID，最多处理 3 个地址，拒绝循环及 HTTPS 降级。手动填写的原始 VM 链接也走这条流程，避免 HTTP 识别成功后 WebSocket 被重定向而连接失败。
 - 开启认证的 VM 需要完整认证路径。本机公告提供 `authCode` 时据此组装地址；只有端口且没有公告 / 已知链接时，仍可能需要手动粘贴。不会猜测令牌、关闭认证或修改目标启动参数。
-- 仅连接 loopback，保留认证路径，不跟随重定向。连接前后重新核对所选 App 的启动身份，防止 PID 回收后误关联。
+- 仅连接 loopback，保留认证路径，不自动跟随重定向。连接前后重新核对所选 App 的启动身份，防止 PID 回收后误关联。
 - VM / DevTools 地址只保存在本次连接的内存状态，不写入应用配置或监听记录元数据。目标自行打印的内容仍会按正常日志规则保存。
 
 ## 日志、网络与 DevTools

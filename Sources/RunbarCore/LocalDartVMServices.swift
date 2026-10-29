@@ -59,7 +59,7 @@ final class LocalDartVMServices: @unchecked Sendable {
         let owner = Unmanaged<LocalDartVMServices>.fromOpaque(context).takeUnretainedValue()
         guard owner.continuation != nil else { return }
         let port = Int(UInt16(bigEndian: networkPort))
-        guard (1...65535).contains(port), owner.ports.isEmpty || owner.ports.contains(port) else { return }
+        guard (1...65535).contains(port) else { return }
         var auth = ""
         if length > 0, let txt {
             var size: UInt8 = 0
@@ -72,8 +72,11 @@ final class LocalDartVMServices: @unchecked Sendable {
         }
         for host in ["127.0.0.1", "[::1]"] {
             guard let endpoint = VMServiceEndpoint("http://\(host):\(port)/\(auth)\(auth.isEmpty ? "" : "/")"),
-                  !owner.results.contains(endpoint), owner.results.count < 16 else { continue }
-            owner.results.append(endpoint)
+                  !owner.results.contains(endpoint) else { continue }
+            if owner.ports.contains(port) {
+                owner.results.insert(endpoint, at: 0)
+                if owner.results.count > 16 { owner.results.removeLast() }
+            } else if owner.results.count < 16 { owner.results.append(endpoint) }
         }
     }
 

@@ -62,8 +62,8 @@ public enum ApplicationDiscovery {
         return ports
     }
 
-    /// Race known / unauthenticated addresses against locally published Dart
-    /// services. Authentication is preserved and every result is PID-validated.
+    /// Race known addresses, local announcements and this app launcher's DDS
+    /// helper. Authentication is preserved and every result is PID-validated.
     public static func serviceEndpoint(for candidate: RunningApplicationCandidate, known: [VMServiceEndpoint]) async throws -> VMServiceEndpoint? {
         let ports = await listeningPorts(processID: candidate.processID)
         try Task.checkCancellation()
@@ -76,6 +76,11 @@ public enum ApplicationDiscovery {
                 let advertised = await LocalDartVMServices.endpoints(ports: ports)
                 try Task.checkCancellation()
                 return try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: advertised, ports: [])
+            }
+            group.addTask {
+                let helpers = await LocalFlutterToolServices.endpoints(processID: candidate.processID, ports: ports)
+                try Task.checkCancellation()
+                return try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: helpers, ports: [])
             }
             for try await result in group {
                 if let result { group.cancelAll(); return result }
@@ -106,15 +111,18 @@ public struct ApplicationServiceProbe: Sendable {
     }
     public func discover(processID: Int32, flutterDetected: Bool, known: [VMServiceEndpoint] = [], ports: [Int]) async throws -> VMServiceEndpoint? {
         var endpoints: [VMServiceEndpoint] = []
-        let relevant = known.filter { ports.isEmpty || ports.contains($0.url.port ?? ($0.url.scheme == "https" ? 443 : 80)) }
+        // A valid DDS endpoint may be owned by a separate tool process. Ports
+        // are a ranking hint, never a reason to discard an authenticated URI.
+        let matchesPorts: (VMServiceEndpoint) -> Bool = { ports.contains($0.url.port ?? ($0.url.scheme == "https" ? 443 : 80)) }
+        let preferred = known.filter(matchesPorts), remaining = known.filter { !matchesPorts($0) }
         let local = ports.flatMap { port in ["127.0.0.1", "[::1]"].compactMap { VMServiceEndpoint("http://\($0):\(port)/") } }
-        for endpoint in relevant + local where !endpoints.contains(endpoint) {
+        for endpoint in preferred + local + remaining where !endpoints.contains(endpoint) {
             endpoints.append(endpoint); if endpoints.count == 16 { break }
         }
         return try await withThrowingTaskGroup(of: VMServiceEndpoint?.self) { group in
             for endpoint in endpoints {
                 group.addTask {
-                    do { try await validate(endpoint, processID: processID, flutterDetected: flutterDetected); return endpoint }
+                    do { return try await connectionEndpoint(endpoint, processID: processID, flutterDetected: flutterDetected) }
                     catch is CancellationError { throw CancellationError() }
                     catch { return nil }
                 }
@@ -122,5 +130,21 @@ public struct ApplicationServiceProbe: Sendable {
             for try await endpoint in group { if let endpoint { group.cancelAll(); return endpoint } }
             return nil
         }
+    }
+    public func connectionEndpoint(_ endpoint: VMServiceEndpoint, processID: Int32, flutterDetected: Bool) async throws -> VMServiceEndpoint {
+        var current = endpoint, visited: [VMServiceEndpoint] = []
+        for _ in 0..<3 {
+            try await validate(current, processID: processID, flutterDetected: flutterDetected)
+            visited.append(current)
+            let target: VMServiceEndpoint?
+            do { target = try await transport.serviceRedirect(endpoint: current) }
+            catch is CancellationError { throw CancellationError() }
+            catch { return current }
+            try Task.checkCancellation()
+            guard let target, target != current else { return current }
+            guard !visited.contains(target) else { throw VMServiceError.unavailable }
+            current = target
+        }
+        throw VMServiceError.unavailable
     }
 }

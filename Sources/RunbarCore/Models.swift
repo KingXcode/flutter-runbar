@@ -69,6 +69,7 @@ public struct RunSession: Codable, Identifiable, Sendable {
     public var devToolsURLs: [String] = []
     public var error: String?
     public var attachment: ApplicationAttachment?
+    public var flutterSandboxAccessFailure: FlutterSandboxAccessFailure?
     public var sourceName: String { attachment?.application.name ?? URL(fileURLWithPath: projectPath).lastPathComponent }
     public var sourceKey: String { attachment.map { "app:" + $0.application.id.uuidString } ?? projectPath }
     public func belongs(to application: ApplicationTarget) -> Bool { attachment?.application.id == application.id }

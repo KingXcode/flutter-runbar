@@ -576,7 +576,7 @@ final class AppModel: ObservableObject {
     func connectApplication(_ candidate: RunningApplicationCandidate, endpoint: VMServiceEndpoint, enteredAddress: String) async throws {
         guard !quitWhenFinished, !logShutdownStarted, let store else { throw RunbarError.message("应用正在退出或本地存储不可用。") }
         guard ApplicationDiscovery.isCurrent(candidate) else { throw RunbarError.message("所选 App 已退出，请刷新列表。") }
-        try await ApplicationServiceProbe().validate(endpoint, processID: candidate.processID, flutterDetected: candidate.flutterDetected)
+        let resolvedEndpoint = try await ApplicationServiceProbe().connectionEndpoint(endpoint, processID: candidate.processID, flutterDetected: candidate.flutterDetected)
         try Task.checkCancellation()
         guard !logShutdownStarted, !quitWhenFinished else { throw CancellationError() }
         guard ApplicationDiscovery.isCurrent(candidate) else { throw RunbarError.message("所选 App 已退出，请刷新列表。") }
@@ -590,14 +590,14 @@ final class AppModel: ObservableObject {
             guard persist() else { config.applications = old; throw RunbarError.message("无法保存应用，请检查本地存储权限。") }
         }
         var state = ApplicationConnectionState(); state.phase = .connecting; state.candidate = candidate
-        state.endpoint = endpoint; state.message = "正在连接"
+        state.endpoint = resolvedEndpoint; state.message = "正在连接"
         if URLComponents(string: enteredAddress)?.queryItems?.contains(where: { $0.name == "uri" }) == true {
             state.devToolsURL = DevToolsLink.validatedURL(enteredAddress)
         }
         applicationConnections[target.id] = state
         let id = target.id
         let generation = state.generation
-        let logger = ApplicationLogSession(root: store.root, endpoint: endpoint,
+        let logger = ApplicationLogSession(root: store.root, endpoint: resolvedEndpoint,
             attachment: ApplicationAttachment(application: target, processID: candidate.processID)) { [weak self] event in
                 await self?.handleAttachment(event, applicationID: id, generation: generation)
             }
@@ -804,7 +804,11 @@ final class AppModel: ObservableObject {
             replace(value)
             if selectedSession == value.id { loadLog() }
             else if !hadStarted && selectedProject == id { selectedSession = value.id; loadLog() }
-            if let problem = value.error { report(problem, projectID: id) }
+            if let failure = value.flutterSandboxAccessFailure {
+                if !quitWhenFinished && !logShutdownStarted {
+                    SandboxResetPermissionAlert.presentFlutterHotReload(failure: failure)
+                }
+            } else if let problem = value.error { report(problem, projectID: id) }
             finishQuitIfReady()
         case .failure(let id, let message): report(message, projectID: id); finishQuitIfReady()
         }

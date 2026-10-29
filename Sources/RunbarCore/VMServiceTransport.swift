@@ -14,6 +14,10 @@ public enum VMServiceError: Error, LocalizedError, Equatable {
 }
 public protocol VMServiceTransport: Sendable {
     func call(endpoint: VMServiceEndpoint, method: String, parameters: [String: String]) async throws -> Data
+    func serviceRedirect(endpoint: VMServiceEndpoint) async throws -> VMServiceEndpoint?
+}
+public extension VMServiceTransport {
+    func serviceRedirect(endpoint: VMServiceEndpoint) async throws -> VMServiceEndpoint? { nil }
 }
 public struct HTTPVMServiceTransport: VMServiceTransport {
     private let limit: Int
@@ -29,6 +33,19 @@ public struct HTTPVMServiceTransport: VMServiceTransport {
             return try await call.run(url)
         }, onCancel: { call.cancel() })
     }
+    /// Read the VM's DevTools redirect header only. Never follow it implicitly:
+    /// parse a loopback VM URI and let the caller verify the target PID again.
+    public func serviceRedirect(endpoint: VMServiceEndpoint) async throws -> VMServiceEndpoint? {
+        let call = BoundedVMCall(limit: 0, captureRedirect: true)
+        let data = try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+            return try await call.run(endpoint.url.appendingPathComponent("index.html"))
+        }, onCancel: { call.cancel() })
+        guard !data.isEmpty, let location = String(data: data, encoding: .utf8),
+              let target = VMServiceEndpoint(location),
+              endpoint.url.scheme != "https" || target.url.scheme == "https" else { return nil }
+        return target
+    }
 }
 
 /// Delegate streaming checks the wire size before JSON decoding. No unbounded
@@ -37,12 +54,13 @@ public struct HTTPVMServiceTransport: VMServiceTransport {
 private final class BoundedVMCall: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let limit: Int
+    private let captureRedirect: Bool
     private var buffer = Data()
     private var continuation: CheckedContinuation<Data, Error>?
     private var session: URLSession?
     private var task: URLSessionDataTask?
     private var cancelled = false
-    init(limit: Int) { self.limit = limit }
+    init(limit: Int, captureRedirect: Bool = false) { self.limit = limit; self.captureRedirect = captureRedirect }
     func run(_ url: URL) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
@@ -67,9 +85,17 @@ private final class BoundedVMCall: NSObject, URLSessionDataDelegate, @unchecked 
         continuation?.resume(with: result); session?.invalidateAndCancel()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+        if captureRedirect { finish(.success(redirectHeader(response))) }
+    }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if captureRedirect {
+            completionHandler(.cancel)
+            finish(.success((response as? HTTPURLResponse).map(redirectHeader) ?? Data()))
+            return
+        }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             completionHandler(.cancel); finish(.failure(VMServiceError.unavailable)); return
         }
@@ -77,6 +103,11 @@ private final class BoundedVMCall: NSObject, URLSessionDataDelegate, @unchecked 
             completionHandler(.cancel); finish(.failure(VMServiceError.responseTooLarge)); return
         }
         completionHandler(.allow)
+    }
+    private func redirectHeader(_ response: HTTPURLResponse) -> Data {
+        guard [301, 302, 303, 307, 308].contains(response.statusCode),
+              let location = response.value(forHTTPHeaderField: "Location"), location.utf8.count <= 16_384 else { return Data() }
+        return Data(location.utf8)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()

@@ -59,7 +59,7 @@ struct ApplicationPickerView: View {
                         if model.connectedApplication(for: candidate) != nil { Text("已连接").font(.caption).foregroundStyle(.secondary) }
                         else if candidate.processID == selectedPID {
                             if checking { ProgressView().controlSize(.mini) }
-                            else { Text(endpoint != nil ? "可直接连接" : "未发现调试服务").font(.caption).foregroundStyle(.secondary) }
+                            else { Text(endpoint != nil ? "可直接连接" : "需完整调试地址").font(.caption).foregroundStyle(.secondary) }
                         }
                     }.padding(.vertical, 3).tag(Optional(candidate.processID))
                 }
@@ -125,7 +125,7 @@ struct ApplicationPickerView: View {
                 guard !Task.isCancelled, selectedPID == candidate.processID else { return }
                 guard ApplicationDiscovery.isCurrent(candidate) else { checking = false; message = "所选 App 已退出，请刷新列表。"; return }
                 endpoint = result; manual = manual || result == nil; checking = false
-                if result == nil { message = "未发现可连接的调试服务。请确认 App 已启用 Debug / Profile 调试服务，或在下方粘贴完整链接。" }
+                if result == nil { message = "未能自动取得完整调试地址，可能缺少认证信息或服务公告。可重新识别，或粘贴 IDE / Flutter 控制台中当前运行的完整链接。" }
             } catch {
                 guard !Task.isCancelled else { return }; checking = false; manual = true
             }

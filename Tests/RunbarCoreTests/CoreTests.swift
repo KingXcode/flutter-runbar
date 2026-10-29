@@ -2,6 +2,45 @@ import XCTest
 @testable import RunbarCore
 
 final class CoreTests: XCTestCase {
+    func testFlutterSandboxFailureAcrossOutputBoundariesAndEOF() throws {
+        let home = "/Users/a developer"
+        let file = "\(home)/Library/Containers/com.example.app/Data/tmp/flutter-demoABC/项目/main.dart.incremental.dill"
+        let text = "Flutter failed to create file at \"\(file)\".\nPlease ensure that the SDK and/or project is installed in a location that has read/write permissions for the current user."
+        var diagnostic = FlutterSandboxDiagnostic(homeDirectory: home)
+        for character in text { diagnostic.consume(String(character)) }
+        XCTAssertNil(diagnostic.failure)
+        diagnostic.consume("", final: true)
+        let failure = try XCTUnwrap(diagnostic.failure)
+        XCTAssertEqual(failure.filePath, file)
+        XCTAssertEqual(failure.containerPath, "\(home)/Library/Containers/com.example.app")
+        XCTAssertTrue(failure.message.contains("Runbar"))
+    }
+    func testFlutterSandboxFailureRequiresNearbyPermissionExplanation() {
+        let file = "/Users/test/Library/Containers/com.example.app/Data/tmp/flutter-demoABC/demo/main.dart.incremental.dill"
+        let denied = "Please ensure that the SDK and/or project is installed in a location that has read/write permissions for the current user.\n"
+        for following in ["The target device is full.\n", "compile error\n", "one\ntwo\nthree\nfour\n" + denied] {
+            var diagnostic = FlutterSandboxDiagnostic(homeDirectory: "/Users/test")
+            diagnostic.consume("Flutter failed to create file at \"\(file)\".\n" + following, final: true)
+            XCTAssertNil(diagnostic.failure)
+        }
+        var verbose = FlutterSandboxDiagnostic(homeDirectory: "/Users/test")
+        verbose.consume("[   +4 ms] Flutter failed to create file at \"\(file)\".\n[        ] " + denied)
+        XCTAssertNotNil(verbose.failure)
+    }
+    func testFlutterSandboxFailureRejectsOtherPathsAndDiscardsOversizedLines() {
+        let file = "/Users/test/Library/Containers/com.example.app/Data/tmp/flutter-demoABC/demo/main.dart.incremental.dill"
+        XCTAssertNil(FlutterSandboxAccessFailure(filePath: file, homeDirectory: "/Users/another"))
+        XCTAssertNil(FlutterSandboxAccessFailure(filePath: file.replacingOccurrences(of: "/demo/main", with: "/../demo/main"), homeDirectory: "/Users/test"))
+        XCTAssertNil(FlutterSandboxAccessFailure(filePath: "/tmp/main.dart.incremental.dill", homeDirectory: "/Users/test"))
+        let error = "Flutter failed to create file at \"\(file)\".\n"
+        let denied = "Please ensure that the SDK and/or project is installed in a location that has read/write permissions for the current user.\n"
+        var diagnostic = FlutterSandboxDiagnostic(homeDirectory: "/Users/test")
+        diagnostic.consume(String(repeating: "x", count: 9000))
+        diagnostic.consume(error + denied)
+        XCTAssertNil(diagnostic.failure, "A suffix of an oversized line must not be treated as a new CLI error")
+        diagnostic.consume(error + denied)
+        XCTAssertNotNil(diagnostic.failure)
+    }
     func testCommandPathIncludesFVMForExistingConfiguration() {
         let home = "/Users/a developer"
         let legacyPath = "\(home)/.pub-cache/bin:/opt/homebrew/bin:/usr/local/bin"

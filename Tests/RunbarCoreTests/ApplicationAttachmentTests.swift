@@ -5,10 +5,17 @@ private actor AttachmentProbeVM: VMServiceTransport {
     var methods: [String] = []
     var pid = 42
     var flutter = true
+    var endpointPIDs: [String: Int] = [:]
+    var redirects: [String: VMServiceEndpoint] = [:]
     func configure(pid: Int, flutter: Bool) { self.pid = pid; self.flutter = flutter }
+    func redirect(_ source: VMServiceEndpoint, to target: VMServiceEndpoint, targetPID: Int) {
+        redirects[source.url.absoluteString] = target; endpointPIDs[target.url.absoluteString] = targetPID
+    }
+    func setPID(_ value: Int, for endpoint: VMServiceEndpoint) { endpointPIDs[endpoint.url.absoluteString] = value }
+    func serviceRedirect(endpoint: VMServiceEndpoint) -> VMServiceEndpoint? { redirects[endpoint.url.absoluteString] }
     func call(endpoint: VMServiceEndpoint, method: String, parameters: [String: String]) async throws -> Data {
         methods.append(method)
-        return try JSONSerialization.data(withJSONObject: ["result": method == "getVM" ? ["pid": pid] : ["views": flutter ? [["id": "view"]] : []]])
+        return try JSONSerialization.data(withJSONObject: ["result": method == "getVM" ? ["pid": endpointPIDs[endpoint.url.absoluteString] ?? pid] : ["views": flutter ? [["id": "view"]] : []]])
     }
 }
 private actor AttachmentSocket: VMEventConnection {
@@ -40,6 +47,40 @@ private actor AttachmentRecorder {
 }
 
 final class ApplicationAttachmentTests: XCTestCase {
+    func testDDSArgumentsRequireAnExplicitLocalServiceInADartHelper() throws {
+        let expected = try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:5555/PRIVATE_AUTH/"))
+        XCTAssertEqual(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK With Spaces/bin/dart development-service --vm-service-uri=http://127.0.0.1:5555/PRIVATE_AUTH/ --bind-port=0"), expected)
+        XCTAssertEqual(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK/bin/dartaotruntime /SDK/bin/snapshots/dds_aot.dart.snapshot --vm-service-uri http://127.0.0.1:5555/PRIVATE_AUTH/"), expected)
+        XCTAssertEqual(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK/bin/dart development-service --vm-service-uri=ws://127.0.0.1:5555/PRIVATE_AUTH/ws"), expected)
+        XCTAssertNil(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK/bin/dart devtools --vm-service-uri=http://127.0.0.1:5555/PRIVATE_AUTH/"))
+        XCTAssertNil(LocalFlutterToolServices.ddsEndpoint(arguments: "/bin/echo development-service --vm-service-uri=http://127.0.0.1:5555/PRIVATE_AUTH/"))
+        XCTAssertNil(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK/bin/dart development-service --vm-service-uri=http://remote.example:5555/PRIVATE_AUTH/"))
+        XCTAssertNil(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK/bin/dart development-service --vm-service-uri=http://127.0.0.1:5555/a/ --vm-service-uri=http://127.0.0.1:5555/b/"))
+    }
+    func testDDSKnownAddressMayUseAnotherProcessPortButMustMatchPID() async throws {
+        let vm = AttachmentProbeVM(), probe = ApplicationServiceProbe(transport: vm)
+        let endpoint = try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:5555/PRIVATE_AUTH/"))
+        await vm.configure(pid: 99, flutter: true)
+        await vm.setPID(42, for: endpoint)
+        let found = try await probe.discover(processID: 42, flutterDetected: true, known: [endpoint], ports: [8000])
+        XCTAssertEqual(found, endpoint)
+        await vm.setPID(99, for: endpoint)
+        let wrong = try await probe.discover(processID: 42, flutterDetected: true, known: [endpoint], ports: [8000])
+        XCTAssertNil(wrong)
+    }
+    func testDDSRedirectIsRevalidatedAndCannotCycle() async throws {
+        let vm = AttachmentProbeVM(), probe = ApplicationServiceProbe(transport: vm)
+        let raw = try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:8000/RAW_AUTH/"))
+        let dds = try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:9000/DDS_AUTH/"))
+        await vm.redirect(raw, to: dds, targetPID: 42)
+        let found = try await probe.connectionEndpoint(raw, processID: 42, flutterDetected: true)
+        XCTAssertEqual(found, dds)
+        await vm.setPID(99, for: dds)
+        do { _ = try await probe.connectionEndpoint(raw, processID: 42, flutterDetected: true); XCTFail("DDS PID mismatch must fail") } catch {}
+        await vm.setPID(42, for: dds)
+        await vm.redirect(dds, to: raw, targetPID: 42)
+        do { _ = try await probe.connectionEndpoint(raw, processID: 42, flutterDetected: true); XCTFail("Redirect cycles must fail") } catch {}
+    }
     func testDevToolsStartupAddressWithSDKTrailingPeriod() {
         XCTAssertEqual(LocalDevToolsServer.startupURL(from: "Serving DevTools at http://127.0.0.1:9100."), URL(string: "http://127.0.0.1:9100"))
         XCTAssertNotNil(LocalDevToolsServer.startupURL(from: "Serving DevTools at http://127.0.0.1:9100"))
