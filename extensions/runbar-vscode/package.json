@@ -1,0 +1,20 @@
+{
+  "name": "runbar-bridge",
+  "publisher": "kingxcode",
+  "displayName": "Runbar Bridge",
+  "description": "Open a Runbar project's source and attach the Dart debugger to its running Flutter app.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.101.0" },
+  "categories": ["Debuggers"],
+  "extensionKind": ["ui"],
+  "main": "./extension.js",
+  "activationEvents": ["onUri", "onStartupFinished"],
+  "extensionDependencies": ["Dart-Code.dart-code", "Dart-Code.flutter"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": "limited", "description": "Runbar can open the requested folder, but debugging requires workspace trust." },
+    "virtualWorkspaces": { "supported": false }
+  },
+  "repository": { "type": "git", "url": "https://github.com/KingXcode/flutter-runbar.git", "directory": "extensions/runbar-vscode" }
+}

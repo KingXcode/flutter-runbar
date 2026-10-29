@@ -6,6 +6,8 @@ struct ManagerView: View {
     @ObservedObject var model: AppModel
     @State private var commandEditor: CommandEditorRequest?
     @State private var showingSettings = false
+    @State private var showingVSCodeSetup = false
+    @State private var vsCodeConnection: VSCodeConnectionRequest?
     @State private var showingApplicationPicker = false
     @State private var metadataHeight: CGFloat = 0
     @State private var showingLogDetails = false
@@ -145,6 +147,9 @@ struct ManagerView: View {
         .sheet(item: $commandEditor) { request in
             CommandEditorView(model: model, request: request)
         }
+        .sheet(item: $vsCodeConnection) { request in
+            VSCodeConnectionView(model: model, request: request)
+        }
         .sheet(isPresented: $showingSettings) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("设置").font(.title2)
@@ -164,6 +169,14 @@ struct ManagerView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 if let message = model.globalShortcutError { Text(message).font(.caption).foregroundStyle(.red) }
                 Divider()
+                HStack {
+                    Text("VS Code").font(.headline)
+                    Spacer()
+                    Button("安装 / 管理扩展…") { showingVSCodeSetup = true }
+                }
+                Text("Runbar 附带 Bridge 扩展，用于自动打开项目并附加 Dart 断点调试。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Divider()
                 Text("命令环境").font(.headline)
                 Text("额外 PATH（冒号分隔；支持完整路径和 ~/）")
                 TextField("PATH", text: $model.config.extraPath)
@@ -171,6 +184,7 @@ struct ManagerView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 HStack { Spacer(); Button("保存") { if model.persist() { showingSettings = false } }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 560)
+                .sheet(isPresented: $showingVSCodeSetup) { VSCodeConnectionView(model: model) }
         }
         .alert("需要注意", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("知道了") { model.error = nil }
@@ -252,6 +266,14 @@ struct ManagerView: View {
                         .accessibilityLabel(model.project.map { "项目目录 \($0.path)" } ?? "尚未选择项目")
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if let project = model.project {
+                    if project.kind == .flutter, let sessionID = model.selectedState.session?.id,
+                       model.selectedState.phase == .running {
+                        Button("VS Code", systemImage: "curlybraces") {
+                            vsCodeConnection = VSCodeConnectionRequest(projectID: project.id, sessionID: sessionID)
+                        }.controlSize(.small)
+                            .disabled((try? model.vsCodeTarget(projectID: project.id, sessionID: sessionID)) == nil)
+                            .help("打开此项目并附加 Dart 断点调试；仅支持就绪的 Debug 运行，首次使用会提示安装扩展")
+                    }
                     if model.selectedState.phase == .running, let controls = model.selectedState.flutterControls,
                        let sessionID = model.selectedState.session?.id {
                         flutterRunButtons(projectID: project.id, sessionID: sessionID, controls: controls)

@@ -3,6 +3,7 @@ fileGroups:
   - README.md
   - project.yml
   - scripts
+  - extensions/runbar-vscode
 options:
   minimumXcodeGenVersion: 2.46.0
   xcodeVersion: "26.0"
@@ -30,6 +31,14 @@ targets:
     sources:
       - Sources/FlutterRunbar
       - Resources/Assets.xcassets
+    postBuildScripts:
+      - name: Embed Runbar VS Code extension
+        basedOnDependencyAnalysis: false
+        script: |
+          /usr/bin/python3 "$SRCROOT/scripts/package-vscode-extension.py" --output "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/VSCodeBridge"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/runbar-bridge.vsix
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/metadata.json
     info:
       path: Resources/Info.plist
       properties:

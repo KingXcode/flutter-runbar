@@ -753,6 +753,16 @@ final class AppModel: ObservableObject {
             report("当前 Flutter 运行不支持此操作，或正在处理其他操作。", projectID: projectID)
         }
     }
+    func vsCodeTarget(projectID: UUID, sessionID: UUID) throws -> VSCodeDebugTarget {
+        let state = state(for: projectID)
+        guard !quitWhenFinished, let project = config.projects.first(where: { $0.id == projectID }), project.kind == .flutter,
+              state.phase == .running, state.session?.id == sessionID,
+              state.flutterControls?.actions.contains(.hotReload) == true, state.flutterControls?.isDetaching != true,
+              let endpoint = state.vmServiceEndpoint else {
+            throw RunbarError.message("请先运行此 Flutter 项目的 Debug 命令，等待调试服务就绪后再连接。Profile / Release 不支持断点调试。")
+        }
+        return VSCodeDebugTarget(projectPath: project.path, projectName: project.name, sessionID: sessionID, endpoint: endpoint)
+    }
     func stopAllForQuit() {
         quitWhenFinished = true
         coordinator?.stopAll()

@@ -8,6 +8,8 @@ public struct ProjectRunState {
     public var command: String?
     public var error: String?
     public var flutterControls: FlutterRunControls?
+    /// Authenticated address belongs only to this live generation, never history/configuration.
+    public var vmServiceEndpoint: VMServiceEndpoint?
     public var isBusy: Bool { phase != .idle }
     // Links are valid only for the owning run, never during stop or from history.
     public var liveDevToolsURLs: [String] {
@@ -163,6 +165,7 @@ public final class ProjectRunCoordinator {
             state.session = session; update(projectID, state); onEvent?(.updated(projectID, session))
         case .service(let endpoint):
             guard state.phase == .running, let session = state.session else { return }
+            state.vmServiceEndpoint = endpoint; update(projectID, state)
             onEvent?(.service(projectID: projectID, sessionID: session.id, endpoint: endpoint))
         case .flutterControls(let controls):
             guard state.phase == .running else { return }

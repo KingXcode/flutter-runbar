@@ -21,8 +21,10 @@
 		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
 		63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */; };
 		673CC5846603D7C9C0D66235 /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F988073F96A1983555A9F5EA /* LogView.swift */; };
+		68D8A344ED1CF995A0292C82 /* VSCodeBridgeServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */; };
 		7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */; };
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
+		82AC89839337A307D9499B3F /* VSCodeConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */; };
 		861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */; };
 		8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
@@ -43,11 +45,15 @@
 		08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogResponsivenessProbe.swift; sourceTree = "<group>"; };
 		0C6F66E99688501B309B2459 /* capture-real-menu.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-real-menu.sh"; sourceTree = "<group>"; };
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
+		129869889879D609F44240FE /* extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = extension.js; sourceTree = "<group>"; };
 		1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPanel.swift; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
+		34A808A71127B818971B8764 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeConnectionView.swift; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
+		3FE25BD6D3CB404D874DA7C2 /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
 		4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentView.swift; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
@@ -63,6 +69,7 @@
 		9BC0C281B047474B3C8BE784 /* LogToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogToolsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
+		AA265515B8A948781CDF2C41 /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
 		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
 		ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
@@ -72,9 +79,11 @@
 		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D0AE10E194C87F99DDCB1683 /* Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runbar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
+		D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeBridgeServer.swift; sourceTree = "<group>"; };
 		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-vscode-extension.py"; sourceTree = "<group>"; };
 		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
@@ -108,6 +117,25 @@
 				75CB9B8540936580652BC9EC /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		2698E51FC4382C2E27F5EDA6 /* runbar-vscode */ = {
+			isa = PBXGroup;
+			children = (
+				3FE25BD6D3CB404D874DA7C2 /* bridge.js */,
+				129869889879D609F44240FE /* extension.js */,
+				AA265515B8A948781CDF2C41 /* package.json */,
+				34A808A71127B818971B8764 /* README.md */,
+			);
+			path = "runbar-vscode";
+			sourceTree = "<group>";
+		};
+		31CA906D6E71070FDCC4B28D /* extensions */ = {
+			isa = PBXGroup;
+			children = (
+				2698E51FC4382C2E27F5EDA6 /* runbar-vscode */,
+			);
+			path = extensions;
 			sourceTree = "<group>";
 		};
 		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
@@ -156,6 +184,7 @@
 				B637E5526FA142797BA3D836 /* capture-preview.sh */,
 				0C6F66E99688501B309B2459 /* capture-real-menu.sh */,
 				B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */,
+				E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */,
 				9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */,
 				8BA286984BB626AF54E8C607 /* process-tests.c */,
 				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
@@ -195,6 +224,8 @@
 				DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */,
 				1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */,
 				7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */,
+				D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */,
+				38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */,
 			);
 			path = FlutterRunbar;
 			sourceTree = "<group>";
@@ -204,6 +235,7 @@
 			children = (
 				1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */,
 				CE552C978360C0B9FEED0C40 /* README.md */,
+				31CA906D6E71070FDCC4B28D /* extensions */,
 				3D807E313C430C635BCA2CF1 /* Packages */,
 				250C094D8AC86FF7E0A7DB1B /* Resources */,
 				87BF212ED71F5E022BBD09EB /* scripts */,
@@ -242,6 +274,7 @@
 				F2EAF89CB7608CCF1264F9BE /* Sources */,
 				CBE78880F38A021AB325E480 /* Resources */,
 				16030357D28652FF245108AC /* Frameworks */,
+				7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */,
 			);
 			buildRules = (
 			);
@@ -308,6 +341,30 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Runbar VS Code extension";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/runbar-bridge.vsix",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/metadata.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/usr/bin/python3 \"$SRCROOT/scripts/package-vscode-extension.py\" --output \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/VSCodeBridge\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F2EAF89CB7608CCF1264F9BE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -324,6 +381,8 @@
 				F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */,
 				861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */,
 				5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */,
+				68D8A344ED1CF995A0292C82 /* VSCodeBridgeServer.swift in Sources */,
+				82AC89839337A307D9499B3F /* VSCodeConnectionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

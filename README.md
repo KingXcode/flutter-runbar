@@ -135,6 +135,8 @@ DMG 流程**不公证、不上传 App / DMG**，不需要 Apple 公证账号或�
 
 左侧项目名和右侧项目标题旁显示当前 Git 分支，长名称截断后可悬停查看完整内容；不额外增加一行。主窗口可见时约每 2 秒后台刷新一次，只读取少量 Git 元数据，不启动 Git 命令。支持仓库子目录、worktree、子模块和尚未提交的新分支；分离 HEAD 时显示 `HEAD · 短提交号`。非 Git 目录或元数据不可读时不显示标签，应用监听来源也不显示。
 
+Flutter 项目以 Debug 模式运行且调试服务就绪后，可点击右上角「VS Code」自动打开对应源码目录并附加断点调试。VS Code 未启动时会自动启动；当前窗口是其他项目时会为该项目打开新窗口。首次使用由 Runbar 提示安装附带的 Runbar Bridge 扩展及官方 Dart / Flutter 支持，也可在设置 → VS Code →「安装 / 管理扩展」保存 VSIX，按界面说明手动安装。扩展源码位于 [`extensions/runbar-vscode`](extensions/runbar-vscode)，标准 Xcode 构建及 App / DMG 脚本会自动嵌入安装包；不修改业务项目的源码或 `launch.json`。连接范围、安装与协议说明见 [VS Code 调试接入](docs/vscode-debugging.md)。
+
 命令由 `/bin/zsh -l -c` 执行，工作目录通过进程 API 设置，不拼接 `cd`。每次运行会在自定义 PATH 后补充 `~/.pub-cache/bin`、`~/fvm/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，已有配置也会生效；自定义路径中的 `~/` 会展开为用户主目录。可在「PATH 设置」添加其他 SDK 或 FVM 实际所在目录，自定义路径优先。登录 zsh 会读取你自己的登录配置；本应用不安装 SDK、不修改 shell 文件。PATH 只影响新运行。
 
 只保存你信任的命令。它拥有当前用户的系统权限，应用没有启用 App Sandbox。输出或日志内容永远不会被执行。普通命令的 stdin 接到 `/dev/null`；直接 Flutter 驻留命令可使用下文的运行按钮，其他交互式输入仍需使用终端，不提供通用交互式终端或 PTY。不要配置 `&`、`nohup`、`setsid` 或其他后台化 / 脱离进程组的命令：主动脱离进程组的进程不能由本应用可靠管理。
