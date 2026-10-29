@@ -71,7 +71,7 @@ open 'dist/Runbar.app'
 ./build_macos_app.sh
 ```
 
-脚本执行 Release 构建和签名校验，同时生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`，只生成 `.app`。也可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
+脚本执行 Release 构建和签名校验，同时生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`。这个入口默认只生成 `.app`；可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
 
 首次改名安装会同时备份并移走桌面旧名 `Flutter Runbar.app`，桌面只保留新版 `Runbar.app`。应用标识和数据目录保持不变，原有配置、命令与运行记录继续使用。
 
@@ -81,7 +81,38 @@ open 'dist/Runbar.app'
 
 CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
 
-构建脚本生成可放进 Applications 的 `.app`，仅使用本机 ad hoc 签名，不是 Developer ID 签名，未公证。跨机器分发可能遇到 Gatekeeper；不要关闭系统安全功能。正式分发需单独配置合法签名与公证。当前构建只生成所在机器架构的应用。
+默认 App 构建使用本机 ad hoc 签名，只生成所在机器架构的应用。跨电脑分发可使用下面的通用 DMG 入口。
+
+### 一键生成桌面 DMG（不公证）
+
+```sh
+./build_macos_dmg.sh
+```
+
+脚本生成 Apple 芯片与 Intel 双架构（`arm64 + x86_64`）的 Release 应用，制作带有 Applications 拖入入口和安装说明的 DMG。自动读取应用版本、构建号和最低系统要求；当前最低要求为 macOS 26。先校验 App / DMG 签名、两种架构及磁盘映像校验和，再输出到：
+
+- `dist/Runbar-<版本>-<构建号>-universal-signed.dmg`
+- `~/Desktop/Runbar-<版本>-<构建号>-universal-signed.dmg`
+- `dist/` 中同时保留 DMG 的 `.sha256` 校验文件。
+
+同名旧 DMG 先备份到 `.build/package-backups/<时间>/`，新文件完整复制后才替换，替换失败会恢复旧文件。制作 DMG 不退出正在运行的 Runbar，也不替换桌面的 `.app`。
+
+DMG 默认选择本机唯一有效的 **Developer ID Application** 证书，同时给 App 和 DMG 签名；不会硬编码某台电脑的证书指纹或团队。证书缺失或有多个候选时，会在构建前明确报错，可指定完整证书名或指纹：
+
+```sh
+./build_macos_dmg.sh --signing-identity 'Developer ID Application: 证书完整名称 (TEAMID)'
+# 也可通过环境变量 RUNBAR_SIGNING_IDENTITY 指定。
+```
+
+没有分发证书时，可明确选择 ad hoc 签名，产物后缀为 `-adhoc.dmg`：
+
+```sh
+./build_macos_dmg.sh --signing-identity -
+```
+
+DMG 流程**不公证、不上传 App / DMG**，不需要 Apple 公证账号或凭据。Developer ID 签名会请求签名时间戳。由于没有公证，在其他电脑首次安装时，系统仍可能拦截；确认包的来源后，按 [Apple 的说明](https://support.apple.com/guide/mac-help/mh40617/mac) 在「系统设置 > 隐私与安全性」中选择「仍要打开」，不要关闭系统安全功能。
+
+底层命令 `bash scripts/build-app.sh --dmg` 只输出到 `dist/`；追加 `--desktop` 才复制到桌面。`./build_macos_app.sh --dmg` 与 DMG 桌面入口等效。原来的 App 打包入口及 CI 默认行为保持不变，预览构建不能用于制作分发 DMG。
 
 `FlutterRunbar.xcodeproj`、共享 Scheme 和 `Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 执行 `xcodegen generate`。如果直接在 Xcode 修改工程设置，应同步修改 `project.yml`，避免重新生成时覆盖设置。
 
