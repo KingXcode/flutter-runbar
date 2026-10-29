@@ -180,6 +180,8 @@ final class AppModel: ObservableObject {
     @Published var applicationConnections: [UUID: ApplicationConnectionState] = [:]
     private var applicationLoggers: [UUID: ApplicationLogSession] = [:]
     private var applicationWatchers: [UUID: Task<Void, Never>] = [:]
+    private var applicationFlutterControllers: [UUID: ApplicationFlutterControls] = [:]
+    private var applicationFlutterTasks: [UUID: Task<Void, Never>] = [:]
     private let devToolsServer = LocalDevToolsServer()
     @Published var historySelection = HistorySelection()
     var selectedSession: UUID? {
@@ -624,8 +626,10 @@ final class AppModel: ObservableObject {
             if let endpoint = applicationConnections[id]?.endpoint { network.discovered(endpoint, sessionID: value.id) }
             if selectedApplication == id { selectedSession = value.id; loadLog() }
         case .connected(let streams):
+            guard applicationConnections[id]?.phase == .connecting else { return }
             applicationConnections[id]?.phase = .listening
             applicationConnections[id]?.message = streams.isEmpty ? "已连接 · 当前 VM 不提供日志事件" : "已连接"
+            startApplicationFlutterControls(id, generation: generation)
         case .output(let sessionID):
             if selectedSession == sessionID { refreshLogAfterOutput() }
         case .finished(let value):
@@ -633,6 +637,7 @@ final class AppModel: ObservableObject {
             let exited = applicationConnections[id]?.message == "App 已退出" || applicationConnections[id]?.candidate.map { !ApplicationDiscovery.isCurrent($0) } == true
             applicationConnections[id]?.phase = .idle; applicationConnections[id]?.endpoint = nil; applicationConnections[id]?.devToolsURL = nil
             applicationConnections[id]?.message = exited ? "App 已退出" : value.error == nil ? "已断开" : "连接已中断"
+            stopApplicationFlutterControls(id)
             applicationLoggers[id] = nil; applicationWatchers[id]?.cancel(); applicationWatchers[id] = nil
             if selectedSession == value.id { loadLog() }
         }
@@ -640,7 +645,53 @@ final class AppModel: ObservableObject {
     func disconnectApplication(_ id: UUID) {
         guard let logger = applicationLoggers[id] else { return }
         applicationConnections[id]?.phase = .disconnecting; applicationConnections[id]?.message = "正在断开"
+        stopApplicationFlutterControls(id)
         Task { await logger.disconnect() }
+    }
+    private func startApplicationFlutterControls(_ id: UUID, generation: UUID) {
+        guard !quitWhenFinished, !logShutdownStarted, applicationFlutterControllers[id] == nil,
+              let state = applicationConnections[id], state.generation == generation, state.phase == .listening,
+              let endpoint = state.endpoint, let candidate = state.candidate, ApplicationDiscovery.isCurrent(candidate) else { return }
+        let controls = ApplicationFlutterControls(endpoint: endpoint, processID: candidate.processID) { [weak self] availability in
+            await self?.updateApplicationFlutterControls(availability, applicationID: id, generation: generation)
+        }
+        applicationFlutterControllers[id] = controls
+        Task { await controls.start() }
+    }
+    private func updateApplicationFlutterControls(_ availability: ApplicationFlutterControls.Availability, applicationID id: UUID, generation: UUID) {
+        guard !quitWhenFinished, !logShutdownStarted, applicationConnections[id]?.generation == generation,
+              applicationConnections[id]?.phase == .listening else { return }
+        applicationConnections[id]?.flutterControls.actions = availability.actions
+        applicationConnections[id]?.flutterControlHint = availability.message
+    }
+    private func stopApplicationFlutterControls(_ id: UUID) {
+        applicationFlutterTasks.removeValue(forKey: id)?.cancel()
+        if let controls = applicationFlutterControllers.removeValue(forKey: id) { Task { await controls.disconnect() } }
+        applicationConnections[id]?.flutterControls = FlutterRunControls()
+        applicationConnections[id]?.flutterControlHint = "连接 App 后检测热更新能力"
+        applicationConnections[id]?.flutterControlResult = nil
+    }
+    func sendApplicationFlutterAction(_ action: FlutterRunAction, applicationID id: UUID) {
+        guard !quitWhenFinished, !logShutdownStarted, action == .hotReload || action == .hotRestart,
+              let state = applicationConnections[id], state.phase == .listening,
+              let candidate = state.candidate, ApplicationDiscovery.isCurrent(candidate),
+              state.flutterControls.canSend(action), let controls = applicationFlutterControllers[id] else { return }
+        let generation = state.generation
+        applicationConnections[id]?.flutterControls.workingAction = action
+        applicationConnections[id]?.flutterControlResult = nil
+        applicationFlutterTasks[id] = Task { [weak self] in
+            var problem: String?
+            do { try await controls.perform(action) }
+            catch is CancellationError { return }
+            catch { problem = error.localizedDescription }
+            guard let self, !Task.isCancelled, !self.quitWhenFinished, !self.logShutdownStarted,
+                  self.applicationConnections[id]?.generation == generation,
+                  self.applicationConnections[id]?.phase == .listening, ApplicationDiscovery.isCurrent(candidate) else { return }
+            self.applicationConnections[id]?.flutterControls.workingAction = nil
+            self.applicationConnections[id]?.flutterControlResult = action.title + (problem == nil ? "完成" : "失败")
+            self.applicationFlutterTasks[id] = nil
+            if let problem { self.error = problem }
+        }
     }
     func removeApplication(_ id: UUID) {
         guard applicationConnections[id]?.active != true else { error = "请先断开该应用，再从列表移除。"; return }
@@ -723,6 +774,11 @@ final class AppModel: ObservableObject {
             // Wait for the cancelled scan to leave its chunk, then close handles
             // and remove the current disk index before completing normal quit.
             for watcher in self.applicationWatchers.values { watcher.cancel() }
+            for task in self.applicationFlutterTasks.values { task.cancel() }
+            self.applicationFlutterTasks.removeAll()
+            let controls = Array(self.applicationFlutterControllers.values)
+            self.applicationFlutterControllers.removeAll()
+            for control in controls { await control.disconnect() }
             for logger in Array(self.applicationLoggers.values) { await logger.disconnect() }
             await self.devToolsServer.stop()
             await logLoader.clear()

@@ -16,7 +16,9 @@ struct ManagerView: View {
     @State private var pendingProjectRemoval: Project?
     @State private var expandedLog = false
     @State private var showingNetwork = false
+    @State private var projectGitHeads: [String: ProjectGitHead] = [:]
     @AppStorage("logWrapsLines") private var logWrapsLines = false
+    private var gitProjectPaths: [String] { model.config.projects.map(\.path).sorted() }
     private var projectHistory: [RunSession] {
         model.visibleHistory
     }
@@ -44,8 +46,11 @@ struct ManagerView: View {
                                         .foregroundStyle(model.selectedProject == project.id ? Color.accentColor : .secondary)
                                         .frame(width: 18)
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(project.name).font(.system(size: 12, weight: .semibold))
-                                            .lineLimit(1).truncationMode(.middle)
+                                        HStack(spacing: 5) {
+                                            Text(project.name).font(.system(size: 12, weight: .semibold))
+                                                .lineLimit(1).truncationMode(.middle).layoutPriority(1)
+                                            if let head = projectGitHeads[project.path] { gitBranchBadge(head, compact: true) }
+                                        }
                                         Text(project.path).font(.system(size: 10)).foregroundStyle(.secondary)
                                             .lineLimit(1).truncationMode(.middle)
                                             .accessibilityLabel("项目目录 \(project.path)")
@@ -118,6 +123,22 @@ struct ManagerView: View {
             }
             #endif
         }
+        .task(id: gitProjectPaths) {
+            let paths = gitProjectPaths
+            let wanted = Set(paths)
+            projectGitHeads = projectGitHeads.filter { wanted.contains($0.key) }
+            guard !paths.isEmpty else { return }
+            while !Task.isCancelled {
+                // A hidden/minimized manager needs no disk polling. Check again
+                // on the next tick when a normal app window becomes visible.
+                if !NSApp.isHidden, NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.level == .normal }) {
+                    let heads = await ProjectGitReader.snapshot(paths: paths)
+                    guard !Task.isCancelled else { return }
+                    if projectGitHeads != heads { projectGitHeads = heads }
+                }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
         .sheet(isPresented: $showingApplicationPicker) {
             ApplicationPickerView(model: model, preferredApplication: model.application)
         }
@@ -183,8 +204,10 @@ struct ManagerView: View {
                 }
                 Spacer(minLength: 8)
                 let state = model.applicationConnections[application.id]
-                Text(state?.message ?? "未连接").font(.caption).foregroundStyle(.secondary).lineLimit(1).help(state?.message ?? "未连接")
+                Text(state?.flutterControlResult ?? state?.message ?? "未连接").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .help(state?.message ?? "未连接")
                 if state?.active == true {
+                    applicationFlutterButtons(applicationID: application.id, state: state)
                     Button("DevTools", systemImage: "arrow.up.right.square") { model.openApplicationDevTools(application.id) }
                         .disabled(state?.phase != .listening)
                     Button(state?.phase == .disconnecting ? "正在断开…" : "断开连接") { model.disconnectApplication(application.id) }
@@ -196,13 +219,32 @@ struct ManagerView: View {
         }.controlSize(.small).padding(.horizontal, 12).padding(.vertical, 12)
     }
 
+    private func applicationFlutterButtons(applicationID: UUID, state: ApplicationConnectionState?) -> some View {
+        let controls = state?.flutterControls ?? FlutterRunControls()
+        return HStack(spacing: 5) {
+            Button(controls.workingAction == .hotReload ? "重载中…" : "热重载", systemImage: "bolt.fill") {
+                model.sendApplicationFlutterAction(.hotReload, applicationID: applicationID)
+            }.disabled(state?.phase != .listening || !controls.canSend(.hotReload) || model.quitWhenFinished)
+                .help(controls.actions.contains(.hotReload) ? "编译并加载 Dart 修改，保留当前状态；编译详情见原调试工具" : state?.flutterControlHint ?? "等待连接")
+                .accessibilityLabel("关联 App 热重载")
+            Button(controls.workingAction == .hotRestart ? "重启中…" : "热重启", systemImage: "arrow.counterclockwise") {
+                model.sendApplicationFlutterAction(.hotRestart, applicationID: applicationID)
+            }.disabled(state?.phase != .listening || !controls.canSend(.hotRestart) || model.quitWhenFinished)
+                .help(controls.actions.contains(.hotRestart) ? "从 Dart 入口重新运行，会重置当前状态；编译详情见原调试工具" : state?.flutterControlHint ?? "等待连接")
+                .accessibilityLabel("关联 App 热重启")
+        }.fixedSize()
+    }
+
     private var projectHeader: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(model.project?.name ?? "选择一个项目")
-                        .font(.system(size: 16, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                        .help(model.project?.name ?? "")
+                    HStack(spacing: 8) {
+                        Text(model.project?.name ?? "选择一个项目")
+                            .font(.system(size: 16, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                            .help(model.project?.name ?? "").layoutPriority(1)
+                        if let path = model.project?.path, let head = projectGitHeads[path] { gitBranchBadge(head) }
+                    }
                     Text(model.project?.path ?? "从左侧添加项目，管理命令与本地运行日志。")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
@@ -260,6 +302,16 @@ struct ManagerView: View {
                 }.controlSize(.small)
             }
         }.padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func gitBranchBadge(_ head: ProjectGitHead, compact: Bool = false) -> some View {
+        Label(head.title, systemImage: "arrow.triangle.branch")
+            .font(.system(size: compact ? 9 : 11))
+            .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 4))
+            .help(head.help).accessibilityLabel(head.help)
+            .layoutPriority(-1)
     }
 
     private func flutterRunButtons(projectID: UUID, sessionID: UUID, controls: FlutterRunControls) -> some View {

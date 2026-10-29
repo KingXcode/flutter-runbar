@@ -11,6 +11,9 @@ struct ApplicationConnectionState {
     var endpoint: VMServiceEndpoint?
     var devToolsURL: URL?
     var message = "未连接"
+    var flutterControls = FlutterRunControls()
+    var flutterControlHint = "正在检测热更新能力"
+    var flutterControlResult: String?
     var active: Bool { phase != .idle }
 }
 
