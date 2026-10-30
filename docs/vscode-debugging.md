@@ -32,7 +32,7 @@ python3 scripts/package-vscode-extension.py
 
 输出在 `dist/vscode-bridge/`。脚本只打入清单中的扩展源码、说明和 manifest，不采集项目、运行历史、设置或认证地址。更新扩展时修改 `extensions/runbar-vscode/package.json` 的版本号；Runbar 根据嵌入的元数据检查是否需要更新。
 
-Runbar 调用已安装 VS Code 自带的 CLI，以参数数组安装内置 VSIX 和官方依赖，不拼接 shell 命令。手动安装时在 Runbar 导出 VSIX，然后在实际使用的 VS Code 窗口选择扩展页面的 **⋯ → 从 VSIX 安装**。如果使用其他 VS Code 配置文件，请在该配置文件中安装并启用所需扩展。
+Runbar 从 VS Code 的 App Bundle 读取真实的可执行文件路径，再调用其自带的 CLI，以参数数组检测及安装扩展，不拼接 shell 命令，不写死主程序名为 Electron 或 Code。命令行组件无法检测时显示具体原因，不据此判定扩展缺失或提示重复安装。手动安装时在 Runbar 导出 VSIX，然后在实际使用的 VS Code 窗口选择扩展页面的 **⋯ → 从 VSIX 安装**。如果使用其他 VS Code 配置文件，请在该配置文件中安装并启用所需扩展。
 
 ## 生命周期与边界
 

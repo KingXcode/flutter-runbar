@@ -27,10 +27,15 @@ private struct VSCodeExtensionPackage: Decodable {
 private enum VSCodeCLI {
     static func run(app: URL, arguments: [String]) async throws -> String {
         try await Task.detached(priority: .utility) {
-            let executable = app.appendingPathComponent("Contents/MacOS/Electron")
+            // VS Code's executable name can change across releases (Code /
+            // Electron). The bundle declares the actual launcher; do not guess.
+            guard let executable = Bundle(url: app)?.executableURL,
+                  FileManager.default.isExecutableFile(atPath: executable.path) else {
+                throw RunbarError.message("无法定位 VS Code 主程序，请确认当前应用的位置后重新检测。")
+            }
             let cli = app.appendingPathComponent("Contents/Resources/app/out/cli.js")
-            guard FileManager.default.isExecutableFile(atPath: executable.path), FileManager.default.isReadableFile(atPath: cli.path) else {
-                throw RunbarError.message("VS Code 安装不完整，请重新安装后重试。")
+            guard FileManager.default.isReadableFile(atPath: cli.path) else {
+                throw RunbarError.message("未找到 VS Code 命令行组件（out/cli.js），暂时无法自动检测扩展。")
             }
             let process = Process(), pipe = Pipe()
             process.executableURL = executable; process.arguments = [cli.path] + arguments
@@ -38,6 +43,11 @@ private enum VSCodeCLI {
             // A terminal launched by a sandboxed App can inherit its target's
             // temporary directory. Never pass that path to an editor CLI.
             var environment = ProcessInfo.processInfo.environment
+            // Match the official code launcher: Node options are forwarded for
+            // VS Code to handle, not interpreted by its Electron CLI helper.
+            for key in ["NODE_OPTIONS", "NODE_REPL_EXTERNAL_MODULE"] {
+                if let value = environment.removeValue(forKey: key) { environment["VSCODE_" + key] = value }
+            }
             environment["ELECTRON_RUN_AS_NODE"] = "1"
             environment["TMPDIR"] = NSTemporaryDirectory()
             process.environment = environment
@@ -205,10 +215,11 @@ struct VSCodeConnectionView: View {
                     .keyboardShortcut(.cancelAction)
                 if connection.phase == .missingEditor {
                     Button("下载 VS Code", action: connection.openEditor).buttonStyle(.borderedProminent)
-                } else if !connection.busy && (!connection.bridgeInstalled || !connection.dartInstalled) {
+                } else if connection.phase == .needsInstall {
                     Button(request == nil ? "安装扩展" : "安装并连接") { connection.installThenConnect(target: target) }
                         .disabled(!connection.packageAvailable).buttonStyle(.borderedProminent)
-                } else if let target, !connection.busy && connection.phase != .connected {
+                } else if let target, connection.bridgeInstalled && connection.dartInstalled,
+                          !connection.busy && connection.phase != .connected {
                     Button("连接") { Task { await connection.connect(target: target) } }
                         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                 }
