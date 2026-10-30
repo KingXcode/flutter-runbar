@@ -6,7 +6,7 @@ import RunbarCore
 private final class NetworkPanelModel: ObservableObject {
     typealias Detail = NetworkDetailSection
     @Published var query = NetworkQuery() { didSet {
-        guard query != oldValue else { return }
+        guard !query.hasSameConditions(as: oldValue) else { return }
         clearSelection(); window = .empty; visibleRow = 0; countsDirty = true
         scrollRevision += 1; refresh(delay: true)
     } }
@@ -121,7 +121,7 @@ private final class NetworkPanelModel: ObservableObject {
                 let record: NetworkRecord?
                 if let visibleID { record = try await reader.request(directory: directory, id: visibleID) }
                 else { record = try await reader.request(directory: directory, query: query, row: row) }
-                guard !Task.isCancelled, self.sessionID == sessionID, self.query == query, self.selectedRow == row else { return }
+                guard !Task.isCancelled, self.sessionID == sessionID, self.query.hasSameConditions(as: query), self.selectedRow == row else { return }
                 self.selectedID = record?.id; self.selected = record; self.loadDetail()
             } catch {
                 guard !Task.isCancelled else { return }; self.error = error.localizedDescription
@@ -138,7 +138,7 @@ private final class NetworkPanelModel: ObservableObject {
         if let data = try? JSONEncoder().encode(preferences) { UserDefaults.standard.set(data, forKey: "networkDetailPreferences") }
     }
     func clearFieldFilters() {
-        var value = query; value.text = ""; value.headers = ""; value.requestBody = ""; value.responseBody = ""; query = value
+        var value = query; value.clearFieldFilters(); query = value
     }
     private func loadDetail() {
         detailTask?.cancel(); loading = false; error = nil; formatError = nil
@@ -188,6 +188,12 @@ struct NetworkPanel: View {
     @StateObject private var data = NetworkPanelModel()
     @State private var confirmingClear = false
     @State private var showingFieldFilters = false
+    @State private var jsonSource = NetworkJSONCondition.Source.response
+    @State private var jsonPath = ""
+    @State private var jsonOperation = NetworkJSONCondition.Operation.equals
+    @State private var jsonValue = ""
+    @State private var jsonError: String?
+    @State private var jsonExclusion = false
     private var enabled: Bool { model.networkCaptureEnabled(for: session) }
     private var sourceExists: Bool {
         if let id = session.attachment?.application.id { return model.applications.contains { $0.id == id } }
@@ -262,9 +268,9 @@ struct NetworkPanel: View {
             }
     }
     private var contentSearch: some View {
-        TextField("搜索全部已缓存内容", text: $data.query.search).textFieldStyle(.roundedBorder).frame(minWidth: 120)
+        NetworkKeywordEditor(query: $data.query, scope: .everywhere, placeholder: "搜索全部内容，回车添加关键词")
+            .frame(minWidth: 150)
             .accessibilityLabel("搜索 URL、请求头、请求参数及响应内容")
-            .help("忽略大小写，在 URL、请求/响应头、URL 参数、已缓存请求和响应正文中查找关键词")
     }
     private var methodFilter: some View {
         Picker("方法", selection: $data.query.method) {
@@ -288,22 +294,91 @@ struct NetworkPanel: View {
             showingFieldFilters.toggle()
         }.fixedSize().accessibilityLabel("按字段组合筛选网络请求")
             .popover(isPresented: $showingFieldFilters, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("按字段筛选").font(.headline)
+                        Text("网络筛选").font(.headline)
                         Spacer()
                         Button("清空", action: data.clearFieldFilters).disabled(data.query.fieldFilterCount == 0)
                     }
-                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
-                        GridRow { Text("URL"); TextField("地址关键词", text: $data.query.text) }
-                        GridRow { Text("请求/响应头"); TextField("Header 名称或内容", text: $data.query.headers) }
-                        GridRow { Text("请求参数"); TextField("URL 参数或请求正文关键词", text: $data.query.requestBody) }
-                        GridRow { Text("响应内容"); TextField("响应正文关键词", text: $data.query.responseBody) }
-                    }.textFieldStyle(.roundedBorder)
-                    Text("不同字段需要同时满足；全部内容搜索在任一字段命中即可。正文仅查询已缓存内容。")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }.padding(16).frame(width: 390)
+                    HStack {
+                        Text("每组包含词")
+                        Picker("关键词关系", selection: $data.query.keywordMode) {
+                            ForEach(NetworkKeywordMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                        Spacer(minLength: 0)
+                    }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            keywordRow("URL", scope: .url, placeholder: "地址关键词")
+                            keywordRow("请求/响应头", scope: .headers, placeholder: "Header 名称或内容")
+                            keywordRow("请求参数", scope: .request, placeholder: "URL 参数或请求正文关键词")
+                            keywordRow("响应内容", scope: .response, placeholder: "响应正文关键词")
+                            Text("选择包含或排除，再回车 / + 添加。逗号、分号和换行可分隔多个词。包含条件先取结果，命中任一排除词则剔除；排除优先。")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Divider()
+                            jsonFilters
+                        }.padding(.trailing, 3)
+                    }.frame(maxHeight: 450)
+                    Text("只设排除条件时从全部请求中剔除；未缓存正文无法判断是否包含排除词。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(16).frame(width: 550).controlSize(.small)
             }
+    }
+    private func keywordRow(_ title: String, scope: NetworkKeywordScope, placeholder: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(title).frame(width: 85, alignment: .leading).padding(.top, 4)
+            NetworkKeywordEditor(query: $data.query, scope: scope, placeholder: placeholder)
+        }
+    }
+    private var jsonFilters: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("字段条件（JSON）").font(.headline)
+            ForEach(data.query.jsonConditions) { rule in
+                HStack(spacing: 6) {
+                    Text(rule.isExclusion ? "排除" : "保留").foregroundStyle(rule.isExclusion ? Color.orange : Color.accentColor)
+                    Text(rule.source.title).foregroundStyle(.secondary)
+                    Text(rule.path).font(.system(.caption, design: .monospaced)).lineLimit(1)
+                    Text(rule.operation.title)
+                    if rule.operation.needsValue { Text(rule.value).lineLimit(1) }
+                    Spacer(minLength: 0)
+                    Button { data.query.jsonConditions.removeAll { $0.id == rule.id } } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("删除这条条件")
+                }.padding(7).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .help("\(rule.source.title) · \(rule.path) \(rule.operation.title) \(rule.value)")
+            }
+            HStack(spacing: 7) {
+                Picker("JSON 条件作用", selection: $jsonExclusion) { Text("保留").tag(false); Text("排除").tag(true) }
+                    .labelsHidden().frame(width: 70)
+                Picker("JSON 来源", selection: $jsonSource) {
+                    ForEach(NetworkJSONCondition.Source.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.labelsHidden().frame(width: 110)
+                TextField("字段路径，如 data.connectionid", text: $jsonPath)
+                    .accessibilityLabel("JSON 字段路径")
+            }
+            HStack(spacing: 7) {
+                Picker("字段比较方式", selection: $jsonOperation) {
+                    ForEach(NetworkJSONCondition.Operation.allCases, id: \.self) { Text($0.title).tag($0) }
+                }.labelsHidden().frame(width: 110)
+                TextField(jsonOperation.needsValue ? "值，如 1、true、null 或文本" : "无需填写值", text: $jsonValue)
+                    .disabled(!jsonOperation.needsValue).onSubmit(addJSONCondition)
+                    .accessibilityLabel("JSON 字段比较值")
+                Button("添加", action: addJSONCondition).disabled(data.query.jsonConditions.count >= 16)
+            }
+            if let jsonError { Text(jsonError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            Text("例：响应 JSON · data.connectionid · 等于 · 1。数组可写 items[0].id 或 items[*].id。数字 1 与字符串 \"1\" 区分；空字符串写 \"\"。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("保留条件须全部满足；任一排除条件命中即剔除。不等于 / 不包含也匹配缺少该字段的 JSON；非 JSON 和未缓存正文不会命中字段条件。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }.textFieldStyle(.roundedBorder)
+    }
+    private func addJSONCondition() {
+        guard data.query.jsonConditions.count < 16 else { return }
+        let rule = NetworkJSONCondition(source: jsonSource, path: jsonPath.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        operation: jsonOperation, value: jsonValue, isExclusion: jsonExclusion)
+        do {
+            try rule.validate(); data.query.jsonConditions.append(rule)
+            jsonPath = ""; jsonValue = ""; jsonError = nil
+        } catch { jsonError = error.localizedDescription }
     }
     private var requests: some View {
         NetworkRequestsTable(window: data.window, selection: data.selectedRow,
@@ -560,5 +635,54 @@ private struct NetworkTextView: NSViewRepresentable {
             view.string = text; view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
             view.scrollRangeToVisible(NSRange(location: 0, length: 0))
         }
+    }
+}
+
+/// Drafts filter live; committing them as chips does not restart the same search.
+private struct NetworkKeywordEditor: View {
+    @Binding var query: NetworkQuery
+    let scope: NetworkKeywordScope
+    let placeholder: String
+    @State private var error: String?
+    @State private var excluding = false
+    private var draft: Binding<String> {
+        Binding(get: { query.draft(in: scope, excluding: excluding) }, set: { query.setDraft($0, in: scope, excluding: excluding); error = nil })
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Picker("关键词作用", selection: $excluding) { Text("包含").tag(false); Text("排除").tag(true) }
+                    .labelsHidden().frame(width: 65)
+                TextField(excluding ? "排除关键词，回车添加" : placeholder, text: draft)
+                    .textFieldStyle(.roundedBorder).onSubmit(commit)
+                Button(action: commit) { Image(systemName: "plus") }
+                    .disabled(draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .help("添加关键词")
+            }
+            chips(excluding: false)
+            chips(excluding: true)
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }.help("回车或 + 添加多个词，点 × 删除。逗号、分号和换行分隔多个词，空格保留。包含 / 排除各最多 16 个；排除词命中任一个即剔除。")
+    }
+    @ViewBuilder private func chips(excluding: Bool) -> some View {
+        if !query.keywords(in: scope, excluding: excluding).isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 170), spacing: 4)], alignment: .leading, spacing: 4) {
+                ForEach(query.keywords(in: scope, excluding: excluding), id: \.self) { word in
+                    HStack(spacing: 4) {
+                        Image(systemName: excluding ? "minus.circle" : "plus.circle")
+                        Text(word).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Button { query.removeKeyword(word, in: scope, excluding: excluding) } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("删除关键词 \(word)")
+                    }.font(.caption).padding(.horizontal, 6).padding(.vertical, 3)
+                        .background((excluding ? Color.orange : Color.accentColor).opacity(0.10), in: RoundedRectangle(cornerRadius: 5))
+                        .help("\(excluding ? "排除" : "包含")：\(word)")
+                }
+            }
+        }
+    }
+    private func commit() {
+        do { try query.commitKeywords(in: scope, excluding: excluding); error = nil }
+        catch { self.error = error.localizedDescription }
     }
 }

@@ -756,3 +756,120 @@ extension NetworkCaptureTests {
         XCTAssertEqual(offline.text, response.text)
     }
 }
+
+final class NetworkAdvancedFilterTests: XCTestCase {
+    func testKeywordTagsPreservePhrasesAndDoNotChangeEffectiveQuery() throws {
+        var query = NetworkQuery()
+        query.search = "orders, hello world；accepted\nORDERS"
+        let draft = query
+        try query.commitKeywords(in: .everywhere)
+        XCTAssertEqual(query.globalKeywords, ["orders", "hello world", "accepted"])
+        XCTAssertTrue(query.hasSameConditions(as: draft))
+        query.setDraft("heartbeat,error", in: .everywhere, excluding: true)
+        let exclusionDraft = query
+        try query.commitKeywords(in: .everywhere, excluding: true)
+        XCTAssertTrue(query.hasSameConditions(as: exclusionDraft))
+        XCTAssertEqual(query.keywords(in: .everywhere, excluding: true), ["heartbeat", "error"])
+        query.removeKeyword("heartbeat", in: .everywhere, excluding: true)
+        XCTAssertEqual(query.keywords(in: .everywhere, excluding: true), ["error"])
+        query.search = (0..<17).map { "term\($0)" }.joined(separator: ",")
+        XCTAssertThrowsError(try query.commitKeywords(in: .everywhere))
+    }
+    func testSQLMultipleIncludesThenAnyExclusion() throws {
+        try networkFixture { _, store in
+            var a = try sampleRecord("keep", url: "http://example.test/orders/ready")
+            a.requestHeaders = "token-a application/json"
+            var b = try sampleRecord("skip", url: "http://example.test/orders/heartbeat")
+            b.requestHeaders = a.requestHeaders
+            let c = try sampleRecord("other", url: "http://example.test/users")
+            try store.upsert([a, b, c])
+            var query = NetworkQuery(); query.urlKeywords = ["orders", "ready"]
+            XCTAssertEqual(try store.page(query: query).records.map(\.id), [a.id])
+            query.keywordMode = .any
+            query.setDraft("heartbeat,missing", in: .url, excluding: true)
+            XCTAssertEqual(try store.page(query: query).records.map(\.id), [a.id])
+            query.headerKeywords = ["token-a", "absent"]
+            XCTAssertEqual(try store.page(query: query).records.map(\.id), [a.id])
+            query.keywordMode = .all
+            XCTAssertEqual(try store.page(query: query).matching, 0)
+            query = NetworkQuery(); query.setDraft("heartbeat", in: .url, excluding: true)
+            XCTAssertEqual(Set(try store.page(query: query).records.map(\.id)), Set([a.id, c.id]))
+        }
+    }
+    func testGlobalWordsMaySpanFieldsButExcludedResponseAlwaysWins() throws {
+        try networkFixture { root, store in
+            var record = try sampleRecord("spread", url: "http://example.test/orders")
+            try store.upsert([record])
+            try store.saveBodies(record.id, request: Data("{\"symbol\":\"alpha\"}".utf8), response: Data("{\"state\":\"accepted\",\"kind\":\"heartbeat\"}".utf8))
+            record.bodyState = .saved
+            var query = NetworkQuery(); query.globalKeywords = ["orders", "alpha", "accepted"]
+            XCTAssertTrue(try NetworkContentMatcher(query: query).matches(record, directory: root))
+            query.globalKeywords.append("absent")
+            XCTAssertFalse(try NetworkContentMatcher(query: query).matches(record, directory: root))
+            query.keywordMode = .any
+            XCTAssertTrue(try NetworkContentMatcher(query: query).matches(record, directory: root))
+            query.setDraft("missing,heartbeat", in: .response, excluding: true)
+            XCTAssertFalse(try NetworkContentMatcher(query: query).matches(record, directory: root))
+        }
+    }
+    func testJSONFieldsIgnoreFormattingAndRespectTypesPathsAndExclusions() throws {
+        try networkFixture { root, store in
+            var record = try sampleRecord("json")
+            try store.upsert([record])
+            let response = #"{"reqtype":1,"status":0,"data":{"connectionid":1,"enabled":true,"name":"a\u0062","empty":"","nil":null},"items":[{"id":2},{"id":3}],"a.b":"literal"}"#
+            try store.saveBodies(record.id, request: Data(#"{"symbol":"alpha"}"#.utf8), response: Data(response.utf8))
+            record.bodyState = .saved
+            func match(_ path: String, _ operation: NetworkJSONCondition.Operation = .equals, _ value: String = "", exclude: Bool = false) throws -> Bool {
+                var query = NetworkQuery()
+                query.jsonConditions = [NetworkJSONCondition(path: path, operation: operation, value: value, isExclusion: exclude)]
+                return try NetworkContentMatcher(query: query).matches(record, directory: root)
+            }
+            XCTAssertTrue(try match("data.connectionid", .equals, "1"))
+            XCTAssertFalse(try match("data.connectionid", .equals, #""1""#))
+            XCTAssertTrue(try match("$.data.enabled", .equals, "true"))
+            XCTAssertFalse(try match("data.enabled", .equals, "1"))
+            XCTAssertTrue(try match("data.name", .equals, "ab"))
+            XCTAssertTrue(try match("data.empty", .equals, #""""#))
+            XCTAssertTrue(try match("data.nil", .equals, "null"))
+            XCTAssertTrue(try match("items[1].id", .equals, "3"))
+            XCTAssertTrue(try match("items[*].id", .equals, "2"))
+            XCTAssertFalse(try match("items[*].id", .notEquals, "2"))
+            XCTAssertTrue(try match(#"["a.b"]"#, .equals, "literal"))
+            XCTAssertTrue(try match("missing", .notExists))
+            XCTAssertTrue(try match("missing", .notEquals, "1"))
+            XCTAssertFalse(try match("data.connectionid", .equals, "1", exclude: true))
+            XCTAssertTrue(try match("data.connectionid", .equals, "2", exclude: true))
+            XCTAssertTrue(try match("data", .contains, "AB"))
+            record.bodyState = .pending
+            XCTAssertFalse(try match("data.connectionid", .equals, "1"))
+            XCTAssertTrue(try match("data.connectionid", .equals, "1", exclude: true))
+        }
+    }
+    func testJSONValidationRejectsMalformedOrExcessiveRules() throws {
+        for path in ["", "data.", "data..id", "items[-1]", "items[no]", "items[0", "data]id"] {
+            XCTAssertThrowsError(try NetworkJSONCondition(path: path, value: "1").validate(), path)
+        }
+        XCTAssertThrowsError(try NetworkJSONCondition(path: "data", value: "{}").validate())
+        XCTAssertThrowsError(try NetworkJSONCondition(path: "data", value: "").validate())
+        XCTAssertThrowsError(try NetworkJSONCondition(path: String(repeating: "x", count: 1025), value: "1").validate())
+        let deep = Data((String(repeating: "[", count: 129) + "1" + String(repeating: "]", count: 129)).utf8)
+        XCTAssertThrowsError(try NetworkBodyFormatter.validateJSONInput(deep))
+    }
+    func testJSONIndexReevaluatesLateBodyWithKeepAndDropRules() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root); defer { store.close() }
+        let a = try sampleRecord("keep-json", start: 1), b = try sampleRecord("drop-json", start: 2)
+        try store.upsert([a, b])
+        var query = NetworkQuery()
+        query.jsonConditions = [NetworkJSONCondition(path: "reqtype", value: "1"),
+                                NetworkJSONCondition(path: "data.connectionid", value: "1", isExclusion: true)]
+        let reader = NetworkCacheReader()
+        let before = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(before.matching, 0)
+        try store.saveBodies(a.id, request: Data(), response: Data(#"{"reqtype":1,"data":{"connectionid":2}}"#.utf8))
+        try store.saveBodies(b.id, request: Data(), response: Data(#"{"reqtype":1,"data":{"connectionid":1}}"#.utf8))
+        let after = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(after.rows.map(\.id), [a.id])
+    }
+}

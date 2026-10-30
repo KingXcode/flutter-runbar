@@ -168,10 +168,19 @@ public final class NetworkStore {
     private func predicate(for query: NetworkQuery) throws -> (String, [String]) {
         guard !query.needsContentSearch else { throw RunbarError.message("正文筛选需要通过后台网络查询器读取。") }
         var clauses = ["1=1"], values: [String] = []
-        if !query.text.isEmpty { clauses.append("instr(lower(url),lower(?))>0"); values.append(String(query.text.prefix(1024))) }
-        if !query.headers.isEmpty {
-            clauses.append("(instr(lower(coalesce(json_extract(CAST(metadata AS TEXT),'$.requestHeaders'),'')),lower(?))>0 OR instr(lower(coalesce(json_extract(CAST(metadata AS TEXT),'$.responseHeaders'),'')),lower(?))>0)")
-            values.append(String(query.headers.prefix(1024))); values.append(String(query.headers.prefix(1024)))
+        for excluding in [false, true] {
+            let join = excluding ? " OR " : query.keywordMode.sqlJoin
+            let urls = query.effectiveKeywords(in: .url, excluding: excluding)
+            let headers = query.effectiveKeywords(in: .headers, excluding: excluding)
+            if !urls.isEmpty {
+                clauses.append((excluding ? "NOT " : "") + "(" + urls.map { _ in "instr(lower(url),lower(?))>0" }.joined(separator: join) + ")")
+                values += urls
+            }
+            if !headers.isEmpty {
+                let clause = "(instr(lower(coalesce(json_extract(CAST(metadata AS TEXT),'$.requestHeaders'),'')),lower(?))>0 OR instr(lower(coalesce(json_extract(CAST(metadata AS TEXT),'$.responseHeaders'),'')),lower(?))>0)"
+                clauses.append((excluding ? "NOT " : "") + "(" + headers.map { _ in clause }.joined(separator: join) + ")")
+                for word in headers { values += [word, word] }
+            }
         }
         if !query.method.isEmpty { clauses.append("method=?"); values.append(query.method) }
         switch query.status {
@@ -381,7 +390,7 @@ public final class NetworkStore {
         // metadata conditions, so their old match can be removed from the index.
         // Text conditions are evaluated outside this lock too: a rare header
         // match must not turn one batch into a full JSON scan under the gate.
-        var base = query.metadataOnly; base.text = ""; base.headers = ""
+        var base = NetworkQuery(); base.method = query.method; base.status = query.status
         let (predicate, values) = afterRevision == nil ? try predicate(for: base) : ("1=1", [])
         let revision = try hasSearchRevision() ? "search_revision" : "0"
         let range = afterRevision.map { "search_revision>\($0) AND search_revision<=\(throughRevision)" } ?? "rowid>\(afterRow) AND rowid<=\(throughRow)"

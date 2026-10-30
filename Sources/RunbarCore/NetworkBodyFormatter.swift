@@ -37,14 +37,16 @@ public enum NetworkBodyFormatter {
     }
     private static var tooLarge: RunbarError { .message("格式化结果超过 4 MB，请查看原始内容。") }
 
-    private static func json(_ data: Data) throws -> Data {
+    static func validateJSONInput(_ data: Data) throws {
+        guard data.count <= inputLimit else { throw RunbarError.message("JSON 正文超过 1 MB。") }
         guard !data.contains(0), String(data: data, encoding: .utf8) != nil else {
             throw RunbarError.message("JSON 格式化需要 UTF-8 正文，请查看原始内容。")
         }
         // Bound nesting before allocating the parser's object graph. Reformat
         // lexically afterwards to preserve number precision and key order.
         var quoted = false, escaped = false, depth = 0
-        for byte in data {
+        for (index, byte) in data.enumerated() {
+            if index % 4096 == 0 { try Task.checkCancellation() }
             if quoted {
                 if escaped { escaped = false }
                 else if byte == 92 { escaped = true }
@@ -55,6 +57,9 @@ public enum NetworkBodyFormatter {
                 guard depth <= 128 else { throw RunbarError.message("JSON 嵌套超过 128 层，请查看原始内容。") }
             } else if byte == 125 || byte == 93 { depth -= 1 }
         }
+    }
+    private static func json(_ data: Data) throws -> Data {
+        try validateJSONInput(data)
         do { _ = try autoreleasepool { try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) } }
         catch { throw RunbarError.message("正文不是有效的 JSON，已保留原始内容。") }
         var result = Data(); result.reserveCapacity(min(data.count * 2, outputLimit))
@@ -67,7 +72,7 @@ public enum NetworkBodyFormatter {
             result.append(byte)
         }
         func newline(_ depth: Int) throws { try append(Data([10] + Array(repeating: 32, count: max(0, depth) * 2))) }
-        quoted = false; escaped = false; depth = 0
+        var quoted = false, escaped = false, depth = 0
         var previous: UInt8 = 0
         for (index, byte) in data.enumerated() {
             if index % 4096 == 0 { try Task.checkCancellation() }

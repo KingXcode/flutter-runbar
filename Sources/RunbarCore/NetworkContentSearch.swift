@@ -17,17 +17,27 @@ struct NetworkSearchCandidate {
 /// with a bounded overlap so matches may span reads and UTF-8 boundaries.
 struct NetworkContentMatcher {
     let query: NetworkQuery
-    init(query: NetworkQuery) { self.query = query.bounded }
+    private let json: NetworkJSONMatcher
+    init(query: NetworkQuery) throws {
+        self.query = query.bounded; json = try NetworkJSONMatcher(query.jsonConditions)
+    }
     private func contains(_ text: String, _ needle: String) -> Bool {
         text.range(of: needle, options: [.caseInsensitive, .literal]) != nil
     }
-    private func keyword(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private func hits(_ words: [String], in texts: [String]) -> Set<String> {
+        Set(words.filter { word in texts.contains { contains($0, word) } })
+    }
     func matches(_ record: NetworkRecord, directory: URL) throws -> Bool {
         try Task.checkCancellation()
-        let all = keyword(query.search), request = keyword(query.requestBody), response = keyword(query.responseBody)
-        let decodedURL = record.url.removingPercentEncoding ?? record.url
-        if !query.text.isEmpty && !contains(record.url, query.text) { return false }
-        if !query.headers.isEmpty && !contains(record.requestHeaders, query.headers) && !contains(record.responseHeaders, query.headers) { return false }
+        let mode = query.keywordMode
+        let all = query.globalKeywords, request = query.requestKeywords, response = query.responseKeywords
+        let excludedAll = query.effectiveKeywords(in: .everywhere, excluding: true)
+        let excludedRequest = query.effectiveKeywords(in: .request, excluding: true)
+        let excludedResponse = query.effectiveKeywords(in: .response, excluding: true)
+        if !mode.matches(query.urlKeywords, hits: hits(query.urlKeywords, in: [record.url])) { return false }
+        if !mode.matches(query.headerKeywords, hits: hits(query.headerKeywords, in: [record.requestHeaders, record.responseHeaders])) { return false }
+        if !hits(query.effectiveKeywords(in: .url, excluding: true), in: [record.url]).isEmpty ||
+            !hits(query.effectiveKeywords(in: .headers, excluding: true), in: [record.requestHeaders, record.responseHeaders]).isEmpty { return false }
         if !query.method.isEmpty && record.method != query.method { return false }
         switch query.status {
         case .all: break
@@ -41,23 +51,27 @@ struct NetworkContentMatcher {
         let encodedParameters = URLComponents(string: record.url)?.percentEncodedQuery ?? ""
         let parameters = String(decoding: decodeForm(Data(encodedParameters.utf8)), as: UTF8.self)
         let literalParameters = encodedParameters.removingPercentEncoding ?? encodedParameters
-        var global = all.isEmpty || contains(record.url, all) || contains(decodedURL, all) || contains(parameters, all) ||
-            contains(record.requestHeaders, all) || contains(record.responseHeaders, all)
-        var requestMatched = request.isEmpty || contains(parameters, request) || contains(literalParameters, request)
-        var responseMatched = response.isEmpty
-        if record.bodyState == .saved {
-            let requestWords = [global ? "" : all, requestMatched ? "" : request].filter { !$0.isEmpty }
-            let requestHits = try scan(directory: directory, id: record.id, response: false, words: requestWords,
-                                       form: record.requestHeaders.range(of: "application/x-www-form-urlencoded", options: .caseInsensitive) != nil)
-            global = global || (!all.isEmpty && requestHits.contains(all))
-            requestMatched = requestMatched || (!request.isEmpty && requestHits.contains(request))
-            if !requestMatched { return false }
-            let responseWords = [global ? "" : all, responseMatched ? "" : response].filter { !$0.isEmpty }
-            let responseHits = try scan(directory: directory, id: record.id, response: true, words: responseWords, form: false)
-            global = global || (!all.isEmpty && responseHits.contains(all))
-            responseMatched = responseMatched || (!response.isEmpty && responseHits.contains(response))
+        let metadata = [record.url, record.url.removingPercentEncoding ?? record.url, parameters, literalParameters, record.requestHeaders, record.responseHeaders]
+        if !hits(excludedAll, in: metadata).isEmpty || !hits(excludedRequest, in: [parameters, literalParameters]).isEmpty { return false }
+        var globalHits = hits(all, in: metadata)
+        var requestHits = hits(request, in: [parameters, literalParameters]), responseHits = Set<String>()
+        func missing(_ words: [String], _ found: Set<String>) -> [String] {
+            mode.matches(words, hits: found) ? [] : words.filter { !found.contains($0) }
         }
-        return global && requestMatched && responseMatched
+        if record.bodyState == .saved {
+            let requestWords = Array(Set(missing(all, globalHits) + missing(request, requestHits) + excludedAll + excludedRequest))
+            let found = try scan(directory: directory, id: record.id, response: false, words: requestWords,
+                                 form: record.requestHeaders.range(of: "application/x-www-form-urlencoded", options: .caseInsensitive) != nil)
+            if !found.isDisjoint(with: excludedAll + excludedRequest) { return false }
+            globalHits.formUnion(found); requestHits.formUnion(found)
+            if !mode.matches(request, hits: requestHits) { return false }
+            let responseWords = Array(Set(missing(all, globalHits) + missing(response, responseHits) + excludedAll + excludedResponse))
+            let responseFound = try scan(directory: directory, id: record.id, response: true, words: responseWords, form: false)
+            if !responseFound.isDisjoint(with: excludedAll + excludedResponse) { return false }
+            globalHits.formUnion(responseFound); responseHits.formUnion(responseFound)
+        }
+        guard mode.matches(all, hits: globalHits), mode.matches(request, hits: requestHits), mode.matches(response, hits: responseHits) else { return false }
+        return try json.matches(record, directory: directory)
     }
     private func scan(directory: URL, id: String, response: Bool, words: [String], form: Bool) throws -> Set<String> {
         guard !words.isEmpty, id.count == 64, id.allSatisfy(\.isHexDigit) else { return [] }
@@ -121,7 +135,7 @@ final class NetworkContentIndex {
     var isComplete: Bool { initialized && initialDone && (!versioned || lastRevision >= targetRevision) }
 
     init(directory: URL, query: NetworkQuery) throws {
-        self.directory = directory; self.query = query.bounded; self.matcher = NetworkContentMatcher(query: query)
+        self.directory = directory; self.query = query.bounded; self.matcher = try NetworkContentMatcher(query: query)
         guard sqlite3_open_v2("", &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             if let db { sqlite3_close_v2(db) }; db = nil
             throw RunbarError.message("无法创建网络筛选临时索引。")

@@ -90,21 +90,81 @@ public struct NetworkQuery: Equatable, Sendable {
     public var headers = ""
     public var requestBody = ""
     public var responseBody = ""
+    public var globalKeywords: [String] = []
+    public var urlKeywords: [String] = []
+    public var headerKeywords: [String] = []
+    public var requestKeywords: [String] = []
+    public var responseKeywords: [String] = []
+    private var exclusionWords: [NetworkKeywordScope: [String]] = [:]
+    private var exclusionDrafts: [NetworkKeywordScope: String] = [:]
+    public var keywordMode = NetworkKeywordMode.all
+    public var jsonConditions: [NetworkJSONCondition] = []
     public var method = ""
     public var status = Status.all
     public init() {}
-    public var fieldFilterCount: Int { [text, headers, requestBody, responseBody].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count }
-    var needsContentSearch: Bool { [search, requestBody, responseBody].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+    public var fieldFilterCount: Int {
+        [NetworkKeywordScope.url, .headers, .request, .response].filter {
+            !effectiveKeywords(in: $0).isEmpty || !effectiveKeywords(in: $0, excluding: true).isEmpty
+        }.count + jsonConditions.count
+    }
+    var needsContentSearch: Bool {
+        [.everywhere, .request, .response].contains { !effectiveKeywords(in: $0).isEmpty || !effectiveKeywords(in: $0, excluding: true).isEmpty } || !jsonConditions.isEmpty
+    }
+    public func draft(in scope: NetworkKeywordScope, excluding: Bool = false) -> String {
+        if excluding { return exclusionDrafts[scope] ?? "" }
+        switch scope { case .everywhere: return search; case .url: return text; case .headers: return headers; case .request: return requestBody; case .response: return responseBody }
+    }
+    public func keywords(in scope: NetworkKeywordScope, excluding: Bool = false) -> [String] {
+        if excluding { return exclusionWords[scope] ?? [] }
+        switch scope { case .everywhere: return globalKeywords; case .url: return urlKeywords; case .headers: return headerKeywords; case .request: return requestKeywords; case .response: return responseKeywords }
+    }
+    public mutating func setDraft(_ value: String, in scope: NetworkKeywordScope, excluding: Bool = false) {
+        let value = String(value.prefix(16_384))
+        if excluding { exclusionDrafts[scope] = value.isEmpty ? nil : value; return }
+        switch scope { case .everywhere: search = value; case .url: text = value; case .headers: headers = value; case .request: requestBody = value; case .response: responseBody = value }
+    }
+    private mutating func setKeywords(_ words: [String], in scope: NetworkKeywordScope, excluding: Bool = false) {
+        if excluding { exclusionWords[scope] = words.isEmpty ? nil : words; return }
+        switch scope { case .everywhere: globalKeywords = words; case .url: urlKeywords = words; case .headers: headerKeywords = words; case .request: requestKeywords = words; case .response: responseKeywords = words }
+    }
+    func effectiveKeywords(in scope: NetworkKeywordScope, excluding: Bool = false) -> [String] {
+        Array(NetworkKeywords.combined(keywords(in: scope, excluding: excluding), draft: draft(in: scope, excluding: excluding)).prefix(NetworkKeywords.limit))
+    }
+    public mutating func commitKeywords(in scope: NetworkKeywordScope, excluding: Bool = false) throws {
+        let words = NetworkKeywords.combined(keywords(in: scope, excluding: excluding), draft: draft(in: scope, excluding: excluding))
+        guard words.count <= NetworkKeywords.limit else { throw RunbarError.message("每组包含 / 排除各最多添加 16 个关键词。") }
+        setKeywords(words, in: scope, excluding: excluding); setDraft("", in: scope, excluding: excluding)
+    }
+    public mutating func removeKeyword(_ word: String, in scope: NetworkKeywordScope, excluding: Bool = false) {
+        setKeywords(keywords(in: scope, excluding: excluding).filter { $0 != word }, in: scope, excluding: excluding)
+    }
+    public mutating func clearFieldFilters() {
+        for scope in [NetworkKeywordScope.url, .headers, .request, .response] {
+            for excluding in [false, true] { setDraft("", in: scope, excluding: excluding); setKeywords([], in: scope, excluding: excluding) }
+        }
+        jsonConditions = []
+    }
+    public func hasSameConditions(as other: Self) -> Bool { bounded == other.bounded }
     var bounded: Self {
         var value = self
-        value.text = String(text.prefix(1024)); value.search = String(search.prefix(1024))
-        value.headers = String(headers.prefix(1024)); value.requestBody = String(requestBody.prefix(1024)); value.responseBody = String(responseBody.prefix(1024))
+        for scope in NetworkKeywordScope.allCases {
+            for excluding in [false, true] {
+                value.setKeywords(effectiveKeywords(in: scope, excluding: excluding), in: scope, excluding: excluding)
+                value.setDraft("", in: scope, excluding: excluding)
+            }
+        }
+        value.jsonConditions = Array(jsonConditions.prefix(16))
         return value
     }
     var metadataOnly: Self {
-        var value = bounded; value.search = ""; value.requestBody = ""; value.responseBody = ""; return value
+        var value = bounded
+        for scope in [NetworkKeywordScope.everywhere, .request, .response] {
+            for excluding in [false, true] { value.setDraft("", in: scope, excluding: excluding); value.setKeywords([], in: scope, excluding: excluding) }
+        }
+        value.jsonConditions = []; return value
     }
 }
+
 public struct NetworkPage: Sendable {
     public var records: [NetworkRecord]
     public var total: Int
