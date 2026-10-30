@@ -47,6 +47,40 @@ private actor AttachmentRecorder {
 }
 
 final class ApplicationAttachmentTests: XCTestCase {
+    func testLegacyAppSourceMappingIsOptionalAndDoesNotChangeIdentity() throws {
+        let id = UUID()
+        let legacy = Data("{\"id\":\"\(id.uuidString)\",\"name\":\"Fixture\",\"bundlePath\":\"/tmp/Fixture.app\",\"networkCaptureEnabled\":true}".utf8)
+        let target = try JSONDecoder().decode(ApplicationTarget.self, from: legacy)
+        XCTAssertNil(target.sourceProjectPath)
+        var mapped = target; mapped.sourceProjectPath = "/tmp/flutter-source"
+        XCTAssertTrue(mapped.matches(target))
+        let restored = try JSONDecoder().decode(ApplicationTarget.self, from: JSONEncoder().encode(mapped))
+        XCTAssertEqual(restored.sourceProjectPath, mapped.sourceProjectPath)
+        XCTAssertEqual(restored.id, id)
+    }
+    func testSourceSuggestionUsesPathContainmentAndDeepestFlutterProject() {
+        let projects = [Project(path: "/tmp/client", kind: .flutter), Project(path: "/tmp/client/example", kind: .flutter),
+                        Project(path: "/tmp/other", kind: .generic)]
+        let expected = URL(fileURLWithPath: "/tmp/client/example").standardizedFileURL.resolvingSymlinksInPath().path
+        XCTAssertEqual(ApplicationSourceDirectory.suggestion(bundlePath: "/tmp/client/example/build/Fixture.app", projects: projects), expected)
+        XCTAssertNil(ApplicationSourceDirectory.suggestion(bundlePath: "/tmp/client-other/Fixture.app", projects: projects))
+        XCTAssertNil(ApplicationSourceDirectory.suggestion(bundlePath: "/Applications/Fixture.app", projects: projects))
+    }
+    func testSourceValidationReadsOnlyAFlutterManifestAndRejectsUnavailableFolders() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        XCTAssertThrowsError(try ApplicationSourceDirectory.validate(root.path))
+        let manifest = root.appendingPathComponent("pubspec.yaml")
+        try Data("name: fixture\ndependencies:\n  flutter:\n    sdk: flutter\n".utf8).write(to: manifest)
+        XCTAssertEqual(try ApplicationSourceDirectory.validate(root.path), root.standardizedFileURL.resolvingSymlinksInPath().path)
+        try Data("name: fixture\nenvironment:\n  sdk: ^3.0.0\n".utf8).write(to: manifest)
+        XCTAssertThrowsError(try ApplicationSourceDirectory.validate(root.path))
+        try Data(repeating: 32, count: 256 * 1024 + 1).write(to: manifest)
+        XCTAssertThrowsError(try ApplicationSourceDirectory.validate(root.path))
+        XCTAssertThrowsError(try ApplicationSourceDirectory.validate("relative/path"))
+        XCTAssertThrowsError(try ApplicationSourceDirectory.validate(root.path + "\0"))
+    }
     func testDDSArgumentsRequireAnExplicitLocalServiceInADartHelper() throws {
         let expected = try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:5555/PRIVATE_AUTH/"))
         XCTAssertEqual(LocalFlutterToolServices.ddsEndpoint(arguments: "/SDK With Spaces/bin/dart development-service --vm-service-uri=http://127.0.0.1:5555/PRIVATE_AUTH/ --bind-port=0"), expected)

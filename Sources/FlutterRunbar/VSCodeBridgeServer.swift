@@ -7,6 +7,7 @@ struct VSCodeDebugTarget {
     let projectName: String
     let sessionID: UUID
     let endpoint: VMServiceEndpoint
+    var processID: Int32? = nil
 }
 
 /// An ephemeral, capability-protected handoff. VM credentials never appear in
@@ -146,11 +147,16 @@ final class VSCodeBridgeServer {
         }
         var context: [String: Any] = ["version": 1, "projectPath": current.projectPath, "projectName": current.projectName,
                                       "sessionID": current.sessionID.uuidString, "expiresAt": expiresAt.timeIntervalSince1970 * 1000]
+        if let pid = current.processID { context["processID"] = pid }
         switch (parts[0], action) {
         case ("GET", "context"): return (200, context)
         case ("POST", "claim"):
             guard claimID == nil, let value = try? JSONSerialization.jsonObject(with: body) as? [String: String],
                   let id = value["claimID"], id.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else { return (409, [:]) }
+            if current.processID != nil, value["appDebugger"] != "v1" {
+                finish("VS Code 当前窗口仍在使用旧版 Runbar Bridge。请更新到 0.1.1 或更新版本，在 VS Code 执行「开发人员: 重新加载窗口」，然后重新连接。")
+                return (409, [:])
+            }
             claimID = id; context["vmServiceUri"] = current.endpoint.url.absoluteString
             return (200, context)
         case ("POST", "result"):
@@ -169,6 +175,8 @@ final class VSCodeBridgeServer {
         case "dart-extension-missing": return "请在 VS Code 中安装并启用官方 Dart 和 Flutter 扩展，再重试。"
         case "dart-extension-outdated": return "请将官方 Dart 扩展更新到 3.144.0 或更新版本。若刚更新过，请在 VS Code 中执行「开发人员: 重新加载窗口」后再重试。"
         case "local-mac-only": return "请使用本机 macOS 的 VS Code 窗口；当前不支持远程工作区。"
+        case "wrong-process": return "调试地址不再属于原来关联的 App，请重新连接 App 后再试。"
+        case "debug-unavailable": return "此 App 未提供 Flutter Debug 调试能力，可能是 Profile / Release 包或尚未初始化完成。请使用 Debug 包，待 App 就绪后重试；日志和网络监听可继续使用。"
         default: return "未能附加调试。请确认这次 Debug 运行仍在进行，并查看 VS Code 中的调试错误，再重试。"
         }
     }

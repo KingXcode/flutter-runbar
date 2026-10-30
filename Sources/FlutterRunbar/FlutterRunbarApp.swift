@@ -753,6 +753,55 @@ final class AppModel: ObservableObject {
             report("当前 Flutter 运行不支持此操作，或正在处理其他操作。", projectID: projectID)
         }
     }
+    func suggestedApplicationSourcePath(_ id: UUID) -> String? {
+        guard let application = applications.first(where: { $0.id == id }) else { return nil }
+        if let path = application.sourceProjectPath { return path }
+        // The same live VM provides a stronger hint than a display name. The
+        // user confirms any unsaved suggestion before it is persisted or opened.
+        if let endpoint = applicationConnections[id]?.endpoint {
+            let matches = config.projects.filter { project in
+                let state = state(for: project.id)
+                return project.kind == .flutter && state.phase == .running && state.vmServiceEndpoint == endpoint
+            }
+            if matches.count == 1 { return matches.first?.path }
+        }
+        return ApplicationSourceDirectory.suggestion(bundlePath: application.bundlePath, projects: config.projects)
+    }
+    @discardableResult
+    func setApplicationSourcePath(_ path: String, applicationID: UUID, sessionID: UUID) throws -> String {
+        _ = try applicationVSCodeState(applicationID, sessionID: sessionID)
+        let path = try ApplicationSourceDirectory.validate(path)
+        guard let index = config.applications?.firstIndex(where: { $0.id == applicationID }) else {
+            throw RunbarError.message("该 App 已移除，请重新连接。")
+        }
+        if config.applications?[index].sourceProjectPath != path {
+            let old = config.applications
+            config.applications?[index].sourceProjectPath = path
+            guard persist() else {
+                config.applications = old
+                throw RunbarError.message("无法保存源码目录关联，请检查本地存储权限。")
+            }
+        }
+        return path
+    }
+    private func applicationVSCodeState(_ id: UUID, sessionID: UUID) throws -> ApplicationConnectionState {
+        guard !quitWhenFinished, !logShutdownStarted, applications.contains(where: { $0.id == id }),
+              let state = applicationConnections[id], state.phase == .listening, state.sessionID == sessionID,
+              let candidate = state.candidate, ApplicationDiscovery.isCurrent(candidate), state.endpoint != nil else {
+            throw RunbarError.message("这次 App 监听已结束或发生变化，请连接当前运行中的 Flutter App 后重试。")
+        }
+        return state
+    }
+    func vsCodeTarget(applicationID: UUID, sessionID: UUID, sourcePath: String) throws -> VSCodeDebugTarget {
+        let state = try applicationVSCodeState(applicationID, sessionID: sessionID)
+        guard let application = applications.first(where: { $0.id == applicationID }),
+              application.sourceProjectPath == sourcePath, let endpoint = state.endpoint, let candidate = state.candidate,
+              FileManager.default.isReadableFile(atPath: sourcePath + "/pubspec.yaml") else {
+            throw RunbarError.message("源码目录关联已改变或不可读取，请重新选择对应 Flutter 源码目录后连接。")
+        }
+        return VSCodeDebugTarget(projectPath: sourcePath, projectName: application.name, sessionID: sessionID,
+                                 endpoint: endpoint, processID: candidate.processID)
+    }
     func vsCodeTarget(projectID: UUID, sessionID: UUID) throws -> VSCodeDebugTarget {
         let state = state(for: projectID)
         guard !quitWhenFinished, let project = config.projects.first(where: { $0.id == projectID }), project.kind == .flutter,

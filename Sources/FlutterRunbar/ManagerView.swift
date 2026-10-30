@@ -221,6 +221,12 @@ struct ManagerView: View {
                 Text(state?.flutterControlResult ?? state?.message ?? "未连接").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     .help(state?.message ?? "未连接")
                 if state?.active == true {
+                    if let sessionID = state?.sessionID {
+                        Button("VS Code", systemImage: "curlybraces") {
+                            vsCodeConnection = VSCodeConnectionRequest(applicationID: application.id, sessionID: sessionID)
+                        }.disabled(state?.phase != .listening || model.quitWhenFinished)
+                            .help("选择此 App 对应的 Flutter 源码目录，在 VS Code 中附加 Dart 断点调试；仅支持 Debug 包")
+                    }
                     applicationFlutterButtons(applicationID: application.id, state: state)
                     Button("DevTools", systemImage: "arrow.up.right.square") { model.openApplicationDevTools(application.id) }
                         .disabled(state?.phase != .listening)

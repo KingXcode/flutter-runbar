@@ -3,12 +3,13 @@
 ## 交互
 
 - 运行 Flutter 项目的 Debug 命令后，右上角显示「VS Code」。调试服务与 Flutter Debug 交互能力就绪后启用；其他运行模式不提供断点连接。
+- 「应用监听」中已连接的 Flutter App 也提供「VS Code」按钮。首次选择对应的本机 Flutter 源码根目录，可直接从已有 Flutter 项目中选择，也可选择其他目录；关联会保存在该 App 的配置中，不新增运行项目。优先显示已保存的关联，否则按同一运行 VM 或 App 位于项目目录内的关系建议目录；未保存的建议须点击连接确认。重连相同 App 后复用关联，仍可在连接窗口更换。源码必须与正在运行的版本一致。
 - 点击按钮时检测 VS Code 与扩展。已安装时直接打开项目并附加；缺少扩展时显示「安装并连接」和可展开的手动安装说明。用户也可从设置 → VS Code →「安装 / 管理扩展」独立安装。
 - VS Code 未打开时自动打开。接收链接的窗口包含同一真实项目路径时复用；否则新开项目窗口，不关闭原来的其他项目窗口。不枚举或保证复用另一个后台窗口。
 - 首次使用时 VS Code 可能要求允许此扩展处理链接，及信任源码目录；需使用者确认。扩展不会绕过工作区信任。安装成功但被禁用、切换了 VS Code 配置文件、首次安装需重新加载窗口时，按提示处理后回 Runbar 重试。
 - 附加成功后在 VS Code 设置 Dart 断点。热重载、热重启继续使用 Runbar 的运行按钮。Runbar 不重新启动 App，不写入源码、`.vscode/launch.json` 或目标项目设置。
 
-当前支持 macOS 本机稳定版 VS Code 1.101+、官方 Dart 扩展 3.144.0+ 与 Flutter 扩展。只连接有源码项目目录的当前 Debug 运行；不把历史运行的调试地址拿来连接。「关联 App」尚无源码目录映射，不显示此入口。远程 SSH、容器、WSL、VS Code Insiders 和其他编辑器不在本次范围内。
+当前支持 macOS 本机稳定版 VS Code 1.101+、官方 Dart 扩展 3.144.0+ 与 Flutter 扩展。支持当前 Flutter 项目 Debug 运行，以及已选择源码目录的当前 App 监听；不把历史记录的调试地址拿来连接。关联 App 的断点连接需要 Runbar Bridge 0.1.1+，主程序区分更新与未安装提示。领取 VM 地址时额外检查扩展声明的 App 调试能力，当前窗口仍运行旧版扩展时拒绝交付并提示「开发人员: 重新加载窗口」。远程 SSH、容器、WSL、VS Code Insiders 和其他编辑器不在本次范围内。
 
 ## 安装与分发
 
@@ -36,12 +37,12 @@ Runbar 从 VS Code 的 App Bundle 读取真实的可执行文件路径，再调�
 
 ## 生命周期与边界
 
-1. `ProjectRunState` 只在内存保存当前运行识别到的 VM Service 地址，结束或重新运行时清除；不增加历史或配置中的认证字段。
-2. 连接时建立仅监听 `127.0.0.1` 的短时服务。系统链接只有随机 64 位十六进制令牌与临时端口，没有 VM 认证 URL。每次查询、领取、回报都重新检查原项目、运行 UUID、运行状态和 Debug 能力。
+1. `ProjectRunState` 与应用连接状态只在内存保存当前运行识别到的 VM Service 地址，结束或重连时清除；不增加历史或配置中的认证字段。App 配置仅新增可选的 `sourceProjectPath`，兼容旧配置，目录关联不改变 App 身份、PID 归属或运行记录分类。
+2. 连接时建立仅监听 `127.0.0.1` 的短时服务。系统链接只有随机 64 位十六进制令牌与临时端口，没有 VM 认证 URL。每次查询、领取、回报都重新检查原项目或 App、运行 UUID 与运行状态；App 同时检查原进程的 PID、启动时间、Bundle 身份和已保存的源码关联。目录变化、断开、重连或 App 退出后原链接失效。
 3. 扩展先查询目录。如果需要新窗口，只向扩展私有目录写入短时令牌、目录和过期时间。新窗口启动后重新查询、核对目录和信任状态，再一次性领取 VM 地址。每次领取绑定独立 claim ID，其他窗口不能覆盖已领取请求的完成状态。
-4. 扩展探测 VM 后再次向 Runbar 核对会话，调用 VS Code 官方 `debug.startDebugging` API，以 `type: dart`、`request: attach`、显式 `debuggerType: dart` 附加，避免额外启动第二个 Flutter 编译器。不存在重试或重新启动目标 App 的隐式操作。
-5. 请求三分钟过期；关闭连接窗口会停止提供本次桥接服务，已在 VS Code 启动的调试会话会保留。桥接服务最多接纳 8 个短连接，单请求最多 8 KiB、正文最多 2 KiB，读入超时 5 秒。扩展桥接响应最多 32 KiB、VM 探测响应最多 256 KiB，绝对超时 8 秒。跨窗口最多保留 8 个有效待办，启动读取有界并清除过期文件。
+4. 扩展探测 VM 后再次向 Runbar 核对会话和源码目录。关联 App 额外核对 `getVM.pid`，并只读检查最多 16 个 isolate 的 `extensionRPCs` 中是否包含 Debug 专属 `ext.flutter.reassemble`，不会调用该操作；Profile、尚未初始化及无 Debug 能力时给出提示。请求和响应大小仍有上限，`getIsolate` 最多 1 MiB。该探测与原编译工具是否注册热重载服务无关，不要求 App 必须由 Runbar 启动。随后调用 VS Code 官方 `debug.startDebugging` API，以 `type: dart`、`request: attach`、显式 `debuggerType: dart` 附加，避免额外启动第二个 Flutter 编译器。不存在重试或重新启动目标 App 的隐式操作。
+5. 请求三分钟过期；关闭连接窗口会停止提供本次桥接服务，已在 VS Code 启动的调试会话会保留。桥接服务最多接纳 8 个短连接，单请求最多 8 KiB、正文最多 2 KiB，读入超时 5 秒。扩展桥接响应最多 32 KiB、getVM 响应最多 256 KiB、getIsolate 响应最多 1 MiB，单次 HTTP 请求绝对超时 8 秒。跨窗口最多保留 8 个有效待办，启动读取有界并清除过期文件。
 
 工作区信任、SDK 初始化与 VS Code 的 URI 允许提示可能延迟连接。发生超时后重新点击连接；请勿使用历史链接。VM 地址只短时用于进程内的附加配置，不主动写扩展配置或跨窗口文件；VS Code / Dart 自身的调试日志与最近调试配置可能保留调试参数，分享相关信息前需检查。Runbar 的原始 Flutter 日志本身仍可能包含 Flutter 输出的调试地址。
 
-实现依据：[VS Code API](https://code.visualstudio.com/api/references/vscode-api)、[VSIX 本地分发](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)、[Dart-Code 调试配置](https://dartcode.org/docs/launch-configuration/)。
+实现依据：[Flutter Debug 服务注册](https://github.com/flutter/flutter/blob/master/packages/flutter/lib/src/foundation/binding.dart#L560-L568)、[Dart Isolate / extensionRPCs](https://github.com/dart-lang/sdk/blob/main/runtime/vm/service/service.md#isolate)、[VS Code API](https://code.visualstudio.com/api/references/vscode-api)、[VSIX 本地分发](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)、[Dart-Code 调试配置](https://dartcode.org/docs/launch-configuration/)。

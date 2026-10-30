@@ -3,9 +3,13 @@ import SwiftUI
 import RunbarCore
 
 struct VSCodeConnectionRequest: Identifiable {
+    enum Source { case project(UUID), application(UUID) }
     let id = UUID()
-    let projectID: UUID
+    let source: Source
     let sessionID: UUID
+    init(projectID: UUID, sessionID: UUID) { source = .project(projectID); self.sessionID = sessionID }
+    init(applicationID: UUID, sessionID: UUID) { source = .application(applicationID); self.sessionID = sessionID }
+    var applicationID: UUID? { if case .application(let id) = source { return id }; return nil }
 }
 
 private struct VSCodeExtensionPackage: Decodable {
@@ -82,6 +86,7 @@ private final class VSCodeConnectionModel: ObservableObject {
     @Published var phase: Phase = .checking
     @Published var message = "正在检查 VS Code 与扩展…"
     @Published var bridgeInstalled = false
+    @Published var installedBridgeVersion = ""
     @Published var dartInstalled = false
     @Published var manualInstallation = false
     private var app: URL?
@@ -92,6 +97,7 @@ private final class VSCodeConnectionModel: ObservableObject {
     var busy: Bool { [.checking, .installing, .waiting].contains(phase) }
     var version: String { package?.version ?? "" }
     var packageAvailable: Bool { package != nil }
+    var bridgeNeedsUpdate: Bool { !installedBridgeVersion.isEmpty && !bridgeInstalled }
 
     func prepare() async {
         guard !closed else { return }
@@ -110,11 +116,15 @@ private final class VSCodeConnectionModel: ObservableObject {
                 if parts.count == 2 { versions[String(parts[0]).lowercased()] = String(parts[1]) }
             }
             if let required = package {
+                installedBridgeVersion = versions[required.id] ?? ""
                 bridgeInstalled = versions[required.id].map { $0.compare(required.version, options: .numeric) != .orderedAscending } == true
             }
             dartInstalled = versions["dart-code.dart-code"].map { $0.compare("3.144.0", options: .numeric) != .orderedAscending } == true && versions["dart-code.flutter"] != nil
             phase = bridgeInstalled && dartInstalled ? .ready : .needsInstall
             message = phase == .ready ? "扩展已安装。连接后即可在 VS Code 中设置 Dart 断点。" : "需要安装 Runbar Bridge，以及官方 Dart / Flutter 扩展。Runbar 已附带 Bridge 安装包；官方扩展的安装或更新需要联网。"
+            if bridgeNeedsUpdate, let package {
+                message = "已安装 Runbar Bridge \(installedBridgeVersion)，需要更新到 \(package.version) 以支持关联 App 调试。点击更新；若 VS Code 提示重新加载窗口，请完成后再连接。"
+            }
         } catch {
             guard !closed else { return }
             phase = .failed; message = error.localizedDescription; manualInstallation = true
@@ -178,19 +188,34 @@ struct VSCodeConnectionView: View {
     @ObservedObject var model: AppModel
     var request: VSCodeConnectionRequest?
     @StateObject private var connection = VSCodeConnectionModel()
+    @State private var sourcePath = ""
+    @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     private var target: (() throws -> VSCodeDebugTarget)? {
         guard let request else { return nil }
-        return { try model.vsCodeTarget(projectID: request.projectID, sessionID: request.sessionID) }
+        switch request.source {
+        case .project(let id): return { try model.vsCodeTarget(projectID: id, sessionID: request.sessionID) }
+        case .application(let id):
+            let path = sourcePath
+            return { try model.vsCodeTarget(applicationID: id, sessionID: request.sessionID, sourcePath: path) }
+        }
     }
+    private var sourceReady: Bool { request?.applicationID == nil || !sourcePath.isEmpty }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(request == nil ? "VS Code 扩展" : "连接 VS Code").font(.title2)
-            if let request, let project = model.config.projects.first(where: { $0.id == request.projectID }) {
-                Text(project.name).font(.headline)
-                Text(project.path).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            if let request {
+                switch request.source {
+                case .project(let id):
+                    if let project = model.config.projects.first(where: { $0.id == id }) {
+                        Text(project.name).font(.headline)
+                        Text(project.path).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                case .application(let id): applicationSource(id)
+                }
             }
-            Label("Runbar Bridge \(connection.version)", systemImage: connection.bridgeInstalled ? "checkmark.circle.fill" : "puzzlepiece.extension")
+            Label("Runbar Bridge \(connection.version)" + (connection.bridgeNeedsUpdate ? "（当前 \(connection.installedBridgeVersion)，需更新）" : ""),
+                  systemImage: connection.bridgeInstalled ? "checkmark.circle.fill" : "puzzlepiece.extension")
             Label("官方 Dart / Flutter 支持", systemImage: connection.dartInstalled ? "checkmark.circle.fill" : "puzzlepiece.extension")
             HStack(alignment: .top, spacing: 10) {
                 if connection.busy { ProgressView().controlSize(.small) }
@@ -198,6 +223,7 @@ struct VSCodeConnectionView: View {
             }
             Text("仅连接本机 Debug 运行。不需要修改 Flutter 源码或 launch.json。打开其他项目时使用新窗口；首次使用需确认工作区信任。")
                 .font(.caption).foregroundStyle(.secondary)
+            if let sourceError { Text(sourceError).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             DisclosureGroup("手动安装", isExpanded: $connection.manualInstallation) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("1. 保存随 Runbar 附带的 .vsix 安装包。\n2. 在 VS Code 扩展页面点击 ⋯ → 从 VSIX 安装。\n3. 确认 Runbar Bridge 与官方 Dart / Flutter 扩展已启用，再回到此处重新检测。")
@@ -216,19 +242,63 @@ struct VSCodeConnectionView: View {
                 if connection.phase == .missingEditor {
                     Button("下载 VS Code", action: connection.openEditor).buttonStyle(.borderedProminent)
                 } else if connection.phase == .needsInstall {
-                    Button(request == nil ? "安装扩展" : "安装并连接") { connection.installThenConnect(target: target) }
-                        .disabled(!connection.packageAvailable).buttonStyle(.borderedProminent)
-                } else if let target, connection.bridgeInstalled && connection.dartInstalled,
+                    Button(connection.bridgeNeedsUpdate ? (request == nil ? "更新扩展" : "更新并连接") : (request == nil ? "安装扩展" : "安装并连接")) { connect(installing: true) }
+                        .disabled(!connection.packageAvailable || !sourceReady).buttonStyle(.borderedProminent)
+                } else if target != nil, connection.bridgeInstalled && connection.dartInstalled,
                           !connection.busy && connection.phase != .connected {
-                    Button("连接") { Task { await connection.connect(target: target) } }
-                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    Button("连接") { connect() }
+                        .disabled(!sourceReady).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                 }
             }
         }.padding(24).frame(width: 530)
             .task {
+                let autoConnect: Bool
+                if let id = request?.applicationID {
+                    sourcePath = model.suggestedApplicationSourcePath(id) ?? ""
+                    autoConnect = model.applications.first(where: { $0.id == id })?.sourceProjectPath != nil
+                } else { autoConnect = true }
                 await connection.prepare()
-                if connection.phase == .ready, let target { await connection.connect(target: target) }
+                if !Task.isCancelled, connection.phase == .ready, request != nil, autoConnect { connect() }
             }
             .onDisappear { connection.close() }
+    }
+    private func applicationSource(_ id: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.applications.first(where: { $0.id == id })?.name ?? "关联的 Flutter App").font(.headline)
+            HStack {
+                Text("源码目录").font(.subheadline)
+                Spacer()
+                Menu(sourcePath.isEmpty ? "选择源码…" : "更换…") {
+                    ForEach(model.config.projects.filter { $0.kind == .flutter }) { project in
+                        Button(project.name) { sourcePath = project.path; sourceError = nil }
+                    }
+                    Divider()
+                    Button("选择本地目录…") { chooseSourceDirectory() }
+                }.fixedSize().disabled(connection.busy || connection.phase == .connected)
+            }
+            Text(sourcePath.isEmpty ? "选择正在运行的 App 对应的 Flutter 源码目录。" : sourcePath)
+                .font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+            Text("首次选择后记住此 App 的目录。源码需与运行中的版本一致；仅建立调试关联，不新增运行项目。")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private func chooseSourceDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
+        panel.title = "选择 Flutter 源码目录"
+        panel.message = "选择当前 App 对应的 Flutter 项目根目录（包含 pubspec.yaml）。"
+        if !sourcePath.isEmpty { panel.directoryURL = URL(fileURLWithPath: sourcePath) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        sourcePath = url.standardizedFileURL.resolvingSymlinksInPath().path; sourceError = nil
+    }
+    private func connect(installing: Bool = false) {
+        do {
+            if let request, let id = request.applicationID {
+                sourcePath = try model.setApplicationSourcePath(sourcePath, applicationID: id, sessionID: request.sessionID)
+            }
+            sourceError = nil
+            if installing { connection.installThenConnect(target: target) }
+            else if let target { Task { await connection.connect(target: target) } }
+        } catch { sourceError = error.localizedDescription }
     }
 }

@@ -4,7 +4,7 @@ const vscode = require("vscode");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomBytes } = require("node:crypto");
-const { tokenPattern, ticketFromURI, bridgeRequest, validateContext, vmServiceURL, requestJSON } = require("./bridge");
+const { tokenPattern, ticketFromURI, bridgeRequest, validateContext, vmServiceURL, verifyVM } = require("./bridge");
 
 // Only short-lived capability tokens are handed across windows. The authenticated
 // VM address is retrieved once, after the correct local workspace has opened.
@@ -87,17 +87,17 @@ function activate(context) {
             if (version[0] < 3 || (version[0] === 3 && version[1] < 144)) { throw new Error("dart-extension-outdated"); }
             await dart.activate();
             if (disposed) { return; }
-            const claimed = validateContext(await bridgeRequest(ticket, "claim", { claimID }));
-            if (claimed.projectPath !== target.projectPath || claimed.sessionID !== target.sessionID) { throw new Error("run-changed"); }
+            const claimed = validateContext(await bridgeRequest(ticket, "claim", { claimID, appDebugger: "v1" }));
+            if (claimed.projectPath !== target.projectPath || claimed.sessionID !== target.sessionID ||
+                claimed.processID !== target.processID) { throw new Error("run-changed"); }
             const endpoint = vmServiceURL(claimed.vmServiceUri);
             // No redirects, proxies or arbitrary URLs; probe before handing the
             // endpoint to the debug adapter. Do not log authentication paths.
-            const probe = new URL(endpoint); probe.pathname += "getVM";
-            const vm = await requestJSON(probe);
-            if (vm?.result?.type !== "VM") { throw new Error("vm-unavailable"); }
+            await verifyVM(endpoint, claimed.processID);
             // Recheck the owning run after SDK activation and the VM probe.
             const current = validateContext(await bridgeRequest(ticket, "context"));
-            if (current.sessionID !== target.sessionID) { throw new Error("run-changed"); }
+            if (current.sessionID !== target.sessionID || current.processID !== target.processID ||
+                current.projectPath !== target.projectPath) { throw new Error("run-changed"); }
             if (disposed || target.expiresAt <= Date.now()) { throw new Error("run-changed"); }
             if (sessions.has(target.sessionID)) {
                 await report(ticket, claimID, "attached");
@@ -119,7 +119,7 @@ function activate(context) {
         } catch (error) {
             // Exception strings from network/debug adapters can contain the VM
             // authentication token. Use a closed set of user-facing reasons.
-            const reasons = new Set(["workspace-untrusted", "dart-extension-missing", "dart-extension-outdated", "local-mac-only", "run-changed", "vm-unavailable"]);
+            const reasons = new Set(["workspace-untrusted", "dart-extension-missing", "dart-extension-outdated", "local-mac-only", "run-changed", "vm-unavailable", "wrong-process", "debug-unavailable"]);
             const reason = reasons.has(error?.message) ? error.message : "attach-failed";
             await report(ticket, claimID, "failed", reason);
             const detail = {
@@ -127,6 +127,8 @@ function activate(context) {
                 "dart-extension-missing": "请安装并启用官方 Dart 和 Flutter 扩展。",
                 "dart-extension-outdated": "请将官方 Dart 扩展更新到 3.144.0 或更新版本。",
                 "local-mac-only": "当前只支持本机 macOS 的 VS Code 窗口。请退出远程工作区后重试。",
+                "wrong-process": "调试服务不再属于原来关联的 App，请在 Runbar 重新连接 App 后再试。",
+                "debug-unavailable": "此 App 未提供 Flutter Debug 调试能力。请运行 Debug 包，待初始化完成后重试；Profile / Release 不支持此断点连接。",
             }[reason] || "请确认 Runbar 中的 Debug 运行仍在进行，再点击连接。调试器的详细错误可在 VS Code 中查看。";
             void vscode.window.showErrorMessage(`Runbar 未能连接调试。${detail}`);
         } finally {

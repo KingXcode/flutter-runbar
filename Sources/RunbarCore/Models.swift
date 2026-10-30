@@ -86,6 +86,8 @@ public struct ApplicationTarget: Codable, Identifiable, Equatable, Sendable {
     public var bundleIdentifier: String?
     public var bundlePath: String
     public var networkCaptureEnabled: Bool
+    /// Optional source mapping for debugger attachment; never contains VM credentials.
+    public var sourceProjectPath: String?
     public init(id: UUID = UUID(), name: String, bundleIdentifier: String?, bundlePath: String, networkCaptureEnabled: Bool = true) {
         self.id = id; self.name = name; self.bundleIdentifier = bundleIdentifier
         self.bundlePath = URL(fileURLWithPath: bundlePath).standardizedFileURL.resolvingSymlinksInPath().path
