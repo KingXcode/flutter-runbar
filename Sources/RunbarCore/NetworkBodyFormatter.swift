@@ -1,7 +1,10 @@
 import Foundation
 
-public enum NetworkBodyFormat: String, Sendable {
+public enum NetworkBodyFormat: String, Codable, CaseIterable, Sendable {
     case raw, json, xml
+    public var title: String {
+        switch self { case .raw: return "原始"; case .json: return "JSON"; case .xml: return "XML" }
+    }
 }
 
 /// Only one bounded response is formatted on the cache reader's background actor.

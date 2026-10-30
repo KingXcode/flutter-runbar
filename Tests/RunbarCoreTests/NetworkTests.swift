@@ -1,4 +1,5 @@
 import XCTest
+import CSQLite
 @testable import RunbarCore
 
 private func networkFixture(_ block: (URL, NetworkStore) throws -> Void, limits: NetworkLimits = NetworkLimits()) throws {
@@ -263,13 +264,205 @@ final class NetworkStoreTests: XCTestCase {
     }
     func testDatabaseCapacityFailureRollsBackBatch() throws {
         var limits = NetworkLimits(); limits.databasePages = 32
-        try networkFixture({ _, store in
+        try networkFixture({ root, store in
             let records = try (0..<100).map { index -> NetworkRecord in
                 var record = try sampleRecord(String(index)); record.requestHeaders = String(repeating: "a", count: 4096); return record
             }
-            XCTAssertThrowsError(try store.upsert(records))
+            XCTAssertThrowsError(try store.upsert(records)) { error in
+                XCTAssertEqual((error as? NetworkStorageError)?.code, SQLITE_FULL)
+                XCTAssertFalse((error as? NetworkStorageError)?.isTransient ?? true)
+            }
             XCTAssertEqual(try store.page().total, 0)
+            let diagnostic = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("last-error.json"))) as? [String: Any]
+            XCTAssertEqual(diagnostic?["code"] as? Int, Int(SQLITE_FULL))
         }, limits: limits)
+    }
+    func testExternalReaderContentionPreservesCodeRollsBackAndCanRecover() throws {
+        try networkFixture { root, store in
+            let first = try sampleRecord("initial")
+            try store.upsert([first])
+            var reader: OpaquePointer?
+            XCTAssertEqual(sqlite3_open_v2(root.appendingPathComponent("requests.sqlite").path, &reader, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+            defer { sqlite3_close_v2(reader) }
+            // A separate connection bypasses Runbar's in-process gate, as an
+            // external SQLite browser would. Keep its read transaction open.
+            XCTAssertEqual(sqlite3_exec(reader, "BEGIN; SELECT count(*) FROM requests;", nil, nil, nil), SQLITE_OK)
+            let next = try sampleRecord("after-contention")
+            XCTAssertThrowsError(try store.upsert([next])) { error in
+                let failure = error as? NetworkStorageError
+                XCTAssertEqual(failure?.code, SQLITE_BUSY)
+                XCTAssertTrue(failure?.isTransient == true)
+                XCTAssertTrue(failure?.localizedDescription.contains("SQLite 5") == true)
+            }
+            XCTAssertEqual(sqlite3_exec(reader, "ROLLBACK", nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(try store.page().total, 1)
+            let diagnostic = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("last-error.json"))) as? [String: Any]
+            XCTAssertEqual(diagnostic?["code"] as? Int, Int(SQLITE_BUSY))
+            // Retry the same record after the failed transaction, rather than
+            // advancing its cursor or leaving a partial insert in the cache.
+            try store.upsert([next]); XCTAssertEqual(try store.page().total, 2)
+        }
+    }
+}
+
+final class NetworkStorageRetryTests: XCTestCase {
+    func testOnlyContentionRetriesAndTheBudgetIsFinite() {
+        let busy = NetworkStorageError(code: SQLITE_BUSY, extendedCode: SQLITE_BUSY | (3 << 8), operation: "提交缓存事务", detail: "database is locked")
+        let locked = NetworkStorageError(code: SQLITE_LOCKED, extendedCode: SQLITE_LOCKED, operation: "读取", detail: "locked")
+        for failure in 1...5 {
+            XCTAssertEqual(NetworkStorageRetry.delay(for: busy, failure: failure), .milliseconds(100 << (failure - 1)))
+            XCTAssertNotNil(NetworkStorageRetry.delay(for: locked, failure: failure))
+            XCTAssertNotNil(NetworkStorageRetry.delay(for: NetworkStorageError.accessTimeout, failure: failure))
+        }
+        XCTAssertNil(NetworkStorageRetry.delay(for: busy, failure: 0))
+        XCTAssertNil(NetworkStorageRetry.delay(for: busy, failure: 6))
+        for code in [SQLITE_FULL, SQLITE_READONLY, SQLITE_PERM, SQLITE_CANTOPEN, SQLITE_CORRUPT, SQLITE_IOERR] {
+            let failure = NetworkStorageError(code: code, extendedCode: code, operation: "读取", detail: "test")
+            XCTAssertNil(NetworkStorageRetry.delay(for: failure, failure: 1))
+        }
+        XCTAssertNil(NetworkStorageRetry.delay(for: CancellationError(), failure: 1))
+    }
+    func testDirectoryAliasesShareAGateWhileSeparateCachesDoNot() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = NetworkCacheAccess.shared(for: root)
+        let alias = NetworkCacheAccess.shared(for: root.appendingPathComponent("unused/.."))
+        XCTAssertTrue(first === alias)
+        XCTAssertFalse(first === NetworkCacheAccess.shared(for: root.appendingPathComponent("other")))
+    }
+}
+
+private func completedNetworkSearch(_ reader: NetworkCacheReader, directory: URL, query: NetworkQuery) async throws -> NetworkListWindow {
+    for _ in 0..<200 {
+        let window = try await reader.listWindow(directory: directory, query: query, around: Int.max)
+        if window.counts.isComplete { return window }
+        try Task.checkCancellation(); await Task.yield()
+    }
+    throw RunbarError.message("测试筛选未能完成。")
+}
+
+final class NetworkContentSearchTests: XCTestCase {
+    func testGlobalSearchAndIndependentFieldsCombineAcrossCachedBodies() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root); defer { store.close() }
+        let reader = NetworkCacheReader()
+        var a = try sampleRecord("a", start: 1, url: "http://example.test/orders")
+        a.requestHeaders = "{\"Authorization\":[\"TOKEN-A\"]}"
+        var b = try sampleRecord("b", start: 2, url: "http://example.test/orders"); b.requestHeaders = a.requestHeaders
+        var c = try sampleRecord("c", start: 3, url: "http://example.test/other"); c.requestHeaders = "{\"Authorization\":[\"TOKEN-B\"]}"
+        try store.upsert([a, b, c])
+        try store.saveBodies(a.id, request: Data("{\"symbol\":\"alpha\"}".utf8), response: Data("{\"message\":\"accepted\"}".utf8))
+        try store.saveBodies(b.id, request: Data("{\"symbol\":\"alpha\"}".utf8), response: Data("{\"message\":\"denied\"}".utf8))
+        try store.saveBodies(c.id, request: Data("{\"symbol\":\"alpha\"}".utf8), response: Data("{\"message\":\"accepted\"}".utf8))
+        var query = NetworkQuery(); query.search = "ACCEPTED"
+        let global = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(global.rows.map(\.id), [a.id, c.id])
+        query.text = "/orders"; query.headers = "token-a"; query.requestBody = "ALPHA"; query.responseBody = "accepted"
+        let combined = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(combined.rows.map(\.id), [a.id])
+        let selected = try await reader.request(directory: root, query: query, row: 0)
+        XCTAssertEqual(selected?.id, a.id)
+        query.search = "denied"
+        let excluded = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(excluded.matching, 0)
+        query = NetworkQuery(); query.headers = "TOKEN-A"
+        let headers = try await reader.listWindow(directory: root, query: query, around: 0)
+        XCTAssertEqual(headers.rows.map(\.id), [a.id, b.id])
+    }
+    func testIncrementalIndexSeesNewBodiesAndRemovesRowsThatStopMatching() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root); defer { store.close() }
+        let reader = NetworkCacheReader()
+        var record = try sampleRecord("later")
+        try store.upsert([record])
+        var query = NetworkQuery(); query.responseBody = "ready"; query.status = .success
+        let missing = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(missing.matching, 0)
+        try store.saveBodies(record.id, request: Data(), response: Data("{\"state\":\"ready\"}".utf8))
+        let saved = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(saved.matching, 1)
+        record.status = 500; record.url = "http://example.test/changed"
+        try store.upsert([record])
+        let removed = try await completedNetworkSearch(reader, directory: root, query: query)
+        XCTAssertEqual(removed.matching, 0)
+        XCTAssertEqual(try store.request(record.id)?.url, record.url)
+    }
+    func testStreamingUTF8BoundaryFormDecodingAndURLParameters() throws {
+        try networkFixture { root, store in
+            var record = try sampleRecord("boundary", url: "http://example.test/api?q=hello+world")
+            record.requestHeaders = "{\"Content-Type\":[\"application/x-www-form-urlencoded\"]}"
+            try store.upsert([record])
+            let body = String(repeating: "x", count: 65527) + "&name=%E4%BD%A0%E5%A5%BD&value=spaced+value"
+            try store.saveBodies(record.id, request: Data(body.utf8), response: Data((String(repeating: "a", count: 65535) + "跨界关键词").utf8))
+            record.bodyState = .saved
+            var query = NetworkQuery(); query.requestBody = "你好"; query.responseBody = "跨界关键词"
+            XCTAssertTrue(try NetworkContentMatcher(query: query).matches(record, directory: root))
+            query.search = "hello world"
+            XCTAssertTrue(try NetworkContentMatcher(query: query).matches(record, directory: root))
+            query.search = "spaced value"
+            XCTAssertTrue(try NetworkContentMatcher(query: query).matches(record, directory: root))
+        }
+    }
+    func testLegacyCacheSearchIsReadOnly() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root)
+        let record = try sampleRecord("legacy")
+        try store.upsert([record]); try store.saveBodies(record.id, request: Data(), response: Data("legacy-response".utf8)); store.close()
+        let file = root.appendingPathComponent("requests.sqlite")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "DROP TRIGGER requests_search_insert; DROP TRIGGER requests_search_update; DROP INDEX requests_search_revision; ALTER TABLE requests DROP COLUMN search_revision; DELETE FROM cache_info WHERE key='search_revision';", nil, nil, nil), SQLITE_OK)
+        sqlite3_close_v2(db)
+        let original = try Data(contentsOf: file)
+        var query = NetworkQuery(); query.responseBody = "legacy-response"
+        let result = try await completedNetworkSearch(NetworkCacheReader(), directory: root, query: query)
+        XCTAssertEqual(result.matching, 1)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+    }
+    func testMatchingIndexKeepsOnlyABoundedWindow() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let index = try NetworkContentIndex(directory: root, query: NetworkQuery())
+        try index.prepare(NetworkSearchSnapshot(total: 400, lastRow: 400, revision: 400, modified: .distantPast))
+        for base in stride(from: 0, to: 400, by: 20) {
+            let entries = try (base..<(base + 20)).map { number in
+                (NetworkSearchCandidate(record: try sampleRecord(String(number), start: Int64(number)), row: Int64(number + 1), revision: Int64(number + 1)), true)
+            }
+            try index.apply(entries)
+        }
+        index.finishPass()
+        let (counts, offset, ids) = try index.window(around: Int.max)
+        XCTAssertEqual(counts.matching, 400); XCTAssertEqual(offset, 144); XCTAssertEqual(ids.count, 256)
+    }
+}
+
+final class NetworkDetailPresentationTests: XCTestCase {
+    func testJSONDefaultsAndIndependentRememberedFormatsRoundTrip() throws {
+        var preferences = NetworkDetailPreferences()
+        for section in NetworkDetailSection.allCases { XCTAssertEqual(preferences.format(for: section), .json) }
+        preferences.setFormat(.xml, for: .request); preferences.setFormat(.raw, for: .response); preferences.wrapsLines = true
+        let restored = try JSONDecoder().decode(NetworkDetailPreferences.self, from: JSONEncoder().encode(preferences))
+        XCTAssertEqual(restored.format(for: .request), .xml); XCTAssertEqual(restored.format(for: .response), .raw)
+        XCTAssertEqual(restored.format(for: .headers), .json); XCTAssertTrue(restored.wrapsLines)
+    }
+    func testHeaderAndQueryMetadataHaveJSONXMLAndRawRepresentations() throws {
+        var record = try sampleRecord("formats", url: "http://example.test/a?x=1&x=2&empty")
+        record.requestHeaders = "{\"x-value\":[\"a < b & c\"]}"
+        for section in [NetworkDetailSection.overview, .headers, .request] {
+            let json = try NetworkDetailPresentation.page(record: record, section: section, format: .json, page: 0)
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(json.text.utf8)))
+            let xml = try NetworkDetailPresentation.page(record: record, section: section, format: .xml, page: 0)
+            XCTAssertNoThrow(try XMLDocument(xmlString: xml.text))
+            let raw = try NetworkDetailPresentation.page(record: record, section: section, format: .raw, page: 0)
+            XCTAssertFalse(raw.text.isEmpty)
+        }
+        try networkFixture { _, store in
+            try store.upsert([record]); try store.saveBodies(record.id, request: Data(), response: Data())
+            let stored = try XCTUnwrap(store.request(record.id))
+            let empty = try store.bodyPage(stored, response: true, page: 0, format: .json)
+            XCTAssertEqual(empty.text, ""); XCTAssertEqual(empty.bytes, 0)
+        }
     }
 }
 

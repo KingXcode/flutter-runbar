@@ -178,6 +178,7 @@ public actor NetworkCaptureSession {
         } catch is CancellationError { throw CancellationError() }
         catch VMServiceError.responseTooLarge { try store.markBody(id, state: .omitted, note: "正文或 VM 返回超过大小限制") }
         catch VMServiceError.unavailable { throw VMServiceError.unavailable }
+        catch let error as NetworkStorageError { throw error }
         catch let error as RunbarError { throw error }
         catch { try store.markBody(id, state: .failed, note: "正文格式不受支持，或已被目标进程清理") }
         return true

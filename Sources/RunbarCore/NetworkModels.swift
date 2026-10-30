@@ -86,9 +86,24 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
 public struct NetworkQuery: Equatable, Sendable {
     public enum Status: String, CaseIterable, Sendable { case all, pending, success, redirect, clientError, serverError, failed }
     public var text = ""
+    public var search = ""
+    public var headers = ""
+    public var requestBody = ""
+    public var responseBody = ""
     public var method = ""
     public var status = Status.all
     public init() {}
+    public var fieldFilterCount: Int { [text, headers, requestBody, responseBody].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count }
+    var needsContentSearch: Bool { [search, requestBody, responseBody].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
+    var bounded: Self {
+        var value = self
+        value.text = String(text.prefix(1024)); value.search = String(search.prefix(1024))
+        value.headers = String(headers.prefix(1024)); value.requestBody = String(requestBody.prefix(1024)); value.responseBody = String(responseBody.prefix(1024))
+        return value
+    }
+    var metadataOnly: Self {
+        var value = bounded; value.search = ""; value.requestBody = ""; value.responseBody = ""; return value
+    }
 }
 public struct NetworkPage: Sendable {
     public var records: [NetworkRecord]
@@ -114,6 +129,10 @@ public struct NetworkRequestSummary: Identifiable, Equatable, Sendable {
 public struct NetworkListCounts: Equatable, Sendable {
     public let total: Int
     public let matching: Int
+    public let isComplete: Bool
+    public init(total: Int, matching: Int, isComplete: Bool = true) {
+        self.total = total; self.matching = matching; self.isComplete = isComplete
+    }
 }
 public struct NetworkListWindow: Equatable, Sendable {
     public static let capacity = 256

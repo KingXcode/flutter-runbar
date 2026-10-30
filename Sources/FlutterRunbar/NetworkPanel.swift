@@ -4,7 +4,7 @@ import RunbarCore
 
 @MainActor
 private final class NetworkPanelModel: ObservableObject {
-    enum Detail: String, CaseIterable { case overview = "概览", headers = "Headers", request = "Request", response = "Response" }
+    typealias Detail = NetworkDetailSection
     @Published var query = NetworkQuery() { didSet {
         guard query != oldValue else { return }
         clearSelection(); window = .empty; visibleRow = 0; countsDirty = true
@@ -23,10 +23,12 @@ private final class NetworkPanelModel: ObservableObject {
             if followsOutput { scrollRevision += 1; loadWindow() }
         }
     }
-    @Published var detail = Detail.overview { didSet {
-        bodyFormat = .raw; bodyIndex = 0; loadDetail()
-    } }
-    @Published private(set) var bodyFormat = NetworkBodyFormat.raw
+    @Published var detail = Detail.overview { didSet { bodyIndex = 0; loadDetail() } }
+    @Published private(set) var preferences = UserDefaults.standard.data(forKey: "networkDetailPreferences")
+        .flatMap { try? JSONDecoder().decode(NetworkDetailPreferences.self, from: $0) } ?? NetworkDetailPreferences()
+    var bodyFormat: NetworkBodyFormat { preferences.format(for: detail) }
+    var showsURLParameters: Bool { detail == .request && selected?.requestBytes == 0 &&
+        selected.flatMap { URLComponents(string: $0.url)?.queryItems }?.isEmpty == false }
     @Published private(set) var formatError: String?
     @Published private(set) var bodyText = "选择一条请求查看详情"
     @Published private(set) var bodyIndex = 0
@@ -34,6 +36,7 @@ private final class NetworkPanelModel: ObservableObject {
     @Published private(set) var bodyBytes = 0
     @Published private(set) var error: String?
     @Published private(set) var loading = false
+    @Published private(set) var queryLoading = false
     private let reader = NetworkCacheReader()
     private var directory: URL?
     private var sessionID: UUID?
@@ -43,6 +46,7 @@ private final class NetworkPanelModel: ObservableObject {
     private var windowTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
+    private var searchRefreshTask: Task<Void, Never>?
     func configure(directory: URL?, sessionID: UUID) {
         if self.sessionID != sessionID {
             stop(); clearSelection(); window = .empty; visibleRow = 0; requestedRow = nil
@@ -55,7 +59,9 @@ private final class NetworkPanelModel: ObservableObject {
     }
     private func loadWindow(delay: Bool = false, scrolling: Bool = false) {
         windowTask?.cancel()
+        searchRefreshTask?.cancel(); searchRefreshTask = nil
         guard let directory else { return }
+        queryLoading = true
         let query = query, anchor = followsOutput ? Int.max : visibleRow, refreshCounts = countsDirty
         requestedRow = anchor
         windowTask = Task { [weak self] in
@@ -64,16 +70,22 @@ private final class NetworkPanelModel: ObservableObject {
                 if delay || scrolling { try await Task.sleep(for: .milliseconds(delay ? 250 : 25)) }
                 let window = try await reader.listWindow(directory: directory, query: query, around: anchor, refreshCounts: refreshCounts)
                 guard !Task.isCancelled else { return }
-                self.window = window; self.countsDirty = false; self.requestedRow = nil; self.error = nil
+                self.window = window; self.countsDirty = false; self.requestedRow = nil; self.error = nil; self.queryLoading = false
+                if !window.counts.isComplete {
+                    self.searchRefreshTask = Task { [weak self] in
+                        do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                        self?.searchRefreshTask = nil; self?.loadWindow()
+                    }
+                }
                 if let id = self.selectedID {
-                    if let local = window.rows.firstIndex(where: { $0.id == id }) { self.selectedRow = window.offset + local }
+                    self.selectedRow = window.rows.firstIndex(where: { $0.id == id }).map { window.offset + $0 }
                     let record = try await reader.request(directory: directory, id: id)
                     guard !Task.isCancelled, self.selectedID == id else { return }
                     if self.selected != record { self.selected = record; self.loadDetail() }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                self.requestedRow = nil; self.error = error.localizedDescription
+                self.requestedRow = nil; self.error = error.localizedDescription; self.queryLoading = false
             }
         }
     }
@@ -99,13 +111,16 @@ private final class NetworkPanelModel: ObservableObject {
     }
     func select(row: Int?) {
         selectionTask?.cancel(); selectedRow = row
-        selectedID = nil; selected = nil; bodyFormat = .raw; bodyIndex = 0; loadDetail()
+        selectedID = nil; selected = nil; bodyIndex = 0; loadDetail()
         guard let directory, let row else { return }
         let query = query, sessionID = sessionID
+        let visibleID = window.row(at: row)?.id
         selectionTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let record = try await reader.request(directory: directory, query: query, row: row)
+                let record: NetworkRecord?
+                if let visibleID { record = try await reader.request(directory: directory, id: visibleID) }
+                else { record = try await reader.request(directory: directory, query: query, row: row) }
                 guard !Task.isCancelled, self.sessionID == sessionID, self.query == query, self.selectedRow == row else { return }
                 self.selectedID = record?.id; self.selected = record; self.loadDetail()
             } catch {
@@ -116,57 +131,54 @@ private final class NetworkPanelModel: ObservableObject {
     private func clearSelection() { select(row: nil) }
     func moveBody(_ delta: Int) { bodyIndex = min(max(0, bodyIndex + delta), bodyPages - 1); loadDetail() }
     func formatBody(_ format: NetworkBodyFormat) {
-        bodyFormat = format; bodyIndex = 0; loadDetail()
+        preferences.setFormat(format, for: detail); savePreferences(); bodyIndex = 0; loadDetail()
+    }
+    func setWrapsLines(_ value: Bool) { preferences.wrapsLines = value; savePreferences() }
+    private func savePreferences() {
+        if let data = try? JSONEncoder().encode(preferences) { UserDefaults.standard.set(data, forKey: "networkDetailPreferences") }
+    }
+    func clearFieldFilters() {
+        var value = query; value.text = ""; value.headers = ""; value.requestBody = ""; value.responseBody = ""; query = value
     }
     private func loadDetail() {
         detailTask?.cancel(); loading = false; error = nil; formatError = nil
         guard let record = selected else { bodyText = "选择一条请求查看详情"; bodyPages = 1; bodyBytes = 0; return }
         bodyPages = 1; bodyBytes = 0
-        switch detail {
-        case .overview:
-            let duration = record.durationMS.map { String(format: "%.1f ms", $0) } ?? (record.timingVersion == nil ? "旧版未记录完整响应耗时" : "响应尚未完成")
-            bodyText = """
-                \(record.method) \(record.url)
-
-                状态：\(record.failure ?? record.status.map(String.init) ?? "Pending")
-                时间：\(record.startDate.formatted(date: .numeric, time: .standard))
-                耗时：\(duration)
-                类型：\(record.contentType.isEmpty ? "未知" : record.contentType)
-                请求正文大小：\(size(record.requestBytes))
-                响应正文大小：\(size(record.responseBytes))
-                正文缓存：\(record.bodyState.title)\(record.bodyNote.isEmpty ? "" : " · " + record.bodyNote)
-                """
-        case .headers:
-            bodyText = "Request Headers\n\n\(record.requestHeaders.isEmpty ? "尚无数据" : record.requestHeaders)\n\nResponse Headers\n\n\(record.responseHeaders.isEmpty ? "尚无数据" : record.responseHeaders)"
-        case .request, .response:
-            guard let directory else { return }
-            loading = true; bodyText = "正在读取正文…"
-            let response = detail == .response, index = bodyIndex, format = bodyFormat
-            detailTask = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let page: NetworkBodyPage
-                    do { page = try await reader.body(directory: directory, record: record, response: response, page: index, format: format) }
-                    catch {
-                        guard !Task.isCancelled else { return }
-                        guard format != .raw else { throw error }
-                        self.formatError = error.localizedDescription; self.bodyFormat = .raw
-                        page = try await reader.body(directory: directory, record: record, response: response, page: 0)
-                    }
-                    guard !Task.isCancelled else { return }
-                    self.bodyText = page.text; self.bodyIndex = page.page; self.bodyPages = page.pages; self.bodyBytes = page.bytes; self.loading = false
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    self.bodyText = "正文文件不存在或读取失败。"; self.loading = false
+        guard let directory else { return }
+        loading = true; bodyText = "正在读取内容…"
+        let section = detail, index = bodyIndex, format = bodyFormat, parameters = showsURLParameters
+        detailTask = Task { [weak self] in
+            guard let self else { return }
+            func read(_ format: NetworkBodyFormat) async throws -> NetworkBodyPage {
+                if section == .overview || section == .headers || parameters {
+                    return try await reader.metadata(record: record, section: section, format: format, page: index)
                 }
+                return try await reader.body(directory: directory, record: record, response: section == .response, page: index, format: format)
+            }
+            do {
+                let page: NetworkBodyPage
+                do { page = try await read(format) }
+                catch {
+                    guard !Task.isCancelled else { return }
+                    guard format != .raw, error is RunbarError else { throw error }
+                    let reason = error.localizedDescription
+                    page = try await read(.raw)
+                    guard !Task.isCancelled else { return }
+                    self.formatError = reason + " 当前按原始内容显示，格式偏好保持不变。"
+                }
+                guard !Task.isCancelled else { return }
+                self.bodyText = page.text; self.bodyIndex = page.page; self.bodyPages = page.pages; self.bodyBytes = page.bytes; self.loading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.bodyText = error.localizedDescription; self.loading = false
             }
         }
     }
-    private func size(_ bytes: Int64?) -> String {
-        guard let bytes, bytes >= 0 else { return "未知" }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    func stop() {
+        windowTask?.cancel(); selectionTask?.cancel(); detailTask?.cancel(); searchRefreshTask?.cancel()
+        let directory = directory
+        Task { await reader.cancelContentSearch(directory: directory) }
     }
-    func stop() { windowTask?.cancel(); selectionTask?.cancel(); detailTask?.cancel() }
 }
 
 struct NetworkPanel: View {
@@ -175,6 +187,7 @@ struct NetworkPanel: View {
     let session: RunSession
     @StateObject private var data = NetworkPanelModel()
     @State private var confirmingClear = false
+    @State private var showingFieldFilters = false
     private var enabled: Bool { model.networkCaptureEnabled(for: session) }
     private var sourceExists: Bool {
         if let id = session.attachment?.application.id { return model.applications.contains { $0.id == id } }
@@ -206,21 +219,12 @@ struct NetworkPanel: View {
                         .accessibilityLabel("网络采集操作")
                 }
             }
-            HStack(spacing: 6) {
-                TextField("搜索请求地址", text: $data.query.text).textFieldStyle(.roundedBorder).accessibilityLabel("搜索网络请求地址")
-                Picker("方法", selection: $data.query.method) {
-                    Text("全部方法").tag("")
-                    ForEach(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().frame(width: 90).accessibilityLabel("网络方法筛选")
-                Picker("状态", selection: $data.query.status) {
-                    Text("全部状态").tag(NetworkQuery.Status.all)
-                    Text("进行中").tag(NetworkQuery.Status.pending)
-                    Text("2xx").tag(NetworkQuery.Status.success)
-                    Text("3xx").tag(NetworkQuery.Status.redirect)
-                    Text("4xx").tag(NetworkQuery.Status.clientError)
-                    Text("5xx").tag(NetworkQuery.Status.serverError)
-                    Text("连接失败").tag(NetworkQuery.Status.failed)
-                }.labelsHidden().frame(width: 90).accessibilityLabel("网络状态筛选")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { contentSearch; fieldFiltersButton; methodFilter; statusFilter }
+                VStack(spacing: 5) {
+                    HStack(spacing: 6) { contentSearch; fieldFiltersButton }
+                    HStack(spacing: 6) { methodFilter; statusFilter; Spacer(minLength: 0) }
+                }
             }
             if let error = data.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             GeometryReader { geometry in
@@ -232,6 +236,7 @@ struct NetworkPanel: View {
             }.frame(minHeight: 250)
             HStack {
                 Text("\(data.window.matching) / \(data.window.total) 条").monospacedDigit()
+                if !data.window.counts.isComplete { Text("筛选中…") }
                 Text("当前位置 \(data.positionPercent)%").monospacedDigit()
                 Spacer(minLength: 0)
                 Button("最早") { data.earliest() }.disabled(data.window.matching == 0)
@@ -256,6 +261,50 @@ struct NetworkPanel: View {
                 Text("这会同时清理 DevTools 中的网络记录，并使正在进行的请求停止记录。Runbar 的本地历史缓存会保留。")
             }
     }
+    private var contentSearch: some View {
+        TextField("搜索全部已缓存内容", text: $data.query.search).textFieldStyle(.roundedBorder).frame(minWidth: 120)
+            .accessibilityLabel("搜索 URL、请求头、请求参数及响应内容")
+            .help("忽略大小写，在 URL、请求/响应头、URL 参数、已缓存请求和响应正文中查找关键词")
+    }
+    private var methodFilter: some View {
+        Picker("方法", selection: $data.query.method) {
+            Text("全部方法").tag("")
+            ForEach(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], id: \.self) { Text($0).tag($0) }
+        }.labelsHidden().frame(width: 90).accessibilityLabel("网络方法筛选")
+    }
+    private var statusFilter: some View {
+        Picker("状态", selection: $data.query.status) {
+            Text("全部状态").tag(NetworkQuery.Status.all)
+            Text("进行中").tag(NetworkQuery.Status.pending)
+            Text("2xx").tag(NetworkQuery.Status.success)
+            Text("3xx").tag(NetworkQuery.Status.redirect)
+            Text("4xx").tag(NetworkQuery.Status.clientError)
+            Text("5xx").tag(NetworkQuery.Status.serverError)
+            Text("连接失败").tag(NetworkQuery.Status.failed)
+        }.labelsHidden().frame(width: 90).accessibilityLabel("网络状态筛选")
+    }
+    private var fieldFiltersButton: some View {
+        Button(data.query.fieldFilterCount == 0 ? "筛选" : "筛选 \(data.query.fieldFilterCount)", systemImage: "line.3.horizontal.decrease") {
+            showingFieldFilters.toggle()
+        }.fixedSize().accessibilityLabel("按字段组合筛选网络请求")
+            .popover(isPresented: $showingFieldFilters, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("按字段筛选").font(.headline)
+                        Spacer()
+                        Button("清空", action: data.clearFieldFilters).disabled(data.query.fieldFilterCount == 0)
+                    }
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                        GridRow { Text("URL"); TextField("地址关键词", text: $data.query.text) }
+                        GridRow { Text("请求/响应头"); TextField("Header 名称或内容", text: $data.query.headers) }
+                        GridRow { Text("请求参数"); TextField("URL 参数或请求正文关键词", text: $data.query.requestBody) }
+                        GridRow { Text("响应内容"); TextField("响应正文关键词", text: $data.query.responseBody) }
+                    }.textFieldStyle(.roundedBorder)
+                    Text("不同字段需要同时满足；全部内容搜索在任一字段命中即可。正文仅查询已缓存内容。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.padding(16).frame(width: 390)
+            }
+    }
     private var requests: some View {
         NetworkRequestsTable(window: data.window, selection: data.selectedRow,
                              following: data.followsOutput, scrollRevision: data.scrollRevision,
@@ -264,7 +313,8 @@ struct NetworkPanel: View {
         }
             .overlay {
                 if data.window.matching == 0 {
-                    Text(data.window.total == 0 ? "暂无已缓存请求\n开启采集后，需要运行支持 HTTP profiling 的 Dart / Flutter 程序" : "没有匹配的请求")
+                    Text(data.queryLoading || !data.window.counts.isComplete ? "正在筛选已缓存内容…" :
+                         data.window.total == 0 ? "暂无已缓存请求\n开启采集后，需要运行支持 HTTP profiling 的 Dart / Flutter 程序" : "没有匹配的请求")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding().allowsHitTesting(false)
                 }
             }
@@ -273,28 +323,26 @@ struct NetworkPanel: View {
     private var details: some View {
         VStack(spacing: 5) {
             Picker("请求详情", selection: $data.detail) {
-                ForEach(NetworkPanelModel.Detail.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(NetworkPanelModel.Detail.allCases, id: \.self) { Text($0.title).tag($0) }
             }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("网络请求详情")
-            if data.detail == .response {
-                HStack(spacing: 5) {
-                    Button("JSON 格式化") { data.formatBody(.json) }
-                        .tint(data.bodyFormat == .json ? .accentColor : .secondary)
-                        .accessibilityValue(data.bodyFormat == .json ? "已启用" : "未启用")
-                    Button("XML 格式化") { data.formatBody(.xml) }
-                        .tint(data.bodyFormat == .xml ? .accentColor : .secondary)
-                        .accessibilityValue(data.bodyFormat == .xml ? "已启用" : "未启用")
-                    Button("原始") { data.formatBody(.raw) }.disabled(data.bodyFormat == .raw)
-                    Spacer(minLength: 0)
-                }.disabled(data.selected?.bodyState != .saved || data.loading)
-                    .help("在后台格式化完整响应并分页显示，保留原始正文；最多读取 1 MB")
+            HStack(spacing: 6) {
+                Picker("显示格式", selection: Binding(get: { data.bodyFormat }, set: data.formatBody)) {
+                    ForEach([NetworkBodyFormat.json, .xml, .raw], id: \.self) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented).frame(maxWidth: 200).disabled(data.selected == nil)
+                    .help("默认 JSON；按当前详情标签记住选择，内容不符合格式时显示原始内容")
+                Spacer(minLength: 0)
+                Toggle("自动换行", isOn: Binding(get: { data.preferences.wrapsLines }, set: data.setWrapsLines))
+                    .toggleStyle(.checkbox).fixedSize().help("记住换行设置；关闭时可横向滚动长行")
             }
             if let error = data.formatError { Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(error) }
-            NetworkTextView(text: data.bodyText).frame(maxWidth: .infinity, maxHeight: .infinity)
+            NetworkTextView(text: data.bodyText, wrapsLines: data.preferences.wrapsLines).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
-            if let selected = data.selected, data.detail == .request || data.detail == .response {
+            if let selected = data.selected, data.detail == .request || data.detail == .response || data.bodyPages > 1 {
                 HStack(spacing: 6) {
-                    if data.loading || monitor.loadingBodies.contains(selected.id) { ProgressView().controlSize(.mini) }
-                    if selected.bodyState == .saved {
+                    if data.loading { ProgressView().controlSize(.mini) }
+                    if data.showsURLParameters { Text("URL 参数") }
+                    else if data.detail == .overview || data.detail == .headers { Text("详情") }
+                    else if selected.bodyState == .saved {
                         Text(data.bodyBytes == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: Int64(data.bodyBytes), countStyle: .file))
                     } else if let error = monitor.bodyErrors[selected.id] {
                         Text(error).lineLimit(1).help(error)
@@ -302,7 +350,7 @@ struct NetworkPanel: View {
                         Text(selected.bodyState == .pending ? "等待正文，选中后优先加载" : selected.bodyState.title)
                     }
                     Spacer()
-                    if selected.bodyState == .saved {
+                    if selected.bodyState == .saved || data.showsURLParameters || data.detail == .overview || data.detail == .headers {
                         Button { data.moveBody(-1) } label: { Image(systemName: "chevron.left") }.disabled(data.bodyIndex == 0)
                         Text("\(data.bodyIndex + 1) / \(data.bodyPages)")
                         Button { data.moveBody(1) } label: { Image(systemName: "chevron.right") }.disabled(data.bodyIndex + 1 >= data.bodyPages)
@@ -480,6 +528,9 @@ private final class NetworkRequestTableView: NSTableView {
 
 private struct NetworkTextView: NSViewRepresentable {
     let text: String
+    let wrapsLines: Bool
+    final class Coordinator { var wrapsLines: Bool? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
         let view = NSTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false
@@ -487,13 +538,27 @@ private struct NetworkTextView: NSViewRepresentable {
         view.isAutomaticLinkDetectionEnabled = false; view.textContainerInset = NSSize(width: 8, height: 8)
         view.isHorizontallyResizable = true; view.isVerticallyResizable = true
         view.autoresizingMask = [.width]; view.textContainer?.widthTracksTextView = false
-        view.textContainer?.containerSize = NSSize(width: 100_000, height: CGFloat.greatestFiniteMagnitude)
+        view.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.layoutManager?.allowsNonContiguousLayout = true
         view.minSize = .zero; view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = view; return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView, view.string != text else { return }
-        view.string = text; view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
-        view.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        guard let view = scroll.documentView as? NSTextView else { return }
+        if context.coordinator.wrapsLines != wrapsLines {
+            let origin = scroll.contentView.bounds.origin
+            context.coordinator.wrapsLines = wrapsLines
+            scroll.hasHorizontalScroller = !wrapsLines
+            view.isHorizontallyResizable = !wrapsLines
+            view.textContainer?.widthTracksTextView = wrapsLines
+            view.textContainer?.containerSize = NSSize(width: wrapsLines ? max(1, scroll.contentSize.width - 16) : CGFloat.greatestFiniteMagnitude,
+                                                       height: CGFloat.greatestFiniteMagnitude)
+            if wrapsLines { view.setFrameSize(NSSize(width: max(1, scroll.contentSize.width), height: max(view.frame.height, scroll.contentSize.height))) }
+            scroll.contentView.scroll(to: NSPoint(x: wrapsLines ? 0 : origin.x, y: origin.y)); scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        if view.string != text {
+            view.string = text; view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
+            view.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        }
     }
 }

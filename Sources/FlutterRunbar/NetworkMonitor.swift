@@ -97,7 +97,7 @@ final class NetworkMonitor: ObservableObject {
         let generation = UUID(); runtime.generation = generation
         states[runtime.sessionID] = State(text: "正在连接")
         runtime.task = Task { [weak self, weak runtime] in
-            var failures = 0, nextSummary = Date.distantPast, lastPublication = Date.distantPast
+            var failures = 0, storageFailures = 0, nextSummary = Date.distantPast, lastPublication = Date.distantPast
             var unpublished = false
             while !Task.isCancelled {
                 guard let runtime else { return }
@@ -111,7 +111,7 @@ final class NetworkMonitor: ObservableObject {
                     }
                     let drain = try await capture.drainPendingBodies(refreshIncomplete: runtime.paused)
                     guard !Task.isCancelled, runtime.generation == generation else { return }
-                    failures = 0; pending = drain.pending
+                    failures = 0; storageFailures = 0; pending = drain.pending
                     unpublished = unpublished || drain.processed > 0
                     let suffix = pending > 0 ? " · 正文待缓存 \(pending) 条" : ""
                     let text = runtime.paused ? "已暂停接收" + suffix :
@@ -128,6 +128,24 @@ final class NetworkMonitor: ObservableObject {
                 } catch is CancellationError { return }
                 catch {
                     guard !Task.isCancelled, runtime.generation == generation else { return }
+                    if let storage = error as? NetworkStorageError, storage.isTransient {
+                        // Only a complete successful pass resets the budgets;
+                        // alternating transport/cache failures stay bounded.
+                        storageFailures += 1
+                        if let delay = NetworkStorageRetry.delay(for: storage, failure: storageFailures) {
+                            self?.states[runtime.sessionID] = State(
+                                text: "缓存暂时繁忙，正在重试（\(storageFailures)/\(NetworkStorageRetry.maximumRetries)）· \(storage.localizedDescription)",
+                                paused: runtime.paused)
+                            self?.revision += 1
+                            do { try await Task.sleep(for: delay) } catch { return }
+                            continue
+                        }
+                        self?.states[runtime.sessionID] = State(
+                            text: storage.localizedDescription + "；重试后仍未恢复，已暂停接收，可点击「继续」重试。",
+                            paused: true, error: true)
+                        self?.revision += 1
+                        runtime.paused = true; runtime.task = nil; return
+                    }
                     failures += 1
                     let retry = (error as? VMServiceError) == .unavailable && failures < 10
                     self?.states[runtime.sessionID] = State(text: retry ? "连接中断，正在重试（\(failures)/10）" : error.localizedDescription,
@@ -151,7 +169,15 @@ final class NetworkMonitor: ObservableObject {
             await old?.value
             guard let self, let runtime, !Task.isCancelled, runtime.bodyGeneration == generation else { return }
             do {
-                _ = try await capture.cacheBody(id)
+                var failures = 0
+                while true {
+                    do { _ = try await capture.cacheBody(id); break }
+                    catch {
+                        failures += 1
+                        guard let delay = NetworkStorageRetry.delay(for: error, failure: failures) else { throw error }
+                        try await Task.sleep(for: delay)
+                    }
+                }
                 guard !Task.isCancelled, runtime.bodyGeneration == generation else { return }
             } catch {
                 guard !Task.isCancelled, runtime.bodyGeneration == generation else { return }
