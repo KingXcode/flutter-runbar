@@ -20,7 +20,7 @@ jobs:
       - name: Build screenshot-only app with fictional data
         env:
           BUILD_SCREENSHOT_PREVIEW: '1'
-        run: bash scripts/build-app.sh
+        run: bash scripts/build-app.sh --no-publish
       - name: Open actual status-item popup and capture menu bar
         run: bash scripts/capture-real-menu.sh
       - uses: actions/upload-artifact@v4

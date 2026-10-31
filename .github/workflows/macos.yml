@@ -29,11 +29,11 @@ jobs:
           xcodebuild -project FlutterRunbar.xcodeproj -scheme FlutterRunbar -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGN_IDENTITY=- test
           bash scripts/test-process.sh
       - name: Build app bundle
-        run: bash scripts/build-app.sh
+        run: bash scripts/build-app.sh --no-publish
       - name: Archive
-        run: ditto -c -k --keepParent 'dist/Runbar.app' dist/Runbar-macOS26-arm64.zip
+        run: ditto -c -k --keepParent 'dist/Runbar.app' dist/Runbar-macOS26-universal.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: Runbar-macOS26-arm64
-          path: dist/Runbar-macOS26-arm64.zip
+          name: Runbar-macOS26-universal
+          path: dist/Runbar-macOS26-universal.zip
           retention-days: 3

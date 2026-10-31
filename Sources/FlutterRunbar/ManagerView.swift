@@ -153,6 +153,8 @@ struct ManagerView: View {
         .sheet(isPresented: $showingSettings) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("设置").font(.title2)
+                UpdateSettingsSection(updater: model.updates) { model.showUpdateWindow() }
+                Divider()
                 Text("应用显示").font(.headline)
                 Toggle("在 Dock 中显示", isOn: Binding(get: { model.showInDock }, set: { model.setDockVisibility($0) }))
                 Text("切换立即生效并自动保存。关闭后仍可从菜单栏打开 Runbar。")

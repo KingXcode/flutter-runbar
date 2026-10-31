@@ -4,28 +4,32 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 COPY_TO_DESKTOP=0
 CREATE_DMG=0
+PUBLISH_RELEASE=1
 SIGNING_IDENTITY="${RUNBAR_SIGNING_IDENTITY:-}"
 SIGNING_TEAM=""
 usage() {
   cat <<'TEXT'
-用法：bash scripts/build-app.sh [--desktop] [--dmg] [--signing-identity 身份] [--help]
+用法：bash scripts/build-app.sh [--desktop] [--dmg] [--no-publish] [--signing-identity 身份] [--help]
 App 桌面入口：./build_macos_app.sh
 DMG 桌面入口：./build_macos_dmg.sh
-  默认                 Release 构建当前机器架构，输出 dist/Runbar.app
+  默认                 Release 通用构建，输出 dist/Runbar.app，并发布 GitHub Release
   --desktop            同时将当前类型的产物放到桌面
   --dmg                生成 arm64 + x86_64 通用 DMG，不安装或退出 App
+  --no-publish         只在本地打包，不上传 GitHub（开发 / CI 使用）
   --signing-identity   指定 Developer ID Application 证书指纹/完整名称；- 为 ad hoc
   --help               显示帮助
 DMG 默认自动选择唯一可用的 Developer ID Application 证书；也可用 RUNBAR_SIGNING_IDENTITY 指定。
 App 默认使用 ad hoc 签名。DMG 无分发证书时会明确报错，可显式指定 - 生成 ad hoc 包。
 同名旧产物先备份。替换桌面 App 前请求旧版正常退出；生成 DMG 不退出 App。
-不进行 Apple 公证，不上传 App 或 DMG。Developer ID 签名会请求签名时间戳。
+发布要求：main 干净且已推送，CHANGELOG.md 写清本次更新，gh 已登录。
+只上传安装包和校验文件到 GitHub；不进行 Apple 公证，不上传到 Apple。Developer ID 签名会请求签名时间戳。
 TEXT
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --desktop) COPY_TO_DESKTOP=1 ;;
     --dmg) CREATE_DMG=1 ;;
+    --no-publish) PUBLISH_RELEASE=0 ;;
     --signing-identity)
       if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
         echo '--signing-identity 需要证书指纹、完整名称或 -。' >&2; exit 2
@@ -39,11 +43,17 @@ done
 if [[ $CREATE_DMG == 1 && "${BUILD_SCREENSHOT_PREVIEW:-0}" == 1 ]]; then
   echo '演示预览构建不能生成分发 DMG。请取消 BUILD_SCREENSHOT_PREVIEW。' >&2; exit 2
 fi
+if [[ $PUBLISH_RELEASE == 1 && "${BUILD_SCREENSHOT_PREVIEW:-0}" == 1 ]]; then
+  echo '演示预览构建不能发布 Release；请添加 --no-publish。' >&2; exit 2
+fi
 if [[ "$(uname -s)" != Darwin ]]; then echo '需要 macOS 26+ 和完整 Xcode 26+。' >&2; exit 1; fi
 if ! xcodebuild -version >/dev/null 2>&1; then
   echo '未找到完整 Xcode，请先安装并在 xcode-select 中选择 Xcode。' >&2
   exit 1
 fi
+RELEASE_CONTEXT="$(/usr/bin/python3 scripts/github-release.py context)"
+IFS=$'\t' read -r RELEASE_VERSION RELEASE_BUILD RELEASE_SHA RELEASE_TAG <<< "$RELEASE_CONTEXT"
+if [[ $PUBLISH_RELEASE == 1 ]]; then /usr/bin/python3 scripts/github-release.py preflight; fi
 RUN_ID="$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$ROOT/.build/logs"
 BUILD_LOG="$ROOT/.build/logs/package-$RUN_ID.log"
@@ -171,7 +181,7 @@ package_dmg() {
     signature_suffix=signed
     signature_note='此包使用 Developer ID 签名，未进行 Apple 公证。'
   fi
-  DMG_FILENAME="Runbar-$VERSION-$BUILD_NUMBER-universal-$signature_suffix.dmg"
+  DMG_FILENAME="Runbar-$VERSION-$BUILD_NUMBER-macOS$minimum_system-universal-$signature_suffix.dmg"
   DMG_WORK_DIRECTORY="$(mktemp -d /private/tmp/runbar-dmg.XXXXXX)"
   mkdir -p "$DMG_WORK_DIRECTORY/image-root"
   ditto --norsrc --noextattr "$BUILT_APP" "$DMG_WORK_DIRECTORY/image-root/Runbar.app"
@@ -204,17 +214,20 @@ TEXT
   hdiutil verify "$DMG_WORK_DIRECTORY/$DMG_FILENAME"
   install_dmg "$DMG_WORK_DIRECTORY/$DMG_FILENAME" "$ROOT/dist/$DMG_FILENAME" dist-dmg
   (cd "$ROOT/dist"; shasum -a 256 "$DMG_FILENAME" > "$DMG_FILENAME.sha256")
+  if [[ $PUBLISH_RELEASE == 1 ]]; then
+    /usr/bin/python3 scripts/github-release.py publish --artifact "$ROOT/dist/$DMG_FILENAME" --app "$BUILT_APP"
+  fi
   if [[ $COPY_TO_DESKTOP == 1 ]]; then
     install_dmg "$ROOT/dist/$DMG_FILENAME" "$HOME/Desktop/$DMG_FILENAME" desktop-dmg
   fi
-  echo "DMG 打包完成：$VERSION+$BUILD_NUMBER ($architectures)，未公证，未上传构建产物。"
+  echo "DMG 打包完成：$VERSION+$BUILD_NUMBER ($architectures)，未进行 Apple 公证。"
 }
 
 select_signing_identity
-DERIVED_DATA="$PWD/.build/xcode"
-BUILD_ARCHITECTURES="$(uname -m)"
-BUILD_ACTIVE_ARCH=YES
-BUILD_SETTINGS=("CODE_SIGN_IDENTITY=$SIGNING_IDENTITY")
+DERIVED_DATA="$PWD/.build/xcode-universal"
+BUILD_ARCHITECTURES='arm64 x86_64'
+BUILD_ACTIVE_ARCH=NO
+BUILD_SETTINGS=("CODE_SIGN_IDENTITY=$SIGNING_IDENTITY" "CURRENT_PROJECT_VERSION=$RELEASE_BUILD" "RUNBAR_SOURCE_REVISION=$RELEASE_SHA")
 if [[ "$SIGNING_IDENTITY" != - ]]; then
   BUILD_SETTINGS+=("CODE_SIGN_STYLE=Manual" "DEVELOPMENT_TEAM=$SIGNING_TEAM" "CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO" "OTHER_CODE_SIGN_FLAGS=--timestamp")
 fi
@@ -245,6 +258,12 @@ if [[ $CREATE_DMG == 1 ]]; then
   exit 0
 fi
 install_bundle "$ROOT/dist/Runbar.app" dist
+if [[ $PUBLISH_RELEASE == 1 ]]; then
+  MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$BUILT_APP/Contents/Info.plist")"
+  ZIP_FILE="$ROOT/dist/Runbar-$VERSION-$BUILD_NUMBER-macOS$MINIMUM_SYSTEM-universal.zip"
+  ditto -c -k --sequesterRsrc --keepParent "$BUILT_APP" "$ZIP_FILE"
+  /usr/bin/python3 scripts/github-release.py publish --artifact "$ZIP_FILE" --app "$BUILT_APP"
+fi
 INSTALL_PENDING=0
 if [[ $COPY_TO_DESKTOP == 1 ]]; then
   mkdir -p "$ROOT/.build/tools"

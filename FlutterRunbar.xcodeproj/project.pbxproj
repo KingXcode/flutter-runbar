@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */; };
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
 		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
 		286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC0C281B047474B3C8BE784 /* LogToolsView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		40E0446C1C3DE04FA930CF84 /* AppUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */; };
 		40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
@@ -42,6 +44,7 @@
 
 /* Begin PBXFileReference section */
 		0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterRunbarApp.swift; sourceTree = "<group>"; };
+		0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateTests.swift; sourceTree = "<group>"; };
 		08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogResponsivenessProbe.swift; sourceTree = "<group>"; };
 		0C6F66E99688501B309B2459 /* capture-real-menu.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-real-menu.sh"; sourceTree = "<group>"; };
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
@@ -50,6 +53,7 @@
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
+		3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateView.swift; sourceTree = "<group>"; };
 		34A808A71127B818971B8764 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeConnectionView.swift; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
@@ -67,6 +71,7 @@
 		9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */ = {isa = PBXFileReference; path = "probe-devtools-network.dart"; sourceTree = "<group>"; };
 		92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandTemplateTests.swift; sourceTree = "<group>"; };
 		9BC0C281B047474B3C8BE784 /* LogToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogToolsView.swift; sourceTree = "<group>"; };
+		A31907D75CF3EDDDDD941ADD /* github-release.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "github-release.py"; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		AA265515B8A948781CDF2C41 /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
@@ -142,6 +147,7 @@
 			isa = PBXGroup;
 			children = (
 				ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */,
+				0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */,
 				92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */,
 				DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */,
 				F8254135888F0FA991DFF1BA /* CoreTests.swift */,
@@ -183,6 +189,7 @@
 				1023E627F98907FA69966F18 /* capture-main-themes.sh */,
 				B637E5526FA142797BA3D836 /* capture-preview.sh */,
 				0C6F66E99688501B309B2459 /* capture-real-menu.sh */,
+				A31907D75CF3EDDDDD941ADD /* github-release.py */,
 				B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */,
 				E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */,
 				9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */,
@@ -214,6 +221,7 @@
 			isa = PBXGroup;
 			children = (
 				4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */,
+				3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */,
 				614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */,
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
 				2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */,
@@ -370,6 +378,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */,
 				8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */,
 				63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */,
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
@@ -390,6 +399,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40E0446C1C3DE04FA930CF84 /* AppUpdateTests.swift in Sources */,
 				40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */,
 				185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */,
 				4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */,
@@ -503,7 +513,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 47;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -517,7 +527,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.9.0;
+				MARKETING_VERSION = 0.10.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -580,7 +590,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 47;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -600,7 +610,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.9.0;
+				MARKETING_VERSION = 0.10.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

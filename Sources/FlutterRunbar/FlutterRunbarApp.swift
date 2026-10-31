@@ -19,6 +19,14 @@ struct FlutterRunbarApp: App {
                 .frame(minWidth: 880, minHeight: 620)
         }
         .defaultSize(width: 1100, height: 760)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") { model.showUpdateWindow() }
+            }
+        }
+        Window("Runbar 软件更新", id: "updates") {
+            AppUpdateView(updater: model.updates)
+        }.windowResizability(.contentSize)
     }
 }
 
@@ -33,6 +41,9 @@ private struct RunbarStatusLabel: View {
                 model.installManagerOpener {
                     openWindow(id: "manager")
                     NSApp.activate(ignoringOtherApps: true)
+                }
+                model.installUpdateOpener {
+                    openWindow(id: "updates"); NSApp.activate(ignoringOtherApps: true)
                 }
             }
     }
@@ -50,6 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Let SwiftUI finish its initial application/window setup first.
         DispatchQueue.main.async { AppModel.shared.restoreDockVisibility(); AppModel.shared.installGlobalShortcut() }
+        #if !SCREENSHOT_PREVIEW && !LIVE_LOG_VALIDATION
+        AppModel.shared.updates.start()
+        #endif
         #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
         let arguments = ProcessInfo.processInfo.arguments
         if let theme = arguments.firstIndex(of: "--screenshot-appearance"), arguments.indices.contains(theme + 1) {
@@ -172,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
+    let updates = AppUpdateModel()
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
@@ -237,6 +252,7 @@ final class AppModel: ObservableObject {
     private(set) var shortcutInvocationCount = 0
     #endif
     private var managerOpener: (() -> Void)?
+    private var updateOpener: (() -> Void)?
     private var pendingManagerOpen = false
     private var installedInitialManagerOpener = false
     var quitWhenFinished = false
@@ -318,6 +334,11 @@ final class AppModel: ObservableObject {
             pendingManagerOpen = false
             DispatchQueue.main.async { opener() }
         }
+    }
+    func installUpdateOpener(_ opener: @escaping () -> Void) { updateOpener = opener }
+    func showUpdateWindow(check: Bool = true) {
+        if check { updates.checkManually() }
+        updateOpener?()
     }
     func showManagerWindow() {
         if let managerOpener { managerOpener() }
@@ -1213,6 +1234,8 @@ struct MenuContent: View {
                 }.padding(.horizontal, 10).padding(.vertical, 5)
                 Divider()
             }
+            UpdateMenuEntry(updater: model.updates) { model.showUpdateWindow() }
+            Divider()
             HStack {
                 Text(model.busy || model.attachmentCount > 0 ? "\(model.activeCount) 个项目运行 · \(model.attachmentCount) 个应用监听" : "就绪")
                     .font(.caption).foregroundStyle(.secondary)

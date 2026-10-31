@@ -20,7 +20,7 @@ jobs:
       - name: Build screenshot-only app
         env:
           BUILD_SCREENSHOT_PREVIEW: '1'
-        run: bash scripts/build-app.sh
+        run: bash scripts/build-app.sh --no-publish
       - name: Capture real app window with fictional data
         run: bash scripts/capture-preview.sh
       - name: Capture main window in both themes and minimum size

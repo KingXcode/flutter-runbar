@@ -41,7 +41,7 @@ DevTools 网络请求采集的接口与独立原型验证见 [可行性分析](d
 - macOS 26 或更新版本。
 - 从源码开发或打包需 Xcode 26（Swift 6.2）或更新版本。已打包应用执行普通命令不要求安装 Xcode。项目使用 Swift 5 语言模式，UI 使用 SwiftUI，日志显示与目录选择采用 AppKit 桥接。
 - 按实际命令安装所需工具链；应用本身不要求安装 Flutter / FVM。
-- 不需要第三方 Swift 包、API 密钥、Apple Developer 证书或在线服务。
+- 不需要第三方 Swift 包或 API 密钥；普通使用不需要 Apple Developer 证书。检查更新和下载安装包会访问公开 GitHub，执行命令所需的网络由命令本身决定。
 
 ## 构建
 
@@ -50,16 +50,16 @@ DevTools 网络请求采集的接口与独立原型验证见 [可行性分析](d
 - `⌘R`：编译并运行应用，入口在系统菜单栏。
 - `⌘U`：运行 `RunbarCoreTests` 单元测试。
 - `Product > Archive`：使用 Release 配置归档，在 Organizer 查看归档和导出选项。
-- 版本号和构建号在应用 Target 的 General 中修改；证书与开发团队在 Signing & Capabilities 中配置。
+- 产品版本号在 `project.yml` 修改并重新生成工程；打包脚本的构建号取 Git 提交计数。证书与开发团队在 Signing & Capabilities 中配置。
 
-工程默认使用本机 ad hoc 签名，无需开发者账号。正式分发时需设置自己的 Team、Developer ID 签名与公证。应用需要执行用户命令和访问项目目录，因此未启用 App Sandbox。
+工程默认使用本机 ad hoc 签名，无需开发者账号。DMG 分发默认使用可用的 Developer ID 签名，不进行 Apple 公证。应用需要执行用户命令和访问项目目录，因此未启用 App Sandbox。
 
 命令行测试、打包：
 
 ```sh
 swift test
 bash scripts/test-process.sh
-bash scripts/build-app.sh
+bash scripts/build-app.sh --no-publish
 open 'dist/Runbar.app'
 ```
 
@@ -71,7 +71,7 @@ open 'dist/Runbar.app'
 ./build_macos_app.sh
 ```
 
-脚本执行 Release 构建和签名校验，同时生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`。这个入口默认只生成 `.app`；可从任何目录用脚本的绝对路径运行，或在 Runbar 中把命令设为 `./build_macos_app.sh`。
+脚本执行通用 Release 构建和签名校验，发布 GitHub Release 的 ZIP / SHA-256 附件，并生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`。发布前先写清 `CHANGELOG.md` 的「下一版本」、提交推送 main 并保持工作区干净，且 `gh` 已登录。只打本地包可加 `--no-publish`；可从任何目录用脚本绝对路径运行。
 
 首次改名安装会同时备份并移走桌面旧名 `Flutter Runbar.app`，桌面只保留新版 `Runbar.app`。应用标识和数据目录保持不变，原有配置、命令与运行记录继续使用。
 
@@ -79,9 +79,9 @@ open 'dist/Runbar.app'
 
 从 Runbar 自身执行打包时，会把桌面替换交给独立安装器，避免退出旧版时连同安装器一起停止。此时脚本会明确提示安装仍在进行，最终结果查看 `.build/logs/install-*.log` 中的「桌面安装完成」。构建日志位于 `.build/logs/package-*.log`；从终端执行时会等待桌面替换完成，失败返回非零退出码。
 
-CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
+CI 使用 `bash scripts/build-app.sh --no-publish`，只输出到 `dist/`，不发布 Release；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
 
-默认 App 构建使用本机 ad hoc 签名，只生成所在机器架构的应用。跨电脑分发可使用下面的通用 DMG 入口。
+默认 App 构建使用 ad hoc 签名，同时包含 arm64 与 x86_64。跨电脑分发优先使用下面的签名通用 DMG 入口。
 
 ### 一键生成桌面 DMG（不公证）
 
@@ -91,8 +91,8 @@ CI 继续使用 `bash scripts/build-app.sh`，只输出到 `dist/`；加 `--desk
 
 脚本生成 Apple 芯片与 Intel 双架构（`arm64 + x86_64`）的 Release 应用，制作带有 Applications 拖入入口和安装说明的 DMG。自动读取应用版本、构建号和最低系统要求；当前最低要求为 macOS 26。先校验 App / DMG 签名、两种架构及磁盘映像校验和，再输出到：
 
-- `dist/Runbar-<版本>-<构建号>-universal-signed.dmg`
-- `~/Desktop/Runbar-<版本>-<构建号>-universal-signed.dmg`
+- `dist/Runbar-<版本>-<构建号>-macOS<最低版本>-universal-signed.dmg`
+- `~/Desktop/Runbar-<版本>-<构建号>-macOS<最低版本>-universal-signed.dmg`
 - `dist/` 中同时保留 DMG 的 `.sha256` 校验文件。
 
 同名旧 DMG 先备份到 `.build/package-backups/<时间>/`，新文件完整复制后才替换，替换失败会恢复旧文件。制作 DMG 不退出正在运行的 Runbar，也不替换桌面的 `.app`。
@@ -110,11 +110,17 @@ DMG 默认选择本机唯一有效的 **Developer ID Application** 证书，同�
 ./build_macos_dmg.sh --signing-identity -
 ```
 
-DMG 流程**不公证、不上传 App / DMG**，不需要 Apple 公证账号或凭据。Developer ID 签名会请求签名时间戳。由于没有公证，在其他电脑首次安装时，系统仍可能拦截；确认包的来源后，按 [Apple 的说明](https://support.apple.com/guide/mac-help/mh40617/mac) 在「系统设置 > 隐私与安全性」中选择「仍要打开」，不要关闭系统安全功能。
+DMG 流程**不公证、不向 Apple 上传 App / DMG**，不需要 Apple 公证账号或凭据；默认将 DMG 和 SHA-256 发布到 GitHub Release，可用 `--no-publish` 跳过 GitHub 上传。Developer ID 签名会请求签名时间戳。由于没有公证，在其他电脑首次安装时，系统仍可能拦截；确认包的来源后，按 [Apple 的说明](https://support.apple.com/guide/mac-help/mh40617/mac) 在「系统设置 > 隐私与安全性」中选择「仍要打开」，不要关闭系统安全功能。
 
-底层命令 `bash scripts/build-app.sh --dmg` 只输出到 `dist/`；追加 `--desktop` 才复制到桌面。`./build_macos_app.sh --dmg` 与 DMG 桌面入口等效。原来的 App 打包入口及 CI 默认行为保持不变，预览构建不能用于制作分发 DMG。
+底层命令 `bash scripts/build-app.sh --dmg` 只输出到 `dist/`；追加 `--desktop` 才复制到桌面。`./build_macos_app.sh --dmg` 与 DMG 桌面入口等效。App / DMG 入口默认发布，CI 和预览构建显式使用 `--no-publish`；预览构建不能制作分发 DMG。
 
 `FlutterRunbar.xcodeproj`、共享 Scheme 和 `Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 执行 `xcodegen generate`。如果直接在 Xcode 修改工程设置，应同步修改 `project.yml`，避免重新生成时覆盖设置。
+
+### 应用内更新与完整发布说明
+
+从应用菜单、菜单栏面板或设置点击「检查更新」，查看当前版本、最新版本和完整更新说明。默认每天自动检查一次，失败或重启不会当天重复请求；可关闭自动检查，手动检查不受每日限制。有兼容的新版本时通过浏览器下载安装包，停止任务并退出后手动替换 App，保留原有配置与历史。
+
+每次发布先改写 [CHANGELOG.md](CHANGELOG.md) 的「下一版本」，分项写清新增、修复、使用方法及限制。新版本不能照搬上次说明；发布前核对已推送源码，先上传草稿并校验附件再公开。同一提交重复打包不会覆盖下载文件。完整流程和失败重试见 [发布与更新说明](docs/releases-and-updates.md)。
 
 ### Xcode 控制台系统日志
 

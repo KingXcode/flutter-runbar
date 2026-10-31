@@ -18,8 +18,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    MARKETING_VERSION: "0.9.0"
-    CURRENT_PROJECT_VERSION: "14"
+    MARKETING_VERSION: "0.10.0"
+    CURRENT_PROJECT_VERSION: "47"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
@@ -45,6 +45,7 @@ targets:
         CFBundleDisplayName: Runbar
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        RunbarSourceRevision: $(RUNBAR_SOURCE_REVISION)
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHighResolutionCapable: true
