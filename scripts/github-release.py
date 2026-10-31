@@ -109,6 +109,24 @@ def checksum(file):
     return digest.hexdigest()
 
 
+def release_for_tag(tag):
+    value = api(f'repos/{REPO}/releases/tags/{quote(tag, safe="")}', optional=True)
+    if value is not None:
+        return value
+    # Drafts with no existing Git tag are not returned by the tag endpoint.
+    # Authenticated release listings include them, addressed by release ID.
+    for page in range(1, 11):
+        values = api(f'repos/{REPO}/releases?per_page=100&page={page}')
+        matches = [item for item in values if item['tag_name'] == tag]
+        if len(matches) > 1:
+            raise RuntimeError('同一标签存在多个草稿，请检查后重试。')
+        if matches:
+            return matches[0]
+        if len(values) < 100:
+            return None
+    raise RuntimeError('Release 数量过多，无法确认同名草稿；未创建重复发布。')
+
+
 def publish(file, app):
     (version, build, sha, tag), text, notes_digest = preflight()
     if file.is_symlink():
@@ -130,12 +148,14 @@ def publish(file, app):
     sums = file.with_name(file.name + '.sha256')
     sums.write_text(f'{digest}  {file.name}\n')
     body = f'# Runbar {version}（{build}）\n\n{text}\n\n### 发布信息\n- 系统要求：macOS {info["LSMinimumSystemVersion"]} 或更新版本。\n- 安装包支持 Apple Silicon 与 Intel。下载文件与 SHA-256 校验文件见附件。\n- 源码提交：`{sha}`。\n- 未进行 Apple 公证，不上传到 Apple；只发布 Runbar 安装包，不包含本机项目、配置、日志或网络记录。\n\n<!-- runbar-notes-sha256:{notes_digest} -->\n'
-    existing = api(f'repos/{REPO}/releases/tags/{quote(tag, safe="")}', optional=True)
+    existing = release_for_tag(tag)
     if existing is None:
         notes_file = ROOT / '.build' / 'release-notes.md'
         notes_file.parent.mkdir(parents=True, exist_ok=True); notes_file.write_text(body)
         run('gh', 'release', 'create', tag, '--repo', REPO, '--target', sha, '--draft', '--title', f'Runbar {version}（{build}）', '--notes-file', str(notes_file))
-        existing = api(f'repos/{REPO}/releases/tags/{quote(tag, safe="")}')
+        existing = release_for_tag(tag)
+        if existing is None:
+            raise RuntimeError('草稿创建后暂不可读取，请稍后重试，未上传安装包。')
     if existing.get('prerelease'):
         raise RuntimeError('相同标签是预发布版本，未自动更改其类型。')
     if existing['draft'] and existing.get('body', '').strip() != body.strip():
@@ -158,7 +178,7 @@ def publish(file, app):
             raise RuntimeError('已有同名校验文件但缺少安装包，请检查该发布，未覆盖附件。')
         run('gh', 'release', 'upload', tag, str(file), '--repo', REPO)
         run('gh', 'release', 'upload', tag, str(sums), '--repo', REPO)
-    refreshed = api(f'repos/{REPO}/releases/tags/{quote(tag, safe="")}')
+    refreshed = api(f'repos/{REPO}/releases/{existing["id"]}')
     uploaded = {asset['name']: asset for asset in refreshed['assets']}
     if file.name not in uploaded or sums.name not in uploaded:
         raise RuntimeError('附件尚未上传完整，草稿未发布。')
