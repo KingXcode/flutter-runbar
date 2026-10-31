@@ -4,9 +4,12 @@ import CryptoKit
 public struct NetworkLimits: Sendable {
     public var responseBytes = 8 * 1024 * 1024
     public var bodyBytes = 1024 * 1024
-    public var bodyBudget = 128 * 1024 * 1024
-    public var databasePages = 8192 // 32 MiB at 4096 bytes/page; journal is transient.
-    public var requests = 50_000
+    // Disk retention is independent of RAM limits. Optional quotas remain
+    // available for explicit bounded consumers, not the default live capture.
+    public var bodyBudget: Int? = nil
+    public var databasePages: Int? = nil
+    public var requests: Int? = nil
+    public var minimumFreeDiskBytes: Int64 = 512 * 1024 * 1024
     public var batchRequests = 2000
     public var bodiesPerPoll = 8
     public init() {}

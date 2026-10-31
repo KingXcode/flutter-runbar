@@ -8,10 +8,13 @@ public final class NetworkStore {
     private var db: OpaquePointer?
     private let limits: NetworkLimits
     private let readOnly: Bool
+    private let diskSpace: NetworkDiskSpaceProvider
     private let access: NetworkCacheAccess
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    public init(directory: URL, readOnly: Bool = false, limits: NetworkLimits = NetworkLimits()) throws {
+    public init(directory: URL, readOnly: Bool = false, limits: NetworkLimits = NetworkLimits(),
+                diskSpace: @escaping NetworkDiskSpaceProvider = { NetworkDiskSpace.available(at: $0) }) throws {
         self.directory = directory; self.limits = limits; self.readOnly = readOnly
+        self.diskSpace = diskSpace
         self.access = NetworkCacheAccess.shared(for: directory)
         try acquireAccess(); defer { access.release() }
         let file = directory.appendingPathComponent("requests.sqlite")
@@ -25,9 +28,12 @@ public final class NetworkStore {
         do {
             sqlite3_extended_result_codes(db, 1)
             sqlite3_busy_timeout(db, 1000)
-            try execute("PRAGMA cache_size=-1024")
+            try execute("PRAGMA cache_size=-1024; PRAGMA mmap_size=0")
             if !readOnly {
-                try execute("PRAGMA page_size=4096; PRAGMA journal_mode=DELETE; PRAGMA max_page_count=\(max(32, limits.databasePages));")
+                try requireDiskSpace(additional: 1024 * 1024)
+                // Reset an old connection's 32 MiB ceiling to the engine limit.
+                // Page cache stays at 1 MiB; database size does not allocate RAM.
+                try execute("PRAGMA page_size=4096; PRAGMA journal_mode=DELETE; PRAGMA max_page_count=\(max(32, limits.databasePages ?? 2_147_483_646));")
                 try execute("""
                     CREATE TABLE IF NOT EXISTS requests (
                     id TEXT PRIMARY KEY, epoch TEXT NOT NULL, isolate TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -102,9 +108,19 @@ public final class NetworkStore {
     private func storageError(operation: String = "读写网络缓存", fallbackCode: Int32 = SQLITE_MISUSE) -> NetworkStorageError {
         let extended = db.map { sqlite3_extended_errcode($0) } ?? fallbackCode
         let detail = db.map { String(cString: sqlite3_errmsg($0)) } ?? "缓存连接不可用"
-        let error = NetworkStorageError(code: extended & 0xff, extendedCode: extended, operation: operation, detail: detail)
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent("requests.sqlite").path)[.size] as? NSNumber)?.int64Value
+        let error = NetworkStorageError(code: extended & 0xff, extendedCode: extended, operation: operation, detail: detail,
+            availableDiskBytes: diskSpace(directory), databaseBytes: bytes, databasePageLimit: limits.databasePages)
         if !readOnly { error.saveDiagnostic(in: directory) }
         return error
+    }
+    private func requireDiskSpace(additional: Int64) throws {
+        do {
+            try NetworkDiskSpace.requireAvailable(at: directory, reserve: limits.minimumFreeDiskBytes,
+                additional: additional, provider: diskSpace, operation: "保存网络缓存")
+        } catch let error as NetworkStorageError {
+            error.saveDiagnostic(in: directory); throw error
+        }
     }
     private func statement(_ sql: String, _ values: [String] = []) throws -> OpaquePointer {
         var result: OpaquePointer?
@@ -123,14 +139,18 @@ public final class NetworkStore {
     public func upsert(_ records: [NetworkRecord]) throws {
         try acquireAccess(); defer { access.release() }
         guard !readOnly, records.count <= limits.batchRequests else { throw RunbarError.message("单批网络请求过多，已暂停接收。") }
+        guard !records.isEmpty else { return }
+        // Leave room for the batch and its transient rollback journal before
+        // starting. Only one metadata object is encoded at a time below.
+        try requireDiskSpace(additional: Int64(records.count) * 2 * 96 * 1024 + 1024 * 1024)
         try execute("BEGIN IMMEDIATE")
         do {
-            var count = try number("SELECT count(*) FROM requests")
+            var count = limits.requests == nil ? 0 : try number("SELECT count(*) FROM requests")
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             for record in records {
                 try Task.checkCancellation()
-                let exists = try number("SELECT count(*) FROM requests WHERE id=?", [record.id]) > 0
-                guard exists || count < limits.requests else { throw RunbarError.message("网络记录已达到 \(limits.requests) 条，已暂停接收。") }
+                let exists = limits.requests == nil ? false : try number("SELECT count(*) FROM requests WHERE id=?", [record.id]) > 0
+                if let maximum = limits.requests, !exists && count >= maximum { throw RunbarError.message("网络记录已达到设置的 \(maximum) 条上限，已暂停接收。") }
                 let metadata = try encoder.encode(record)
                 guard metadata.count <= 96 * 1024 else { throw RunbarError.message("单条网络摘要过大，已暂停接收。") }
                 let stmt = try statement("""
@@ -150,7 +170,7 @@ public final class NetworkStore {
                 sqlite3_bind_int(stmt, 10, record.failure == nil ? 0 : 1)
                 _ = metadata.withUnsafeBytes { sqlite3_bind_blob(stmt, 11, $0.baseAddress, Int32(metadata.count), transient) }
                 guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
-                if !exists { count += 1 }
+                if limits.requests != nil && !exists { count += 1 }
             }
             try execute("COMMIT")
         } catch { rollback(); throw error }
@@ -320,11 +340,14 @@ public final class NetworkStore {
         guard request.count <= limits.bodyBytes, response.count <= limits.bodyBytes else {
             try markBody(id, state: .omitted, note: "请求或响应正文超过 1 MB 限制"); return
         }
-        let used = try number("SELECT value FROM cache_info WHERE key='body_bytes'")
         let added = request.count + response.count
-        guard used + added <= limits.bodyBudget else {
-            try markBody(id, state: .omitted, note: "本次运行的正文缓存已达容量上限"); return
+        if let maximum = limits.bodyBudget {
+            let used = try number("SELECT value FROM cache_info WHERE key='body_bytes'")
+            if used + added > maximum {
+                try markBody(id, state: .omitted, note: "本次运行的正文缓存已达容量上限"); return
+            }
         }
+        try requireDiskSpace(additional: Int64(added) + 1024 * 1024)
         let requestURL = bodyURL(id, response: false), responseURL = bodyURL(id, response: true)
         do {
             try request.write(to: requestURL, options: .atomic)

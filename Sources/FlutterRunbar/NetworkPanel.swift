@@ -309,9 +309,9 @@ struct NetworkPanel: View {
                 Button("最新") { data.latest() }.disabled(data.window.matching == 0)
                     .accessibilityLabel("最新的网络请求")
             }.font(.caption).foregroundStyle(.secondary)
-            Text("完整列表按需读取 · 每个请求 / 响应正文最多 1 MB")
+            Text("完整列表按需读取 · 磁盘自动增长 · 每个请求 / 响应正文最多 1 MB")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help("每次运行：最多 50,000 条摘要、数据库 32 MB、正文合计 128 MB。单次服务返回最多 8 MB。超限会标记或暂停接收，已缓存内容保留。支持 Dart VM 的 HTTP / HTTPS 扩展；WebView、Web 和 WebSocket 不在本版范围。")
+                .help("请求摘要和正文按需保存在磁盘，不再受固定 32 MB、50,000 条或 128 MB 总量限制。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。支持 Dart VM 的 HTTP / HTTPS 扩展；WebView、Web 和 WebSocket 不在本版范围。")
         }.controlSize(.small)
             .task(id: session.id) { data.configure(directory: monitor.directory(session.id), sessionID: session.id) }
             .onChange(of: monitor.revision) { _, _ in data.refresh() }

@@ -965,3 +965,78 @@ final class NetworkFilterPreferencesTests: XCTestCase {
         XCTAssertTrue(try NetworkFilterPreferences.load(Data("{}".utf8)).query.isEmpty)
     }
 }
+
+private final class NetworkDiskFixture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: Int64?
+    init(_ bytes: Int64?) { self.bytes = bytes }
+    func set(_ bytes: Int64?) { lock.lock(); defer { lock.unlock() }; self.bytes = bytes }
+    func available(_ directory: URL) -> Int64? { lock.lock(); defer { lock.unlock() }; return bytes }
+}
+
+final class NetworkDiskCapacityTests: XCTestCase {
+    func testExistingCappedDatabaseCanGrowAfterReopeningWithDefaultsWithoutDataLoss() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var oldLimits = NetworkLimits(); oldLimits.databasePages = 32
+        let original = try NetworkStore(directory: root, limits: oldLimits)
+        let first = try sampleRecord("existing")
+        try original.upsert([first])
+        let batch = try (0..<100).map { number -> NetworkRecord in
+            var record = try sampleRecord("new-\(number)")
+            record.requestHeaders = String(repeating: "x", count: 4096)
+            return record
+        }
+        XCTAssertThrowsError(try original.upsert(batch)) { error in
+            XCTAssertEqual((error as? NetworkStorageError)?.code, SQLITE_FULL)
+            XCTAssertEqual((error as? NetworkStorageError)?.databasePageLimit, 32)
+        }
+        XCTAssertEqual(try original.page().total, 1)
+        original.close()
+        let upgraded = try NetworkStore(directory: root); defer { upgraded.close() }
+        try upgraded.upsert(batch)
+        XCTAssertEqual(try upgraded.page().total, 101)
+        XCTAssertEqual(try upgraded.request(first.id)?.url, first.url)
+        let size = try XCTUnwrap(try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("requests.sqlite").path)[.size] as? NSNumber)
+        XCTAssertGreaterThan(size.intValue, 32 * 4096)
+    }
+    func testActualDiskReservePausesBeforeBatchAndCanResumeAfterSpaceReturns() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = NetworkDiskFixture(8 * 1024 * 1024 * 1024)
+        let store = try NetworkStore(directory: root, diskSpace: { disk.available($0) }); defer { store.close() }
+        let first = try sampleRecord("first"), second = try sampleRecord("later")
+        try store.upsert([first])
+        disk.set(100 * 1024 * 1024)
+        XCTAssertThrowsError(try store.upsert([second])) { error in
+            let failure = error as? NetworkStorageError
+            XCTAssertTrue(failure?.spaceProtection == true)
+            XCTAssertNil(failure?.code) // This guard did not get a SQLite FULL result.
+            XCTAssertFalse(failure?.isTransient ?? true)
+            XCTAssertNil(NetworkStorageRetry.delay(for: error, failure: 1))
+            XCTAssertEqual(failure?.availableDiskBytes, 100 * 1024 * 1024)
+        }
+        XCTAssertEqual(try store.page().total, 1)
+        let diagnostic = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("last-error.json"))) as? [String: Any]
+        XCTAssertEqual(diagnostic?["spaceProtection"] as? Bool, true)
+        XCTAssertEqual(diagnostic?["availableDiskBytes"] as? Int64, 100 * 1024 * 1024)
+        let reader = try NetworkStore(directory: root, readOnly: true, diskSpace: { disk.available($0) })
+        XCTAssertEqual(try reader.page().total, 1); reader.close()
+        disk.set(8 * 1024 * 1024 * 1024)
+        try store.upsert([second]); XCTAssertEqual(try store.page().total, 2)
+    }
+    func testBodyDiskCheckPreservesPendingStateAndCanRecover() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = NetworkDiskFixture(8 * 1024 * 1024 * 1024)
+        let store = try NetworkStore(directory: root, diskSpace: { disk.available($0) }); defer { store.close() }
+        let record = try sampleRecord("body")
+        try store.upsert([record])
+        disk.set(0)
+        XCTAssertThrowsError(try store.saveBodies(record.id, request: Data("{}".utf8), response: Data("{}".utf8)))
+        XCTAssertEqual(try store.request(record.id)?.bodyState, .pending)
+        disk.set(nil) // Unknown capacity must not be misreported as no free space.
+        try store.saveBodies(record.id, request: Data("{}".utf8), response: Data("{}".utf8))
+        XCTAssertEqual(try store.request(record.id)?.bodyState, .saved)
+    }
+}

@@ -114,7 +114,7 @@ struct NetworkContentMatcher {
 
 /// A private, automatically deleted SQLite temporary database stores *only*
 /// matching IDs and sort keys. No full body or unbounded match array is retained.
-/// Its page cache is 256 KiB and its file is capped at 16 MiB.
+/// Its page cache is 256 KiB; the file grows on disk while disk reserve permits.
 final class NetworkContentIndex {
     let directory: URL
     let query: NetworkQuery
@@ -141,7 +141,9 @@ final class NetworkContentIndex {
             throw RunbarError.message("无法创建网络筛选临时索引。")
         }
         do {
-            try execute("PRAGMA page_size=4096; PRAGMA cache_size=-256; PRAGMA temp_store=FILE; PRAGMA mmap_size=0; PRAGMA max_page_count=4096; PRAGMA synchronous=OFF;")
+            try NetworkDiskSpace.requireAvailable(at: FileManager.default.temporaryDirectory, reserve: NetworkLimits().minimumFreeDiskBytes,
+                additional: 1024 * 1024, operation: "创建网络筛选索引")
+            try execute("PRAGMA page_size=4096; PRAGMA cache_size=-256; PRAGMA temp_store=FILE; PRAGMA mmap_size=0; PRAGMA max_page_count=2147483646; PRAGMA synchronous=OFF;")
             try execute("CREATE TABLE matches(id TEXT PRIMARY KEY,started INTEGER NOT NULL) WITHOUT ROWID; CREATE INDEX matches_started ON matches(started,id DESC);")
         } catch { close(); throw error }
     }
@@ -161,6 +163,8 @@ final class NetworkContentIndex {
     }
     func apply(_ candidates: [(NetworkSearchCandidate, Bool)]) throws {
         guard !candidates.isEmpty else { return }
+        try NetworkDiskSpace.requireAvailable(at: FileManager.default.temporaryDirectory, reserve: NetworkLimits().minimumFreeDiskBytes,
+            additional: Int64(candidates.count) * 2048 + 256 * 1024, operation: "写入网络筛选索引")
         try execute("BEGIN")
         do {
             for (candidate, matches) in candidates {

@@ -8,20 +8,31 @@ public struct NetworkStorageError: LocalizedError, Sendable {
     public let extendedCode: Int32?
     public let operation: String
     public let detail: String
-    public var isTransient: Bool { code == nil || code == SQLITE_BUSY || code == SQLITE_LOCKED }
+    public let spaceProtection: Bool
+    public let availableDiskBytes: Int64?
+    public let requiredDiskBytes: Int64?
+    public let databaseBytes: Int64?
+    public let databasePageLimit: Int?
+    public var isTransient: Bool { !spaceProtection && (code == nil || code == SQLITE_BUSY || code == SQLITE_LOCKED) }
 
-    init(code: Int32?, extendedCode: Int32?, operation: String, detail: String) {
+    init(code: Int32?, extendedCode: Int32?, operation: String, detail: String,
+         spaceProtection: Bool = false, availableDiskBytes: Int64? = nil, requiredDiskBytes: Int64? = nil,
+         databaseBytes: Int64? = nil, databasePageLimit: Int? = nil) {
         self.code = code; self.extendedCode = extendedCode; self.operation = operation
         self.detail = String(detail.prefix(400))
+        self.spaceProtection = spaceProtection; self.availableDiskBytes = availableDiskBytes
+        self.requiredDiskBytes = requiredDiskBytes; self.databaseBytes = databaseBytes; self.databasePageLimit = databasePageLimit
     }
     static var accessTimeout: Self {
         Self(code: nil, extendedCode: nil, operation: "等待缓存读写", detail: "同一缓存的其他操作尚未完成")
     }
     public var errorDescription: String? {
+        if spaceProtection { return "网络缓存磁盘余量不足，已暂停写入：\(detail)" }
         let message: String
         switch code {
         case nil, SQLITE_BUSY, SQLITE_LOCKED: message = "网络缓存暂时被占用"
-        case SQLITE_FULL: message = "网络缓存空间不足或已达容量上限"
+        case SQLITE_FULL:
+            message = databasePageLimit.map { "网络数据库无法继续分配空间（配置上限 \($0) 页）" } ?? "磁盘或文件系统无法继续分配网络缓存空间"
         case SQLITE_READONLY: message = "网络缓存处于只读状态，无法保存"
         case SQLITE_PERM, SQLITE_AUTH: message = "没有网络缓存的访问权限"
         case SQLITE_CANTOPEN: message = "无法打开网络缓存，请检查缓存目录和访问权限"
@@ -39,6 +50,11 @@ public struct NetworkStorageError: LocalizedError, Sendable {
         var value: [String: Any] = ["time": Date().timeIntervalSince1970, "operation": operation, "detail": detail]
         if let code { value["code"] = code }
         if let extendedCode { value["extendedCode"] = extendedCode }
+        if spaceProtection { value["spaceProtection"] = true }
+        if let availableDiskBytes { value["availableDiskBytes"] = availableDiskBytes }
+        if let requiredDiskBytes { value["requiredDiskBytes"] = requiredDiskBytes }
+        if let databaseBytes { value["databaseBytes"] = databaseBytes }
+        if let databasePageLimit { value["databasePageLimit"] = databasePageLimit }
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), data.count <= 4096 else { return }
         let file = directory.appendingPathComponent("last-error.json")
         do {
