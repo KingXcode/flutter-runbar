@@ -7,6 +7,7 @@ private final class NetworkPanelModel: ObservableObject {
     typealias Detail = NetworkDetailSection
     @Published var query = NetworkQuery() { didSet {
         guard !query.hasSameConditions(as: oldValue) else { return }
+        scheduleFilterSave()
         clearSelection(); window = .empty; visibleRow = 0; countsDirty = true
         scrollRevision += 1; refresh(delay: true)
     } }
@@ -37,6 +38,11 @@ private final class NetworkPanelModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var loading = false
     @Published private(set) var queryLoading = false
+    @Published private(set) var filterPreferences = NetworkFilterPreferences()
+    @Published private(set) var filterSaveError: String?
+    private static let filterPreferencesKey = "networkFilterPreferences"
+    private var filterSaveTask: Task<Void, Never>?
+    private var filtersDirty = false
     private let reader = NetworkCacheReader()
     private var directory: URL?
     private var sessionID: UUID?
@@ -47,6 +53,55 @@ private final class NetworkPanelModel: ObservableObject {
     private var selectionTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
     private var searchRefreshTask: Task<Void, Never>?
+    init() {
+        guard let bytes = UserDefaults.standard.data(forKey: Self.filterPreferencesKey) else { return }
+        do {
+            let saved = try NetworkFilterPreferences.load(bytes)
+            filterPreferences = saved; query = saved.query
+        } catch { filterSaveError = "无法读取已保存的网络筛选：\(error.localizedDescription)" }
+    }
+    private func scheduleFilterSave() {
+        filtersDirty = true; filterSaveTask?.cancel()
+        filterSaveTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            self?.savePendingFilters()
+        }
+    }
+    private func writeFilters(_ preferences: NetworkFilterPreferences) throws {
+        let bytes = try preferences.data()
+        UserDefaults.standard.set(bytes, forKey: Self.filterPreferencesKey)
+        filterPreferences = preferences; filterSaveError = nil; filtersDirty = false
+    }
+    private func savePendingFilters() {
+        guard filtersDirty else { return }
+        do {
+            var next = filterPreferences; try next.remember(query)
+            try writeFilters(next)
+        } catch { filterSaveError = "网络筛选未保存：\(error.localizedDescription)" }
+    }
+    func saveFilterPreset(_ name: String) -> Bool {
+        do {
+            var next = filterPreferences; try next.savePreset(name: name, query: query)
+            try writeFilters(next); query = next.query
+            return true
+        } catch { filterSaveError = error.localizedDescription; return false }
+    }
+    func useFilterPreset(_ id: UUID) -> Bool {
+        do {
+            var next = filterPreferences; try next.usePreset(id)
+            try writeFilters(next); query = next.query
+            return true
+        } catch { filterSaveError = error.localizedDescription; return false }
+    }
+    func removeFilterPreset(_ id: UUID) {
+        do {
+            var next = filterPreferences; next.removePreset(id)
+            try writeFilters(next)
+            // Deleting a saved scheme leaves the live filter untouched, including
+            // any edits that have not reached the debounced auto-save yet.
+            scheduleFilterSave()
+        } catch { filterSaveError = error.localizedDescription }
+    }
     func configure(directory: URL?, sessionID: UUID) {
         if self.sessionID != sessionID {
             stop(); clearSelection(); window = .empty; visibleRow = 0; requestedRow = nil
@@ -175,6 +230,7 @@ private final class NetworkPanelModel: ObservableObject {
         }
     }
     func stop() {
+        filterSaveTask?.cancel(); filterSaveTask = nil; savePendingFilters()
         windowTask?.cancel(); selectionTask?.cancel(); detailTask?.cancel(); searchRefreshTask?.cancel()
         let directory = directory
         Task { await reader.cancelContentSearch(directory: directory) }
@@ -188,6 +244,8 @@ struct NetworkPanel: View {
     @StateObject private var data = NetworkPanelModel()
     @State private var confirmingClear = false
     @State private var showingFieldFilters = false
+    @State private var showingFilterPresets = false
+    @State private var filterPresetName = ""
     @State private var jsonSource = NetworkJSONCondition.Source.response
     @State private var jsonPath = ""
     @State private var jsonOperation = NetworkJSONCondition.Operation.equals
@@ -226,13 +284,14 @@ struct NetworkPanel: View {
                 }
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) { contentSearch; fieldFiltersButton; methodFilter; statusFilter }
+                HStack(spacing: 6) { contentSearch; fieldFiltersButton; filterPresetsButton; methodFilter; statusFilter }
                 VStack(spacing: 5) {
-                    HStack(spacing: 6) { contentSearch; fieldFiltersButton }
+                    HStack(spacing: 6) { contentSearch; fieldFiltersButton; filterPresetsButton }
                     HStack(spacing: 6) { methodFilter; statusFilter; Spacer(minLength: 0) }
                 }
             }
             if let error = data.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
+            if let error = data.filterSaveError { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             GeometryReader { geometry in
                 if geometry.size.width >= 800 {
                     HSplitView { requests.frame(minWidth: 380); details.frame(minWidth: 300) }
@@ -298,7 +357,7 @@ struct NetworkPanel: View {
                     HStack {
                         Text("网络筛选").font(.headline)
                         Spacer()
-                        Button("清空", action: data.clearFieldFilters).disabled(data.query.fieldFilterCount == 0)
+                        Button("清空字段", action: data.clearFieldFilters).disabled(data.query.fieldFilterCount == 0)
                     }
                     HStack {
                         Text("每组包含词")
@@ -323,6 +382,58 @@ struct NetworkPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(16).frame(width: 550).controlSize(.small)
             }
+    }
+    private var filterPresetsButton: some View {
+        Button("方案", systemImage: "bookmark") { showingFilterPresets.toggle() }
+            .fixedSize().accessibilityLabel("网络筛选方案")
+            .help("当前网络筛选自动记住；保存命名方案，下次一键使用")
+            .popover(isPresented: $showingFilterPresets, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("网络筛选方案").font(.headline)
+                        Spacer()
+                        Button("重置当前筛选") { data.query = NetworkQuery() }.disabled(data.query.isEmpty)
+                    }
+                    Text("当前条件自动记住。点击方案替换当前条件；重置不删除方案。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if data.filterPreferences.presets.isEmpty {
+                        Text("还没有方案，输入名称保存当前条件即可。")
+                            .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 5) {
+                                ForEach(data.filterPreferences.presets) { preset in
+                                    HStack {
+                                        Button {
+                                            if data.useFilterPreset(preset.id) { showingFilterPresets = false }
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: data.query.hasSameConditions(as: preset.query) ? "checkmark.circle.fill" : "circle")
+                                                Text(preset.name).lineLimit(1)
+                                                Spacer()
+                                            }.contentShape(Rectangle())
+                                        }.buttonStyle(.plain).help("使用 \(preset.name)，替换当前网络筛选")
+                                        Button { data.removeFilterPreset(preset.id) } label: { Image(systemName: "trash") }
+                                            .buttonStyle(.borderless).accessibilityLabel("删除网络筛选方案 \(preset.name)")
+                                    }.padding(.vertical, 4)
+                                }
+                            }
+                        }.frame(height: min(210, CGFloat(data.filterPreferences.presets.count) * 32))
+                    }
+                    Divider()
+                    HStack {
+                        TextField("方案名称", text: $filterPresetName).textFieldStyle(.roundedBorder).onSubmit(saveFilterPreset)
+                        Button("保存", action: saveFilterPreset)
+                            .disabled(filterPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text("保存包含 / 排除词、JSON 条件、方法和状态；同名保存会更新原方案。所有项目与关联 App 均可复用。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let error = data.filterSaveError { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+                }.padding(16).frame(width: 390).controlSize(.small)
+            }
+    }
+    private func saveFilterPreset() {
+        if data.saveFilterPreset(filterPresetName) { filterPresetName = "" }
     }
     private func keywordRow(_ title: String, scope: NetworkKeywordScope, placeholder: String) -> some View {
         HStack(alignment: .top, spacing: 10) {

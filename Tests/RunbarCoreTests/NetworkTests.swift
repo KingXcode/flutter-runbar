@@ -873,3 +873,95 @@ final class NetworkAdvancedFilterTests: XCTestCase {
         XCTAssertEqual(after.rows.map(\.id), [a.id])
     }
 }
+
+final class NetworkFilterPreferencesTests: XCTestCase {
+    private func sampleQuery() -> NetworkQuery {
+        var query = NetworkQuery()
+        query.search = "accepted, hello world"
+        query.urlKeywords = ["/orders"]
+        query.headerKeywords = ["application/json"]
+        query.requestBody = "symbol,alpha"
+        query.responseBody = "state,ready"
+        for scope in NetworkKeywordScope.allCases {
+            query.setDraft("heartbeat,ping", in: scope, excluding: true)
+        }
+        query.keywordMode = .any; query.method = "POST"; query.status = .success
+        query.jsonConditions = [NetworkJSONCondition(path: "reqtype", value: "1"),
+                                NetworkJSONCondition(path: "data.connectionid", value: "1", isExclusion: true)]
+        return query
+    }
+    func testRestartRoundTripRestoresEveryScopePolarityAndJSONRule() throws {
+        let query = sampleQuery()
+        var preferences = NetworkFilterPreferences()
+        try preferences.remember(query)
+        try preferences.savePreset(name: "常用网络请求", query: query)
+        let restored = try NetworkFilterPreferences.load(preferences.data())
+        XCTAssertTrue(restored.query.hasSameConditions(as: query))
+        XCTAssertEqual(restored.presets, preferences.presets)
+        XCTAssertEqual(restored.query.jsonConditions, query.jsonConditions)
+        XCTAssertEqual(restored.query.method, "POST"); XCTAssertEqual(restored.query.status, .success)
+        for scope in NetworkKeywordScope.allCases {
+            XCTAssertEqual(restored.query.draft(in: scope), "")
+            XCTAssertEqual(restored.query.draft(in: scope, excluding: true), "")
+            XCTAssertEqual(restored.query.keywords(in: scope, excluding: true), ["heartbeat", "ping"])
+        }
+        XCTAssertEqual(restored.query.globalKeywords, ["accepted", "hello world"])
+        XCTAssertEqual(restored.query.requestKeywords, ["symbol", "alpha"])
+    }
+    func testReplacingANameKeepsIdentityAndRemovingItKeepsLiveQuery() throws {
+        var preferences = NetworkFilterPreferences()
+        try preferences.savePreset(name: " API ", query: sampleQuery())
+        let id = try XCTUnwrap(preferences.presets.first?.id)
+        var changed = NetworkQuery(); changed.urlKeywords = ["/quotes"]; changed.status = .serverError
+        try preferences.savePreset(name: "api", query: changed)
+        XCTAssertEqual(preferences.presets.count, 1)
+        XCTAssertEqual(preferences.presets.first?.id, id)
+        try preferences.remember(sampleQuery())
+        try preferences.usePreset(id)
+        XCTAssertTrue(preferences.query.hasSameConditions(as: changed))
+        preferences.removePreset(id)
+        XCTAssertTrue(preferences.presets.isEmpty)
+        XCTAssertTrue(preferences.query.hasSameConditions(as: changed))
+        XCTAssertThrowsError(try preferences.usePreset(id))
+    }
+    func testResetCurrentQueryDoesNotEraseSavedSchemes() throws {
+        var preferences = NetworkFilterPreferences()
+        try preferences.savePreset(name: "Keep", query: sampleQuery())
+        let id = try XCTUnwrap(preferences.presets.first?.id)
+        try preferences.remember(NetworkQuery())
+        let restored = try NetworkFilterPreferences.load(preferences.data())
+        XCTAssertTrue(restored.query.isEmpty)
+        XCTAssertEqual(restored.presets.first?.id, id)
+    }
+    func testInvalidNamesConditionsAndExcessiveSchemeCountsDoNotMutatePreferences() throws {
+        var preferences = NetworkFilterPreferences()
+        for number in 0..<32 { try preferences.savePreset(name: "方案\(number)", query: NetworkQuery()) }
+        let original = preferences
+        XCTAssertThrowsError(try preferences.savePreset(name: "额外", query: sampleQuery()))
+        XCTAssertEqual(preferences, original)
+        XCTAssertThrowsError(try preferences.savePreset(name: " ", query: sampleQuery()))
+        XCTAssertThrowsError(try preferences.savePreset(name: String(repeating: "a", count: 81), query: sampleQuery()))
+        var invalid = NetworkQuery(); invalid.search = (0..<17).map { "term\($0)" }.joined(separator: ",")
+        XCTAssertThrowsError(try preferences.savePreset(name: "方案0", query: invalid))
+        invalid = NetworkQuery(); invalid.jsonConditions = [NetworkJSONCondition(path: "data.", value: "1")]
+        XCTAssertThrowsError(try preferences.remember(invalid))
+        XCTAssertEqual(preferences, original)
+        try preferences.savePreset(name: "方案0", query: sampleQuery())
+        XCTAssertEqual(preferences.presets.count, 32)
+    }
+    func testPreferenceByteBudgetIsEnforcedWithoutDroppingExistingSchemes() throws {
+        var query = NetworkQuery()
+        let words = (0..<16).map { String(repeating: "🚀", count: 700) + String(format: "%02d", $0) }
+        for scope in NetworkKeywordScope.allCases {
+            query.setKeywords(words, in: scope); query.setKeywords(words, in: scope, excluding: true)
+        }
+        var preferences = NetworkFilterPreferences()
+        try preferences.savePreset(name: "Large", query: query)
+        let original = preferences
+        XCTAssertThrowsError(try preferences.savePreset(name: "Second", query: query))
+        XCTAssertEqual(preferences, original)
+        XCTAssertThrowsError(try NetworkFilterPreferences.load(Data(repeating: 32, count: NetworkFilterPreferences.byteLimit + 1)))
+        XCTAssertThrowsError(try NetworkFilterPreferences.load(Data(#"{"version":2}"#.utf8)))
+        XCTAssertTrue(try NetworkFilterPreferences.load(Data("{}".utf8)).query.isEmpty)
+    }
+}

@@ -1,9 +1,9 @@
 import Foundation
 
-public enum NetworkKeywordScope: CaseIterable, Hashable, Sendable {
+public enum NetworkKeywordScope: String, Codable, CaseIterable, Hashable, Sendable {
     case everywhere, url, headers, request, response
 }
-public enum NetworkKeywordMode: String, CaseIterable, Sendable {
+public enum NetworkKeywordMode: String, Codable, CaseIterable, Sendable {
     case all, any
     public var title: String { self == .all ? "全部满足" : "满足任一" }
     var sqlJoin: String { self == .all ? " AND " : " OR " }

@@ -84,7 +84,7 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
 }
 
 public struct NetworkQuery: Equatable, Sendable {
-    public enum Status: String, CaseIterable, Sendable { case all, pending, success, redirect, clientError, serverError, failed }
+    public enum Status: String, Codable, CaseIterable, Sendable { case all, pending, success, redirect, clientError, serverError, failed }
     public var text = ""
     public var search = ""
     public var headers = ""
@@ -123,7 +123,7 @@ public struct NetworkQuery: Equatable, Sendable {
         if excluding { exclusionDrafts[scope] = value.isEmpty ? nil : value; return }
         switch scope { case .everywhere: search = value; case .url: text = value; case .headers: headers = value; case .request: requestBody = value; case .response: responseBody = value }
     }
-    private mutating func setKeywords(_ words: [String], in scope: NetworkKeywordScope, excluding: Bool = false) {
+    mutating func setKeywords(_ words: [String], in scope: NetworkKeywordScope, excluding: Bool = false) {
         if excluding { exclusionWords[scope] = words.isEmpty ? nil : words; return }
         switch scope { case .everywhere: globalKeywords = words; case .url: urlKeywords = words; case .headers: headerKeywords = words; case .request: requestKeywords = words; case .response: responseKeywords = words }
     }

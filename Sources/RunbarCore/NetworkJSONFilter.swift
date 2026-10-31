@@ -1,12 +1,12 @@
 import Foundation
 import CoreFoundation
 
-public struct NetworkJSONCondition: Identifiable, Equatable, Sendable {
-    public enum Source: String, CaseIterable, Sendable {
+public struct NetworkJSONCondition: Codable, Identifiable, Equatable, Sendable {
+    public enum Source: String, Codable, CaseIterable, Sendable {
         case request, response
         public var title: String { self == .request ? "请求 JSON" : "响应 JSON" }
     }
-    public enum Operation: String, CaseIterable, Sendable {
+    public enum Operation: String, Codable, CaseIterable, Sendable {
         case equals, notEquals, contains, notContains, exists, notExists
         public var title: String {
             switch self {
