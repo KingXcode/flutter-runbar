@@ -67,10 +67,15 @@ public final class SessionStore {
     }
     public func sessions() throws -> [RunSession] {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        let urls = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("sessions"), includingPropertiesForKeys: nil)
+        let urls = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("sessions"),
+                                                             includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)
         warnings = []
         return urls.compactMap { url -> RunSession? in
-            do { return try decoder.decode(RunSession.self, from: Data(contentsOf: url.appendingPathComponent("session.json"))) }
+            do {
+                // Finder metadata and loose files are not session directories.
+                guard try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { return nil }
+                return try decoder.decode(RunSession.self, from: Data(contentsOf: url.appendingPathComponent("session.json")))
+            }
             catch { warnings.append("已跳过损坏的历史记录：\(url.lastPathComponent)。原文件保留供恢复。"); return nil }
         }.sorted { $0.startedAt > $1.startedAt }
     }

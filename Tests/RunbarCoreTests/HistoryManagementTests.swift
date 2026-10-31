@@ -14,6 +14,28 @@ final class HistoryManagementTests: XCTestCase {
         try Data(value.id.uuidString.utf8).write(to: store.directory(value.id).appendingPathComponent("output.raw"))
         return value
     }
+    func testRepeatedHistoryLoadsIgnoreMetadataAndLooseFilesWithoutRemovingThem() throws {
+        let root = try fixture(), store = try SessionStore(root: root)
+        let session = try record(store)
+        let sessions = root.appendingPathComponent("sessions")
+        let finderFile = sessions.appendingPathComponent(".DS_Store")
+        let looseFile = sessions.appendingPathComponent("notes.txt")
+        let hiddenFolder = sessions.appendingPathComponent(".metadata")
+        try Data("Finder metadata".utf8).write(to: finderFile)
+        try Data("not a session".utf8).write(to: looseFile)
+        try FileManager.default.createDirectory(at: hiddenFolder, withIntermediateDirectories: false)
+        for _ in 0..<2 {
+            let reopened = try SessionStore(root: root)
+            try reopened.recoverInterrupted()
+            XCTAssertTrue(reopened.warnings.isEmpty)
+            XCTAssertEqual(try reopened.sessions().map(\.id), [session.id])
+            XCTAssertTrue(reopened.warnings.isEmpty)
+        }
+        XCTAssertEqual(try Data(contentsOf: finderFile), Data("Finder metadata".utf8))
+        XCTAssertEqual(try Data(contentsOf: looseFile), Data("not a session".utf8))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hiddenFolder.path))
+        XCTAssertEqual(try Data(contentsOf: store.outputFile(for: session.id)), Data(session.id.uuidString.utf8))
+    }
     func testSingleToggleAndCommandMultiSelectionPreserveFocus() {
         let a = UUID(), b = UUID(), c = UUID(); let visible = [a, b, c]
         var selection = HistorySelection()
