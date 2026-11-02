@@ -61,12 +61,21 @@ final class MCPLocalServer {
         listener?.stateUpdateHandler = nil; listener?.newConnectionHandler = nil
         listener?.cancel(); listener = nil
         let pending = startup; startup = nil; pending?.resume(throwing: CancellationError())
-        for client in clients.values { client.timer?.cancel(); client.work?.cancel(); client.connection.cancel() }
+        for client in clients.values {
+            client.timer?.cancel(); client.work?.cancel()
+            client.connection.stateUpdateHandler = nil; client.connection.cancel()
+        }
         clients.removeAll(); token = ""; handler = nil; onTool = nil; onFailure = nil
     }
     private func accept(_ connection: NWConnection) {
         guard clients.count < 8, listener != nil else { connection.cancel(); return }
         let id = UUID(), client = Client(connection); clients[id] = client
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed, .cancelled: Task { @MainActor in self?.end(id) }
+            default: break
+            }
+        }
         connection.start(queue: .main)
         client.timer = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(10)) } catch { return }
@@ -76,7 +85,8 @@ final class MCPLocalServer {
     }
     private func end(_ id: UUID) {
         guard let client = clients.removeValue(forKey: id) else { return }
-        client.timer?.cancel(); client.work?.cancel(); client.connection.cancel()
+        client.timer?.cancel(); client.work?.cancel()
+        client.connection.stateUpdateHandler = nil; client.connection.cancel()
     }
     private func receive(id: UUID, buffer: Data) {
         guard let client = clients[id] else { return }

@@ -9,6 +9,7 @@ public final class NetworkStore {
     private let limits: NetworkLimits
     private let readOnly: Bool
     private let readDeadline: TimeInterval?
+    private var hasSummaryTiming = false
     private let diskSpace: NetworkDiskSpaceProvider
     private let access: NetworkCacheAccess
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -48,13 +49,18 @@ public final class NetworkStore {
                     id TEXT PRIMARY KEY, epoch TEXT NOT NULL, isolate TEXT NOT NULL, request_id TEXT NOT NULL,
                     started INTEGER NOT NULL, ended INTEGER, method TEXT NOT NULL, url TEXT NOT NULL,
                     status INTEGER, failed INTEGER NOT NULL, metadata BLOB NOT NULL,
-                    body_state TEXT NOT NULL DEFAULT 'pending', body_note TEXT NOT NULL DEFAULT '');
+                    body_state TEXT NOT NULL DEFAULT 'pending', body_note TEXT NOT NULL DEFAULT '', timing_version INTEGER);
                     CREATE INDEX IF NOT EXISTS requests_started ON requests(started DESC,id);
                     CREATE INDEX IF NOT EXISTS requests_pending ON requests(epoch,isolate,body_state,ended);
                     CREATE TABLE IF NOT EXISTS cache_info (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
                     INSERT OR IGNORE INTO cache_info VALUES ('body_bytes',0);
                     """)
                 try installSearchRevision()
+                if try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name='timing_version'") == 0 {
+                    // No eager metadata backfill on large caches. Older rows
+                    // retain a bounded, read-only timing fallback when viewed.
+                    try execute("ALTER TABLE requests ADD COLUMN timing_version INTEGER")
+                }
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
                 // Recover an interrupted body save. No partial file is labelled saved.
                 try execute("UPDATE requests SET body_state='unavailable',body_note='上次采集已断开，正文未缓存' WHERE body_state='pending'")
@@ -67,6 +73,7 @@ public final class NetworkStore {
                 }
                 try execute("UPDATE cache_info SET value=\(bytes) WHERE key='body_bytes'")
             }
+            hasSummaryTiming = try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name='timing_version'") == 1
         } catch { close(); throw error }
     }
     public func close() {
@@ -173,10 +180,10 @@ public final class NetworkStore {
                 let metadata = try encoder.encode(record)
                 guard metadata.count <= 96 * 1024 else { throw RunbarError.message("单条网络摘要过大，已暂停接收。") }
                 let stmt = try statement("""
-                    INSERT INTO requests(id,epoch,isolate,request_id,started,ended,method,url,status,failed,metadata)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                    INSERT INTO requests(id,epoch,isolate,request_id,started,ended,method,url,status,failed,metadata,timing_version)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                     started=excluded.started,method=excluded.method,url=excluded.url,
-                    ended=excluded.ended,status=excluded.status,failed=excluded.failed,metadata=excluded.metadata
+                    ended=excluded.ended,status=excluded.status,failed=excluded.failed,metadata=excluded.metadata,timing_version=excluded.timing_version
                     """)
                 defer { sqlite3_finalize(stmt) }
                 for (index, value) in [record.id, record.epoch, record.isolateID, record.requestID].enumerated() {
@@ -188,6 +195,7 @@ public final class NetworkStore {
                 if let status = record.status { sqlite3_bind_int(stmt, 9, Int32(clamping: status)) }
                 sqlite3_bind_int(stmt, 10, record.failure == nil ? 0 : 1)
                 _ = metadata.withUnsafeBytes { sqlite3_bind_blob(stmt, 11, $0.baseAddress, Int32(metadata.count), transient) }
+                sqlite3_bind_int(stmt, 12, Int32(clamping: record.timingVersion ?? 0))
                 guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
                 if limits.requests != nil && !exists { count += 1 }
             }
@@ -258,16 +266,21 @@ public final class NetworkStore {
     }
     public func listWindow(query: NetworkQuery = NetworkQuery(), around row: Int, counts: NetworkListCounts? = nil) throws -> NetworkListWindow {
         try acquireAccess(); defer { access.release() }
+        let mayReadFromTail = counts == nil
         let counts = try counts ?? listCounts(query: query)
         let anchor = min(max(0, row), max(0, counts.matching - 1))
         let offset = min(max(0, anchor - NetworkListWindow.capacity / 2), max(0, counts.matching - NetworkListWindow.capacity))
         let (predicate, values) = try predicate(for: query)
+        let limit = min(NetworkListWindow.capacity, max(0, counts.matching - offset))
+        let reverseOffset = max(0, counts.matching - offset - limit)
+        let reversed = mayReadFromTail && reverseOffset < offset
+        let order = reversed ? "started DESC,id ASC" : "started ASC,id DESC"
         // This is the reverse of requests_started(started DESC,id ASC), so the
         // old database index also supports chronological virtual access. Equal
         // timestamps use a stable ID order across windows and point selection.
         let stmt = try statement("""
-            SELECT id,method,url,started,ended,status,failed,json_extract(CAST(metadata AS TEXT),'$.timingVersion')
-            FROM requests WHERE \(predicate) ORDER BY started ASC,id DESC LIMIT \(NetworkListWindow.capacity) OFFSET \(offset)
+            SELECT id,method,url,started,ended,status,failed,\(summaryTiming)
+            FROM requests WHERE \(predicate) ORDER BY \(order) LIMIT \(limit) OFFSET \(reversed ? reverseOffset : offset)
             """, values)
         defer { sqlite3_finalize(stmt) }
         var rows: [NetworkRequestSummary] = []
@@ -283,7 +296,7 @@ public final class NetworkStore {
             step = sqlite3_step(stmt)
         }
         guard step == SQLITE_DONE else { throw storageError() }
-        return NetworkListWindow(counts: counts, offset: offset, rows: rows)
+        return NetworkListWindow(counts: counts, offset: offset, rows: reversed ? Array(rows.reversed()) : rows)
     }
     public func request(query: NetworkQuery, row: Int) throws -> NetworkRecord? {
         try acquireAccess(); defer { access.release() }
@@ -426,17 +439,25 @@ public final class NetworkStore {
                                      modified: (attributes[.modificationDate] as? Date) ?? .distantPast)
     }
     func searchCandidates(query: NetworkQuery, afterRow: Int64, throughRow: Int64,
-                          afterRevision: Int64? = nil, throughRevision: Int64 = 0) throws -> [NetworkSearchCandidate] {
+                          afterRevision: Int64? = nil, throughRevision: Int64 = 0,
+                          newestFirst: Bool = false, before: NetworkSearchCursor? = nil) throws -> [NetworkSearchCandidate] {
         try acquireAccess(); defer { access.release() }
         // Changed rows must be seen even when they have stopped matching the
         // metadata conditions, so their old match can be removed from the index.
         // Text conditions are evaluated outside this lock too: a rare header
         // match must not turn one batch into a full JSON scan under the gate.
         var base = NetworkQuery(); base.method = query.method; base.status = query.status
-        let (predicate, values) = afterRevision == nil ? try predicate(for: base) : ("1=1", [])
+        var (predicate, values) = afterRevision == nil ? try predicate(for: base) : ("1=1", [])
         let revision = try hasSearchRevision() ? "search_revision" : "0"
-        let range = afterRevision.map { "search_revision>\($0) AND search_revision<=\(throughRevision)" } ?? "rowid>\(afterRow) AND rowid<=\(throughRow)"
-        let order = afterRevision == nil ? "rowid" : "search_revision,rowid"
+        var range = afterRevision.map { "search_revision>\($0) AND search_revision<=\(throughRevision)" } ?? "rowid>\(afterRow) AND rowid<=\(throughRow)"
+        var order = afterRevision == nil ? "rowid" : "search_revision,rowid"
+        if afterRevision == nil && newestFirst {
+            range = "rowid<=\(throughRow)"; order = "started DESC,id ASC"
+            if let before {
+                range += " AND (started<\(before.started) OR (started=\(before.started) AND id>?))"
+                values.append(before.id)
+            }
+        }
         let stmt = try statement("SELECT metadata,body_state,body_note,rowid,\(revision),id FROM requests WHERE (\(predicate)) AND \(range) ORDER BY \(order) LIMIT 24", values)
         defer { sqlite3_finalize(stmt) }
         var result: [NetworkSearchCandidate] = []
@@ -456,7 +477,7 @@ public final class NetworkStore {
         guard !ids.isEmpty else { return [] }
         guard ids.count <= NetworkListWindow.capacity else { throw RunbarError.message("网络摘要窗口过大。") }
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
-        let stmt = try statement("SELECT id,method,url,started,ended,status,failed,json_extract(CAST(metadata AS TEXT),'$.timingVersion') FROM requests WHERE id IN (\(placeholders))", ids)
+        let stmt = try statement("SELECT id,method,url,started,ended,status,failed,\(summaryTiming) FROM requests WHERE id IN (\(placeholders))", ids)
         defer { sqlite3_finalize(stmt) }
         var result: [String: NetworkRequestSummary] = [:]
         var step = sqlite3_step(stmt)
@@ -471,6 +492,10 @@ public final class NetworkStore {
         }
         guard step == SQLITE_DONE else { throw storageError() }
         return ids.compactMap { result[$0] }
+    }
+    private var summaryTiming: String {
+        let legacy = "json_extract(CAST(metadata AS TEXT),'$.timingVersion')"
+        return hasSummaryTiming ? "coalesce(timing_version,\(legacy))" : legacy
     }
 }
 
@@ -497,16 +522,17 @@ public actor NetworkCacheReader {
             }
         }
     }
-    public func listWindow(directory: URL, query: NetworkQuery, around row: Int, refreshCounts: Bool = true) async throws -> NetworkListWindow {
+    public func listWindow(directory: URL, query: NetworkQuery, around row: Int, refreshCounts: Bool = true, anchorID: String? = nil) async throws -> NetworkListWindow {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("requests.sqlite").path) else {
             countsCache = nil; cancelContentSearch(directory: directory); return .empty
         }
         try Task.checkCancellation()
-        if query.needsContentSearch {
+        if query.needsIndexedSearch {
             let index = try await indexed(directory: directory, query: query)
-            let (counts, offset, ids) = try index.window(around: row)
+            let anchor = try anchorID.flatMap { try index.row(id: $0) }
+            let (counts, offset, ids) = try index.window(around: anchor ?? row)
             let rows = try await read(directory: directory) { try $0.summaries(ids: ids) }
-            return NetworkListWindow(counts: counts, offset: offset, rows: rows)
+            return NetworkListWindow(counts: counts, offset: offset, rows: rows, anchorRow: anchor)
         }
         cancelContentSearch()
         let counts: NetworkListCounts?
@@ -518,7 +544,7 @@ public actor NetworkCacheReader {
     }
     public func request(directory: URL, query: NetworkQuery, row: Int) async throws -> NetworkRecord? {
         guard row >= 0 else { return nil }
-        if query.needsContentSearch {
+        if query.needsIndexedSearch {
             let index = try await indexed(directory: directory, query: query)
             guard let id = try index.ids(offset: row, limit: 1).first else { return nil }
             return try await read(directory: directory) { try $0.request(id) }
@@ -527,7 +553,7 @@ public actor NetworkCacheReader {
     }
     public func page(directory: URL, query: NetworkQuery, page: Int, latest: Bool = false) async throws -> NetworkPage {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("requests.sqlite").path) else { return .empty }
-        if query.needsContentSearch {
+        if query.needsIndexedSearch {
             var index = try await indexed(directory: directory, query: query)
             while !index.isComplete {
                 try Task.checkCancellation(); await Task.yield()
@@ -586,14 +612,18 @@ public actor NetworkCacheReader {
         let clock = ContinuousClock(), deadline = clock.now.advanced(by: .milliseconds(120))
         while !index.isComplete {
             try Task.checkCancellation()
-            let initial = !index.initialDone, row = index.lastRow, revision = index.lastRevision
+            // Newly captured/updated requests take priority even while a large
+            // historical filter is still being built from newest to oldest.
+            let revisionPass = index.hasPendingRevisions || index.initialDone
+            let row = index.lastRow, revision = index.lastRevision
             let candidates = try await read(directory: index.directory) {
                 try $0.searchCandidates(query: index.query, afterRow: row, throughRow: index.baselineRow,
-                                        afterRevision: initial ? nil : revision, throughRevision: index.targetRevision)
+                                        afterRevision: revisionPass ? revision : nil, throughRevision: index.targetRevision,
+                                        newestFirst: !revisionPass, before: index.initialCursor)
             }
             try Task.checkCancellation()
             guard contentIndex === index else { throw CancellationError() }
-            if candidates.isEmpty { index.finishPass() }
+            if candidates.isEmpty { index.finishPass(revisionPass: revisionPass) }
             else {
                 var results: [(NetworkSearchCandidate, Bool)] = []
                 for candidate in candidates {
@@ -602,7 +632,7 @@ public actor NetworkCacheReader {
                     results.append((candidate, matches))
                     if clock.now >= deadline { break }
                 }
-                try index.apply(results)
+                try index.apply(results, revisionPass: revisionPass)
             }
             if clock.now >= deadline { break }
             await Task.yield()

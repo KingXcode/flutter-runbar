@@ -31,37 +31,57 @@ public struct RunbarMCPSnapshot: Sendable {
 
 /// Disk work is independent of the UI's selection and readers. One heavy query
 /// at a time bounds payloads, search state and SQLite connections per server.
+/// Other heavy requests wait in a bounded, cancellable FIFO queue.
 public actor RunbarMCPDataSource {
     private let root: URL
     private let snapshot: @Sendable () async -> RunbarMCPSnapshot
     private let network = NetworkCacheReader(queryTimeLimit: 30)
-    private var reading = false
+    private let queries = RunbarMCPQueryQueue()
+    private var stopped = false
+    var waitingQueries: Int { get async { await queries.waitingCount } }
     private let dateFormatter: ISO8601DateFormatter = {
         let value = ISO8601DateFormatter(); value.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return value
     }()
     public init(root: URL, snapshot: @escaping @Sendable () async -> RunbarMCPSnapshot) {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath(); self.snapshot = snapshot
     }
-    public func shutdown() async { await network.cancelContentSearch() }
+    public func shutdown() async {
+        stopped = true
+        await queries.shutdown()
+        await network.cancelContentSearch()
+    }
     private func json(_ value: Any) throws -> Data { try RunbarMCPProtocol.json(value) }
     private func date(_ value: Date?) -> Any { value.map { dateFormatter.string(from: $0) } ?? NSNull() as Any }
     private func optional<T>(_ value: T?) -> Any { value.map { $0 as Any } ?? NSNull() }
     private func cut(_ value: String, _ count: Int) -> String { String(value.prefix(count)) }
 
     public func call(_ name: String, arguments: Data) async throws -> Data {
+        try Task.checkCancellation()
+        guard !stopped else { throw RunbarMCPQueueError.closed }
         guard let definition = RunbarMCPProtocol.tools().first(where: { $0["name"] as? String == name }),
               let schema = definition["inputSchema"] as? [String: Any], let fields = schema["properties"] as? [String: Any] else {
             throw RunbarMCPToolError.invalidArguments("未知工具。")
         }
         let args = try MCPArguments(arguments, fields: fields, required: schema["required"] as? [String] ?? [])
-        let heavy = !["runbar_list_sources", "runbar_list_sessions"].contains(name)
-        if heavy {
-            guard !reading else { throw RunbarError.message("另一项日志/网络查询正在执行，请顺序查询并稍后重试。") }
-            reading = true
+        if ["runbar_list_sources", "runbar_list_sessions"].contains(name) { return try await perform(name, args: args) }
+        let permit = try await queries.acquire()
+        do {
+            // A queued task may be cancelled just as its permit is handed off.
+            try Task.checkCancellation()
+            guard !stopped else { throw RunbarMCPQueueError.closed }
+            let result = try await perform(name, args: args)
+            try Task.checkCancellation()
+            await queries.release(permit)
+            return result
+        } catch {
+            await queries.release(permit)
+            throw error
         }
-        defer { if heavy { reading = false } }
+    }
+    private func perform(_ name: String, args: MCPArguments) async throws -> Data {
         let current = await snapshot()
         try Task.checkCancellation()
+        guard !stopped else { throw RunbarMCPQueueError.closed }
         if name == "runbar_list_sources" {
             let offset = try args.integer("offset", fallback: 0), limit = try args.integer("limit", fallback: 50, min: 1, max: 100)
             let sources = current.sources.dropFirst(min(offset, current.sources.count)).prefix(limit)

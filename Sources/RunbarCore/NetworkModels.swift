@@ -113,6 +113,9 @@ public struct NetworkQuery: Equatable, Sendable {
     var needsContentSearch: Bool {
         [.everywhere, .request, .response].contains { !effectiveKeywords(in: $0).isEmpty || !effectiveKeywords(in: $0, excluding: true).isEmpty } || !jsonConditions.isEmpty
     }
+    var needsIndexedSearch: Bool {
+        needsContentSearch || !effectiveKeywords(in: .headers).isEmpty || !effectiveKeywords(in: .headers, excluding: true).isEmpty
+    }
     public func draft(in scope: NetworkKeywordScope, excluding: Bool = false) -> String {
         if excluding { return exclusionDrafts[scope] ?? "" }
         switch scope { case .everywhere: return search; case .url: return text; case .headers: return headers; case .request: return requestBody; case .response: return responseBody }
@@ -202,6 +205,12 @@ public struct NetworkListWindow: Equatable, Sendable {
     public let counts: NetworkListCounts
     public let offset: Int
     public let rows: [NetworkRequestSummary]
+    /// Global row of the retained first visible request after older matches
+    /// are prepended to a still-building content index.
+    public let anchorRow: Int?
+    public init(counts: NetworkListCounts, offset: Int, rows: [NetworkRequestSummary], anchorRow: Int? = nil) {
+        self.counts = counts; self.offset = offset; self.rows = rows; self.anchorRow = anchorRow
+    }
     public var total: Int { counts.total }
     public var matching: Int { counts.matching }
     public func row(at index: Int) -> NetworkRequestSummary? {

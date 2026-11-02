@@ -277,6 +277,53 @@ final class NetworkStoreTests: XCTestCase {
             XCTAssertEqual(diagnostic?["code"] as? Int, Int(SQLITE_FULL))
         }, limits: limits)
     }
+    func testSummaryWindowDoesNotDecodeUnselectedMetadataOrBodies() throws {
+        try networkFixture { root, store in
+            let record = try sampleRecord("summary-only")
+            try store.upsert([record])
+            var db: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(root.appendingPathComponent("requests.sqlite").path, &db), SQLITE_OK)
+            defer { sqlite3_close_v2(db) }
+            // Malformed detail data must not prevent browsing list summaries.
+            XCTAssertEqual(sqlite3_exec(db, "UPDATE requests SET metadata=CAST('invalid-json' AS BLOB)", nil, nil, nil), SQLITE_OK)
+            let window = try store.listWindow(around: Int.max)
+            XCTAssertEqual(window.rows.first?.id, record.id)
+            XCTAssertEqual(window.rows.first?.durationMS, 50)
+            XCTAssertEqual(try store.summaries(ids: [record.id]), window.rows)
+            XCTAssertThrowsError(try store.request(record.id))
+        }
+    }
+    func testCachedCountWindowDoesNotMoveToNewTailUntilRefreshed() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root); defer { store.close() }
+        let reader = NetworkCacheReader(), query = NetworkQuery()
+        try store.upsert((0..<300).map { try sampleRecord(String($0), start: Int64($0)) })
+        let original = try await reader.listWindow(directory: root, query: query, around: Int.max)
+        try store.upsert((300..<400).map { try sampleRecord(String($0), start: Int64($0)) })
+        let browsing = try await reader.listWindow(directory: root, query: query, around: 299, refreshCounts: false)
+        XCTAssertEqual(browsing.rows.map(\.id), original.rows.map(\.id))
+        let latest = try await reader.listWindow(directory: root, query: query, around: Int.max)
+        XCTAssertEqual(latest.rows.last?.id, try sampleRecord("399", start: 399).id)
+    }
+    func testLegacySummaryTimingRemainsReadableWithoutEagerBackfill() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try NetworkStore(directory: root), record = try sampleRecord("legacy-timing")
+        try store.upsert([record]); store.close()
+        let file = root.appendingPathComponent("requests.sqlite")
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "ALTER TABLE requests DROP COLUMN timing_version", nil, nil, nil), SQLITE_OK)
+        sqlite3_close_v2(db)
+        let original = try Data(contentsOf: file)
+        let legacy = try NetworkStore(directory: root, readOnly: true)
+        XCTAssertEqual(try legacy.listWindow(around: Int.max).rows.first?.durationMS, 50)
+        legacy.close(); XCTAssertEqual(try Data(contentsOf: file), original)
+        let migrated = try NetworkStore(directory: root); defer { migrated.close() }
+        XCTAssertEqual(try migrated.listWindow(around: Int.max).rows.first?.durationMS, 50)
+        XCTAssertEqual(try migrated.request(record.id)?.id, record.id)
+    }
     func testExternalReaderContentionPreservesCodeRollsBackAndCanRecover() throws {
         try networkFixture { root, store in
             let first = try sampleRecord("initial")
@@ -341,6 +388,51 @@ private func completedNetworkSearch(_ reader: NetworkCacheReader, directory: URL
 }
 
 final class NetworkContentSearchTests: XCTestCase {
+    func testNewestFirstCandidatesUseTimeAndStableIDsInsteadOfInsertionOrder() throws {
+        try networkFixture { _, store in
+            let records = try (0..<91).map { number in
+                try sampleRecord(String(number), start: Int64((number * 13) % 7))
+            }
+            try store.upsert(records)
+            let snapshot = try store.searchSnapshot()
+            var cursor: NetworkSearchCursor?, actual: [String] = []
+            while true {
+                let batch = try store.searchCandidates(query: NetworkQuery(), afterRow: 0, throughRow: snapshot.lastRow, newestFirst: true, before: cursor)
+                guard let last = batch.last else { break }
+                XCTAssertLessThanOrEqual(batch.count, 24)
+                actual += batch.map { $0.record.id }
+                cursor = NetworkSearchCursor(started: last.record.startMicros, id: last.record.id)
+            }
+            let expected = records.sorted { $0.startMicros == $1.startMicros ? $0.id < $1.id : $0.startMicros > $1.startMicros }
+            XCTAssertEqual(actual, expected.map(\.id))
+        }
+    }
+    func testPartialNewestFirstIndexPrioritizesLiveChangesAndRetainsBrowsingAnchor() throws {
+        try networkFixture { root, store in
+            let records = try (0..<100).map { try sampleRecord(String($0), start: Int64($0)) }
+            try store.upsert(records)
+            let index = try NetworkContentIndex(directory: root, query: NetworkQuery())
+            let source = try store.searchSnapshot(); try index.prepare(source)
+            let first = try store.searchCandidates(query: NetworkQuery(), afterRow: 0, throughRow: source.lastRow, newestFirst: true)
+            try index.apply(first.map { ($0, true) })
+            let anchorID = records[90].id, initialRow = try XCTUnwrap(index.row(id: anchorID))
+            XCTAssertEqual(try index.window(around: Int.max).2.last, records.last?.id)
+            XCTAssertFalse(index.initialDone)
+            let next = try sampleRecord("live", start: 200)
+            try store.upsert([next]); try index.prepare(store.searchSnapshot())
+            XCTAssertTrue(index.hasPendingRevisions)
+            let updates = try store.searchCandidates(query: NetworkQuery(), afterRow: 0, throughRow: source.lastRow,
+                afterRevision: index.lastRevision, throughRevision: index.targetRevision)
+            try index.apply(updates.map { ($0, true) }, revisionPass: true); index.finishPass(revisionPass: true)
+            XCTAssertFalse(index.initialDone)
+            XCTAssertEqual(try index.window(around: Int.max).2.last, next.id)
+            let older = try store.searchCandidates(query: NetworkQuery(), afterRow: 0, throughRow: source.lastRow, newestFirst: true, before: index.initialCursor)
+            try index.apply(older.map { ($0, true) })
+            XCTAssertEqual(try index.row(id: anchorID), initialRow + older.count)
+            let (_, offset, ids) = try index.window(around: XCTUnwrap(index.row(id: anchorID)))
+            XCTAssertEqual(ids[(try XCTUnwrap(index.row(id: anchorID))) - offset], anchorID)
+        }
+    }
     func testGlobalSearchAndIndependentFieldsCombineAcrossCachedBodies() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

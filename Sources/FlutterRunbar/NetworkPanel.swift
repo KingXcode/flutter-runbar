@@ -8,7 +8,7 @@ private final class NetworkPanelModel: ObservableObject {
     @Published var query = NetworkQuery() { didSet {
         guard !query.hasSameConditions(as: oldValue) else { return }
         scheduleFilterSave()
-        clearSelection(); window = .empty; visibleRow = 0; countsDirty = true
+        clearSelection(); window = .empty; visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; countsDirty = true
         scrollRevision += 1; refresh(delay: true)
     } }
     @Published private(set) var window = NetworkListWindow.empty
@@ -17,11 +17,12 @@ private final class NetworkPanelModel: ObservableObject {
     @Published private(set) var selected: NetworkRecord?
     @Published private(set) var positionPercent = 100
     @Published private(set) var scrollRevision = 0
+    @Published private(set) var scrollsToLatest = true
     @Published var followsOutput = UserDefaults.standard.object(forKey: "networkFollowsOutput") as? Bool ?? true {
         didSet {
             guard followsOutput != oldValue else { return }
             UserDefaults.standard.set(followsOutput, forKey: "networkFollowsOutput")
-            if followsOutput { scrollRevision += 1; loadWindow() }
+            if followsOutput { scrollsToLatest = true; viewportAnchorID = nil; scrollRevision += 1; loadWindow() }
         }
     }
     @Published var detail = Detail.overview { didSet { bodyIndex = 0; loadDetail() } }
@@ -46,7 +47,8 @@ private final class NetworkPanelModel: ObservableObject {
     private let reader = NetworkCacheReader()
     private var directory: URL?
     private var sessionID: UUID?
-    private var visibleRow = 0
+    private var visibleRow = Int.max
+    private var viewportAnchorID: String?
     private var countsDirty = true
     private var requestedRow: Int?
     private var windowTask: Task<Void, Never>?
@@ -104,7 +106,7 @@ private final class NetworkPanelModel: ObservableObject {
     }
     func configure(directory: URL?, sessionID: UUID) {
         if self.sessionID != sessionID {
-            stop(); clearSelection(); window = .empty; visibleRow = 0; requestedRow = nil
+            stop(); clearSelection(); window = .empty; visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; requestedRow = nil
             countsDirty = true; scrollRevision += 1
         }
         self.directory = directory; self.sessionID = sessionID; refresh()
@@ -118,12 +120,13 @@ private final class NetworkPanelModel: ObservableObject {
         guard let directory else { return }
         queryLoading = true
         let query = query, anchor = followsOutput ? Int.max : visibleRow, refreshCounts = countsDirty
+        let anchorID = followsOutput ? nil : viewportAnchorID
         requestedRow = anchor
         windowTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay || scrolling { try await Task.sleep(for: .milliseconds(delay ? 250 : 25)) }
-                let window = try await reader.listWindow(directory: directory, query: query, around: anchor, refreshCounts: refreshCounts)
+                let window = try await reader.listWindow(directory: directory, query: query, around: anchor, refreshCounts: refreshCounts, anchorID: anchorID)
                 guard !Task.isCancelled else { return }
                 self.window = window; self.countsDirty = false; self.requestedRow = nil; self.error = nil; self.queryLoading = false
                 if !window.counts.isComplete {
@@ -148,6 +151,7 @@ private final class NetworkPanelModel: ObservableObject {
         let percent = Int((min(1, max(0, progress)) * 100).rounded())
         if positionPercent != percent { positionPercent = percent }
         visibleRow = first + max(0, last - first) / 2
+        viewportAnchorID = followsOutput ? nil : window.row(at: first)?.id
         guard !followsOutput, window.matching > 0 else { return }
         // Prefetch before reaching the edge, but don't restart the same disk
         // read on every pixel or on the redraw that fills placeholder cells.
@@ -159,8 +163,9 @@ private final class NetworkPanelModel: ObservableObject {
         if let requestedRow, abs(requestedRow - visibleRow) < 32 { return }
         loadWindow(scrolling: true)
     }
-    func earliest() { followsOutput = false; visibleRow = 0; scrollRevision += 1; loadWindow() }
+    func earliest() { followsOutput = false; visibleRow = 0; viewportAnchorID = nil; scrollsToLatest = false; scrollRevision += 1; loadWindow() }
     func latest() {
+        visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true
         if !followsOutput { followsOutput = true }
         else { scrollRevision += 1; loadWindow() }
     }
@@ -301,7 +306,7 @@ struct NetworkPanel: View {
             }.frame(minHeight: 250)
             HStack {
                 Text("\(data.window.matching) / \(data.window.total) 条").monospacedDigit()
-                if !data.window.counts.isComplete { Text("筛选中…") }
+                if !data.window.counts.isComplete { Text("正在筛选更早记录…") }
                 Text("当前位置 \(data.positionPercent)%").monospacedDigit()
                 Spacer(minLength: 0)
                 Button("最早") { data.earliest() }.disabled(data.window.matching == 0)
@@ -493,7 +498,7 @@ struct NetworkPanel: View {
     }
     private var requests: some View {
         NetworkRequestsTable(window: data.window, selection: data.selectedRow,
-                             following: data.followsOutput, scrollRevision: data.scrollRevision,
+                             following: data.followsOutput, scrollRevision: data.scrollRevision, scrollsToLatest: data.scrollsToLatest,
                              onSelection: data.select, onViewport: data.viewportChanged) {
             data.followsOutput = false
         }
@@ -506,7 +511,16 @@ struct NetworkPanel: View {
             }
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
     }
-    private var details: some View {
+    @ViewBuilder private var details: some View {
+        if data.selected == nil {
+            VStack(spacing: 8) {
+                Image(systemName: "network").font(.title2)
+                Text("选择一条请求查看详情")
+                Text("概览、请求头和正文在选中后读取").font(.caption)
+            }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else { selectedDetails }
+    }
+    private var selectedDetails: some View {
         VStack(spacing: 5) {
             Picker("请求详情", selection: $data.detail) {
                 ForEach(NetworkPanelModel.Detail.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -557,6 +571,7 @@ private struct NetworkRequestsTable: NSViewRepresentable {
     let selection: Int?
     let following: Bool
     let scrollRevision: Int
+    let scrollsToLatest: Bool
     let onSelection: (Int?) -> Void
     let onViewport: (Int, Int, Double) -> Void
     let onScrollAway: () -> Void
@@ -565,6 +580,8 @@ private struct NetworkRequestsTable: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NetworkRequestsScrollView()
         scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
+        let verticalScroller = NetworkRequestsScroller()
+        scroll.verticalScroller = verticalScroller
         let table = NetworkRequestTableView()
         table.setAccessibilityLabel("网络请求列表（完整历史，从旧到新）")
         table.rowHeight = 23; table.usesAlternatingRowBackgroundColors = true
@@ -580,6 +597,7 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         table.delegate = context.coordinator; table.dataSource = context.coordinator
         scroll.documentView = table
         scroll.onScrollAway = { [weak coordinator = context.coordinator] in coordinator?.pauseFollowing() }
+        verticalScroller.onInteraction = scroll.onScrollAway
         table.onScrollAway = scroll.onScrollAway
         context.coordinator.observe(scroll)
         return scroll
@@ -588,6 +606,13 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         guard let table = scroll.documentView as? NSTableView else { return }
         let coordinator = context.coordinator, old = coordinator.parent
         coordinator.parent = self; coordinator.applying = true
+        if following && (!old.following || old.scrollRevision != scrollRevision) { coordinator.userPaused = false }
+        let oldVisible = table.rows(in: scroll.documentVisibleRect)
+        let oldFirst = oldVisible.location != NSNotFound && oldVisible.length > 0 ? oldVisible.location : nil
+        let oldFirstID = oldFirst.flatMap { old.window.row(at: $0)?.id }
+        let firstOffset = oldFirst.map { scroll.contentView.bounds.minY - table.rect(ofRow: $0).minY } ?? 0
+        let initialPlacement = window.matching > 0 && !coordinator.positioned
+        if window.matching == 0 { coordinator.positioned = false }
         let countChanged = !coordinator.initialized || table.numberOfRows != window.matching
         coordinator.initialized = true
         if countChanged { table.reloadData() }
@@ -602,18 +627,26 @@ private struct NetworkRequestsTable: NSViewRepresentable {
             if table.selectedRow != selection { table.selectRowIndexes(IndexSet(integer: selection), byExtendingSelection: false) }
         } else if table.selectedRow >= 0 { table.deselectAll(nil) }
         let navigation = old.scrollRevision != scrollRevision
-        if window.matching > 0 && (navigation || (following && (countChanged || !old.following))) {
+        if window.matching > 0 && (initialPlacement || navigation || (following && (countChanged || !old.following))) {
+            coordinator.positioned = true
             table.layoutSubtreeIfNeeded()
-            table.scrollRowToVisible(following ? window.matching - 1 : 0)
+            table.scrollRowToVisible(scrollsToLatest ? window.matching - 1 : 0)
             // SwiftUI may resize the initial clip view after this update.
             let revision = scrollRevision
             DispatchQueue.main.async { [weak table, weak coordinator] in
                 guard let table, let coordinator, coordinator.parent.scrollRevision == revision,
-                      coordinator.parent.following == following, table.numberOfRows > 0 else { return }
+                      coordinator.parent.following == following, !coordinator.userPaused || !following, table.numberOfRows > 0 else { return }
                 coordinator.applying = true
-                table.layoutSubtreeIfNeeded(); table.scrollRowToVisible(following ? table.numberOfRows - 1 : 0)
+                table.layoutSubtreeIfNeeded(); table.scrollRowToVisible(scrollsToLatest ? table.numberOfRows - 1 : 0)
                 coordinator.applying = false; coordinator.reportViewport()
             }
+        } else if !following, let anchor = window.anchorRow, let oldFirstID,
+                  window.row(at: anchor)?.id == oldFirstID, anchor != oldFirst {
+            // A newest-first content scan prepends older matches. Keep the
+            // same request under the user's eyes instead of keeping its rank.
+            table.layoutSubtreeIfNeeded()
+            scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: table.rect(ofRow: anchor).minY + firstOffset))
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
         coordinator.applying = false; coordinator.reportViewport()
     }
@@ -621,25 +654,44 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         var parent: NetworkRequestsTable
         var applying = false
         var initialized = false
+        var positioned = false
+        var userPaused = false
         private weak var scroll: NSScrollView?
         private var observation: NSObjectProtocol?
+        private var frameObservation: NSObjectProtocol?
         private var reportPending = false
+        private var followPending = false
         private static let formatter: DateFormatter = {
             let value = DateFormatter(); value.locale = Locale(identifier: "en_US_POSIX")
             value.dateFormat = "HH:mm:ss.SSS"; return value
         }()
         init(_ parent: NetworkRequestsTable) { self.parent = parent }
-        deinit { if let observation { NotificationCenter.default.removeObserver(observation) } }
+        deinit {
+            if let observation { NotificationCenter.default.removeObserver(observation) }
+            if let frameObservation { NotificationCenter.default.removeObserver(frameObservation) }
+        }
         func observe(_ scroll: NSScrollView) {
-            self.scroll = scroll; scroll.contentView.postsBoundsChangedNotifications = true
+            self.scroll = scroll; scroll.contentView.postsBoundsChangedNotifications = true; scroll.contentView.postsFrameChangedNotifications = true
             observation = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
-                                                                 object: scroll.contentView, queue: .main) { [weak self, weak scroll] _ in
-                guard let self, let scroll, !self.applying else { return }
-                if self.parent.following, NSApp.currentEvent?.type == .leftMouseDragged,
-                   let document = scroll.documentView, scroll.contentView.bounds.maxY < document.bounds.maxY - 2 {
-                    self.pauseFollowing()
-                }
+                                                                 object: scroll.contentView, queue: .main) { [weak self] _ in
+                guard let self, !self.applying else { return }
+                self.followTailAfterLayout()
                 self.reportViewport()
+            }
+            frameObservation = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification,
+                object: scroll.contentView, queue: .main) { [weak self] _ in self?.followTailAfterLayout() }
+        }
+        func followTailAfterLayout() {
+            guard !applying, parent.following, !userPaused, !followPending else { return }
+            followPending = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }; self.followPending = false
+                guard self.parent.following, !self.userPaused, let scroll = self.scroll,
+                      let table = scroll.documentView as? NSTableView, table.numberOfRows > 0,
+                      scroll.contentView.bounds.maxY < table.rect(ofRow: table.numberOfRows - 1).maxY - 2 else { return }
+                self.applying = true
+                table.layoutSubtreeIfNeeded(); table.scrollRowToVisible(table.numberOfRows - 1)
+                self.applying = false; self.reportViewport()
             }
         }
         func reportViewport() {
@@ -653,16 +705,14 @@ private struct NetworkRequestsTable: NSViewRepresentable {
                 guard rows.location != NSNotFound, rows.length > 0 else { return }
                 let range = max(0, table.bounds.height - scroll.contentView.bounds.height)
                 let progress = range > 0 ? (scroll.contentView.bounds.minY - table.bounds.minY) / range : 1
-                // Scroller accessibility actions have no mouse-drag event.
-                // Treat any settled viewport away from the tail as browsing,
-                // after deferred programmatic following has finished.
-                if self.parent.following, range > 0, progress < 1 - 2 / range {
-                    self.pauseFollowing()
-                }
                 self.parent.onViewport(rows.location, min(table.numberOfRows - 1, NSMaxRange(rows) - 1), Double(progress))
             }
         }
-        func pauseFollowing() { if parent.following && !applying { parent.onScrollAway() } }
+        func pauseFollowing() {
+            guard !applying else { return }
+            userPaused = true
+            if parent.following { parent.onScrollAway() }
+        }
         func numberOfRows(in tableView: NSTableView) -> Int { parent.window.matching }
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !applying, let table = notification.object as? NSTableView else { return }
@@ -703,6 +753,12 @@ private final class NetworkRequestsScrollView: NSScrollView {
         if event.scrollingDeltaY > 0 { onScrollAway?() }
         super.scrollWheel(with: event)
     }
+}
+private final class NetworkRequestsScroller: NSScroller {
+    var onInteraction: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onInteraction?(); super.mouseDown(with: event) }
+    override func accessibilityPerformIncrement() -> Bool { onInteraction?(); return super.accessibilityPerformIncrement() }
+    override func accessibilityPerformDecrement() -> Bool { onInteraction?(); return super.accessibilityPerformDecrement() }
 }
 private final class NetworkRequestTableView: NSTableView {
     var onScrollAway: (() -> Void)?

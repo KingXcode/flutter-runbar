@@ -12,6 +12,10 @@ struct NetworkSearchCandidate {
     let row: Int64
     let revision: Int64
 }
+struct NetworkSearchCursor {
+    let started: Int64
+    let id: String
+}
 
 /// Literal, case-insensitive matching. Bodies are scanned in 64 KiB chunks,
 /// with a bounded overlap so matches may span reads and UTF-8 boundaries.
@@ -129,11 +133,13 @@ final class NetworkContentIndex {
     private(set) var baselineRow: Int64 = 0
     private(set) var lastRevision: Int64 = 0
     private(set) var targetRevision: Int64 = 0
+    private(set) var initialCursor: NetworkSearchCursor?
     private var baselineRevision: Int64 = 0
     private var initialized = false
     private var versioned = false
     private var modified = Date.distantPast
     var isComplete: Bool { initialized && initialDone && (!versioned || lastRevision >= targetRevision) }
+    var hasPendingRevisions: Bool { versioned && lastRevision < targetRevision }
 
     init(directory: URL, query: NetworkQuery) throws {
         self.directory = directory; self.query = query.bounded; self.matcher = try NetworkContentMatcher(query: query)
@@ -156,13 +162,13 @@ final class NetworkContentIndex {
             (!versioned && initialDone && modified != source.modified)
         if shouldReset {
             try execute("DELETE FROM matches")
-            initialized = true; initialDone = false; lastRow = 0; baselineRow = source.lastRow
+            initialized = true; initialDone = false; lastRow = 0; initialCursor = nil; baselineRow = source.lastRow
             baselineRevision = source.revision ?? 0; lastRevision = baselineRevision
             versioned = source.revision != nil; modified = source.modified
         }
         sourceTotal = source.total; targetRevision = source.revision ?? 0
     }
-    func apply(_ candidates: [(NetworkSearchCandidate, Bool)]) throws {
+    func apply(_ candidates: [(NetworkSearchCandidate, Bool)], revisionPass: Bool = false) throws {
         guard !candidates.isEmpty else { return }
         try NetworkDiskSpace.requireAvailable(at: FileManager.default.temporaryDirectory, reserve: NetworkLimits().minimumFreeDiskBytes,
             additional: Int64(candidates.count) * 2048 + 256 * 1024, operation: "写入网络筛选索引")
@@ -180,12 +186,15 @@ final class NetworkContentIndex {
         } catch {
             sqlite3_exec(db, "ROLLBACK", nil, nil, nil); throw error
         }
-        if initialDone { lastRevision = candidates.last!.0.revision }
-        else { lastRow = candidates.last!.0.row }
+        if revisionPass { lastRevision = candidates.last!.0.revision }
+        else {
+            let last = candidates.last!.0
+            lastRow = last.row; initialCursor = NetworkSearchCursor(started: last.record.startMicros, id: last.record.id)
+        }
     }
-    func finishPass() {
-        if !initialDone { initialDone = true; lastRevision = baselineRevision }
-        else { lastRevision = targetRevision }
+    func finishPass(revisionPass: Bool = false) {
+        if revisionPass { lastRevision = targetRevision }
+        else { initialDone = true; lastRevision = max(lastRevision, baselineRevision) }
     }
     func window(around row: Int) throws -> (NetworkListCounts, Int, [String]) {
         let count = try count()
@@ -210,6 +219,17 @@ final class NetworkContentIndex {
         }
         guard step == SQLITE_DONE else { throw error() }
         return result
+    }
+    func row(id: String) throws -> Int? {
+        let stmt = try statement("SELECT count(*) FROM matches WHERE started<(SELECT started FROM matches WHERE id=?) OR (started=(SELECT started FROM matches WHERE id=?) AND id>?)")
+        defer { sqlite3_finalize(stmt) }
+        for index in 1...3 { sqlite3_bind_text(stmt, Int32(index), id, -1, transient) }
+        let exists = try statement("SELECT 1 FROM matches WHERE id=?"); defer { sqlite3_finalize(exists) }
+        sqlite3_bind_text(exists, 1, id, -1, transient)
+        let found = sqlite3_step(exists)
+        if found == SQLITE_DONE { return nil }
+        guard found == SQLITE_ROW, sqlite3_step(stmt) == SQLITE_ROW else { throw error() }
+        return Int(sqlite3_column_int64(stmt, 0))
     }
     private func error() -> Error {
         let code = sqlite3_extended_errcode(db)
