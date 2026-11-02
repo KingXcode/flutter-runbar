@@ -7,18 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */; };
 		0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */; };
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
 		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
+		2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */; };
 		286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC0C281B047474B3C8BE784 /* LogToolsView.swift */; };
+		2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		401D7E552F16054EE4A4F086 /* MCPSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */; };
 		40E0446C1C3DE04FA930CF84 /* AppUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */; };
 		40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
 		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
 		5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */; };
+		629CAF4816992E4EFFB435F9 /* MCPRuntimeSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */; };
 		6326D10ABC37026E77E5AD7D /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */; };
 		638995230949F6C246161705 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8254135888F0FA991DFF1BA /* CoreTests.swift */; };
 		63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */; };
@@ -28,8 +33,11 @@
 		823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */; };
 		82AC89839337A307D9499B3F /* VSCodeConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */; };
 		861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */; };
+		8F4E93AE6DAC2ADFB05333AD /* MCPServiceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */; };
 		8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */; };
+		91B2B0006C04DDEB3E24BFEA /* SkillInstallationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E30B83948A472ACDB7F7876 /* SkillInstallationTests.swift */; };
 		9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */; };
+		9E62AB2D1441582A0A950A36 /* RunbarMCPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */; };
 		A803486EBC6D49F61DC76278 /* LogTailReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */; };
 		B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */; };
 		B5CF035478C12B7C52FDD482 /* GlobalShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */; };
@@ -51,29 +59,38 @@
 		129869889879D609F44240FE /* extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = extension.js; sourceTree = "<group>"; };
 		1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPanel.swift; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
+		1E30B83948A472ACDB7F7876 /* SkillInstallationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationTests.swift; sourceTree = "<group>"; };
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateView.swift; sourceTree = "<group>"; };
 		34A808A71127B818971B8764 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeConnectionView.swift; sourceTree = "<group>"; };
+		3C4BA1882F0B204ADE474147 /* setup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = setup.md; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
 		3FE25BD6D3CB404D874DA7C2 /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
 		4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentView.swift; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
+		6A2C0A687E0FDEB00B0A2C3B /* openai.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = openai.yaml; sourceTree = "<group>"; };
 		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
+		7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationModel.swift; sourceTree = "<group>"; };
+		72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationView.swift; sourceTree = "<group>"; };
 		75CB9B8540936580652BC9EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7C403F001B892EF0AC7AD6F5 /* package-mcp-skill.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-mcp-skill.py"; sourceTree = "<group>"; };
 		7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetPermissionAlert.swift; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRuntimeSnapshot.swift; sourceTree = "<group>"; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
 		8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTailReaderTests.swift; sourceTree = "<group>"; };
 		9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */ = {isa = PBXFileReference; path = "probe-devtools-network.dart"; sourceTree = "<group>"; };
 		92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandTemplateTests.swift; sourceTree = "<group>"; };
 		9BC0C281B047474B3C8BE784 /* LogToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogToolsView.swift; sourceTree = "<group>"; };
 		A31907D75CF3EDDDDD941ADD /* github-release.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "github-release.py"; sourceTree = "<group>"; };
+		A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
+		A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPLocalServer.swift; sourceTree = "<group>"; };
 		AA265515B8A948781CDF2C41 /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
 		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
 		ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentTests.swift; sourceTree = "<group>"; };
@@ -81,13 +98,16 @@
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
+		CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServiceController.swift; sourceTree = "<group>"; };
 		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D0AE10E194C87F99DDCB1683 /* Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runbar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
 		D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeBridgeServer.swift; sourceTree = "<group>"; };
 		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
+		D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPTests.swift; sourceTree = "<group>"; };
 		DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		E843F7341E5B0A609C6A0B71 /* SKILL.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SKILL.md; sourceTree = "<group>"; };
 		E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-vscode-extension.py"; sourceTree = "<group>"; };
 		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
@@ -116,6 +136,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1C5433C67555F7539EFFB44F /* references */ = {
+			isa = PBXGroup;
+			children = (
+				3C4BA1882F0B204ADE474147 /* setup.md */,
+			);
+			path = references;
+			sourceTree = "<group>";
+		};
 		250C094D8AC86FF7E0A7DB1B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -160,8 +188,10 @@
 				3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
+				D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
 				EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */,
+				1E30B83948A472ACDB7F7876 /* SkillInstallationTests.swift */,
 			);
 			path = RunbarCoreTests;
 			sourceTree = "<group>";
@@ -174,12 +204,38 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		659ABE429192965375E65FE4 /* agents */ = {
+			isa = PBXGroup;
+			children = (
+				6A2C0A687E0FDEB00B0A2C3B /* openai.yaml */,
+			);
+			path = agents;
+			sourceTree = "<group>";
+		};
 		6E46135F8D7D378CB421F75C /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				AF3C5D6C143F2EE52CA4BF57 /* FlutterRunbar */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		7AE339EF6DAD3806F5706498 /* skills */ = {
+			isa = PBXGroup;
+			children = (
+				7C304D7351DDBB6A1B36197F /* runbar-diagnostics */,
+			);
+			path = skills;
+			sourceTree = "<group>";
+		};
+		7C304D7351DDBB6A1B36197F /* runbar-diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				E843F7341E5B0A609C6A0B71 /* SKILL.md */,
+				659ABE429192965375E65FE4 /* agents */,
+				1C5433C67555F7539EFFB44F /* references */,
+			);
+			path = "runbar-diagnostics";
 			sourceTree = "<group>";
 		};
 		87BF212ED71F5E022BBD09EB /* scripts */ = {
@@ -191,6 +247,7 @@
 				0C6F66E99688501B309B2459 /* capture-real-menu.sh */,
 				A31907D75CF3EDDDDD941ADD /* github-release.py */,
 				B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */,
+				7C403F001B892EF0AC7AD6F5 /* package-mcp-skill.py */,
 				E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */,
 				9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */,
 				8BA286984BB626AF54E8C607 /* process-tests.c */,
@@ -229,9 +286,15 @@
 				9BC0C281B047474B3C8BE784 /* LogToolsView.swift */,
 				F988073F96A1983555A9F5EA /* LogView.swift */,
 				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
+				A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */,
+				8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */,
+				CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */,
+				A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */,
 				DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */,
 				1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */,
 				7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */,
+				7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */,
+				72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */,
 				D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */,
 				38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */,
 			);
@@ -247,6 +310,7 @@
 				3D807E313C430C635BCA2CF1 /* Packages */,
 				250C094D8AC86FF7E0A7DB1B /* Resources */,
 				87BF212ED71F5E022BBD09EB /* scripts */,
+				7AE339EF6DAD3806F5706498 /* skills */,
 				6E46135F8D7D378CB421F75C /* Sources */,
 				9C78DA381C463E93DF22D6F5 /* Tests */,
 				AACE5E493712C470DE29553A /* Products */,
@@ -283,6 +347,7 @@
 				CBE78880F38A021AB325E480 /* Resources */,
 				16030357D28652FF245108AC /* Frameworks */,
 				7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */,
+				3F465ECE5D4756465E9D3922 /* Embed Runbar diagnostic Skill */,
 			);
 			buildRules = (
 			);
@@ -350,6 +415,30 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		3F465ECE5D4756465E9D3922 /* Embed Runbar diagnostic Skill */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Runbar diagnostic Skill";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics.zip",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/SKILL.md",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/agents/openai.yaml",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/references/setup.md",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/manifest.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/usr/bin/python3 \"$SRCROOT/scripts/package-mcp-skill.py\" --output \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Skills\"\n";
+		};
 		7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -386,10 +475,16 @@
 				B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */,
 				286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */,
 				673CC5846603D7C9C0D66235 /* LogView.swift in Sources */,
+				0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */,
+				629CAF4816992E4EFFB435F9 /* MCPRuntimeSnapshot.swift in Sources */,
+				8F4E93AE6DAC2ADFB05333AD /* MCPServiceController.swift in Sources */,
+				401D7E552F16054EE4A4F086 /* MCPSettingsView.swift in Sources */,
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 				F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */,
 				861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */,
 				5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */,
+				2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */,
+				2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */,
 				68D8A344ED1CF995A0292C82 /* VSCodeBridgeServer.swift in Sources */,
 				82AC89839337A307D9499B3F /* VSCodeConnectionView.swift in Sources */,
 			);
@@ -413,8 +508,10 @@
 				B917C5541571C2B18D7C4A00 /* NetworkTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
+				9E62AB2D1441582A0A950A36 /* RunbarMCPTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
 				7DB18459492C924DCFCB8D79 /* SandboxResetTests.swift in Sources */,
+				91B2B0006C04DDEB3E24BFEA /* SkillInstallationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -513,7 +610,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -527,7 +624,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.10.1;
+				MARKETING_VERSION = 0.11.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -590,7 +687,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -610,7 +707,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.10.1;
+				MARKETING_VERSION = 0.11.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

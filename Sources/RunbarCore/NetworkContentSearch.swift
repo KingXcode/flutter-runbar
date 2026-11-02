@@ -75,7 +75,8 @@ struct NetworkContentMatcher {
     }
     private func scan(directory: URL, id: String, response: Bool, words: [String], form: Bool) throws -> Set<String> {
         guard !words.isEmpty, id.count == 64, id.allSatisfy(\.isHexDigit) else { return [] }
-        let file = directory.appendingPathComponent("bodies/\(id).\(response ? "response" : "request")")
+        let file = directory.resolvingSymlinksInPath().appendingPathComponent("bodies/\(id).\(response ? "response" : "request")")
+        guard file.resolvingSymlinksInPath().path == file.standardizedFileURL.path else { throw RunbarError.message("网络正文路径包含符号链接，未读取。") }
         guard let handle = try? FileHandle(forReadingFrom: file) else { return [] }
         defer { try? handle.close() }
         let overlap = min(32 * 1024, (words.map { $0.utf8.count }.max() ?? 0) * (form ? 12 : 4) + 16)

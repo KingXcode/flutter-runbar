@@ -8,13 +8,15 @@ public final class NetworkStore {
     private var db: OpaquePointer?
     private let limits: NetworkLimits
     private let readOnly: Bool
+    private let readDeadline: TimeInterval?
     private let diskSpace: NetworkDiskSpaceProvider
     private let access: NetworkCacheAccess
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     public init(directory: URL, readOnly: Bool = false, limits: NetworkLimits = NetworkLimits(),
-                diskSpace: @escaping NetworkDiskSpaceProvider = { NetworkDiskSpace.available(at: $0) }) throws {
+                diskSpace: @escaping NetworkDiskSpaceProvider = { NetworkDiskSpace.available(at: $0) }, queryTimeLimit: TimeInterval? = nil) throws {
         self.directory = directory; self.limits = limits; self.readOnly = readOnly
         self.diskSpace = diskSpace
+        readDeadline = readOnly ? queryTimeLimit.map { ProcessInfo.processInfo.systemUptime + max(0, min(30, $0)) } : nil
         self.access = NetworkCacheAccess.shared(for: directory)
         try acquireAccess(); defer { access.release() }
         let file = directory.appendingPathComponent("requests.sqlite")
@@ -28,6 +30,13 @@ public final class NetworkStore {
         do {
             sqlite3_extended_result_codes(db, 1)
             sqlite3_busy_timeout(db, 1000)
+            if readDeadline != nil {
+                sqlite3_progress_handler(db, 1000, { context in
+                    guard let context else { return 1 }
+                    let store = Unmanaged<NetworkStore>.fromOpaque(context).takeUnretainedValue()
+                    return Task<Never, Never>.isCancelled || ProcessInfo.processInfo.systemUptime >= (store.readDeadline ?? .infinity) ? 1 : 0
+                }, Unmanaged.passUnretained(self).toOpaque())
+            }
             try execute("PRAGMA cache_size=-1024; PRAGMA mmap_size=0")
             if !readOnly {
                 try requireDiskSpace(additional: 1024 * 1024)
@@ -62,7 +71,10 @@ public final class NetworkStore {
     }
     public func close() {
         access.acquireForClose(); defer { access.release() }
-        if let db { sqlite3_close_v2(db) }; db = nil
+        if let db {
+            if readDeadline != nil { sqlite3_progress_handler(db, 0, nil, nil) }
+            sqlite3_close_v2(db)
+        }; db = nil
     }
     deinit { close() }
     private func acquireAccess() throws {
@@ -73,8 +85,14 @@ public final class NetworkStore {
         }
     }
     private func execute(_ sql: String) throws {
+        try checkReadDeadline()
         let operation = sql == "COMMIT" ? "提交缓存事务" : sql.hasPrefix("BEGIN") ? "开始缓存事务" : "执行缓存语句"
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else { throw storageError(operation: operation) }
+    }
+    private func checkReadDeadline() throws {
+        guard let readDeadline else { return }
+        try Task.checkCancellation()
+        guard ProcessInfo.processInfo.systemUptime < readDeadline else { throw RunbarError.message("网络缓存查询超时，请缩小筛选范围后重试。") }
     }
     private func rollback() {
         // SQLITE_FULL and some I/O errors already roll back automatically. Do
@@ -123,6 +141,7 @@ public final class NetworkStore {
         }
     }
     private func statement(_ sql: String, _ values: [String] = []) throws -> OpaquePointer {
+        try checkReadDeadline()
         var result: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &result, nil) == SQLITE_OK, let result else { throw storageError() }
         for (i, value) in values.enumerated() { sqlite3_bind_text(result, Int32(i + 1), value, -1, transient) }
@@ -456,15 +475,16 @@ public final class NetworkStore {
 }
 
 public actor NetworkCacheReader {
+    private let queryTimeLimit: TimeInterval?
     private var countsCache: (URL, NetworkQuery, NetworkListCounts)?
     private var contentIndex: NetworkContentIndex?
-    public init() {}
+    public init(queryTimeLimit: TimeInterval? = nil) { self.queryTimeLimit = queryTimeLimit }
     private func read<Value>(directory: URL, operation: (NetworkStore) throws -> Value) async throws -> Value {
         var failures = 0
         while true {
             do {
                 try Task.checkCancellation()
-                let store = try NetworkStore(directory: directory, readOnly: true); defer { store.close() }
+                let store = try NetworkStore(directory: directory, readOnly: true, queryTimeLimit: queryTimeLimit); defer { store.close() }
                 let value = try operation(store)
                 try Task.checkCancellation()
                 return value
@@ -549,7 +569,11 @@ public actor NetworkCacheReader {
                 try await self.scanSlice(index)
             }
         }
-        if let worker = index.worker { try await worker.value }
+        if let worker = index.worker {
+            if queryTimeLimit != nil {
+                try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
+            } else { try await worker.value }
+        }
         try Task.checkCancellation()
         guard contentIndex === index else { throw CancellationError() }
         return index

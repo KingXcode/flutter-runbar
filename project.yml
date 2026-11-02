@@ -3,6 +3,7 @@ fileGroups:
   - README.md
   - project.yml
   - scripts
+  - skills
   - extensions/runbar-vscode
 options:
   minimumXcodeGenVersion: 2.46.0
@@ -18,8 +19,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    MARKETING_VERSION: "0.10.1"
-    CURRENT_PROJECT_VERSION: "49"
+    MARKETING_VERSION: "0.11.0"
+    CURRENT_PROJECT_VERSION: "50"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
@@ -39,6 +40,16 @@ targets:
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/runbar-bridge.vsix
           - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/VSCodeBridge/metadata.json
+      - name: Embed Runbar diagnostic Skill
+        basedOnDependencyAnalysis: false
+        script: |
+          /usr/bin/python3 "$SRCROOT/scripts/package-mcp-skill.py" --output "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Skills"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics.zip
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/SKILL.md
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/agents/openai.yaml
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/references/setup.md
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Skills/runbar-diagnostics/manifest.json
     info:
       path: Resources/Info.plist
       properties:

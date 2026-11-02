@@ -154,6 +154,14 @@ struct ManagerView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("设置").font(.title2)
                 UpdateSettingsSection(updater: model.updates) { model.showUpdateWindow() }
+                MCPSettingsEntry(service: model.mcp) {
+                    showingSettings = false
+                    DispatchQueue.main.async { model.showMCPWindow() }
+                }
+                SkillManagementEntry(installer: model.skillInstaller) {
+                    showingSettings = false
+                    DispatchQueue.main.async { model.showSkillWindow() }
+                }
                 Divider()
                 Text("应用显示").font(.headline)
                 Toggle("在 Dock 中显示", isOn: Binding(get: { model.showInDock }, set: { model.setDockVisibility($0) }))

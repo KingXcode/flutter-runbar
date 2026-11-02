@@ -22,10 +22,18 @@ struct FlutterRunbarApp: App {
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { model.showUpdateWindow() }
+                Button("AI 连接（MCP）…") { model.showMCPWindow() }
+                Button("安装 / 更新 AI Skill…") { model.showSkillWindow() }
             }
         }
         Window("Runbar 软件更新", id: "updates") {
             AppUpdateView(updater: model.updates)
+        }.windowResizability(.contentSize)
+        Window("Runbar · AI 连接", id: "mcp") {
+            MCPSettingsView(service: model.mcp, installer: model.skillInstaller) { model.showSkillWindow() }
+        }.windowResizability(.contentSize)
+        Window("Runbar · Skill 安装与更新", id: "skill-installer") {
+            SkillInstallationView(installer: model.skillInstaller) { model.showMCPWindow() }
         }.windowResizability(.contentSize)
     }
 }
@@ -45,6 +53,12 @@ private struct RunbarStatusLabel: View {
                 model.installUpdateOpener {
                     openWindow(id: "updates"); NSApp.activate(ignoringOtherApps: true)
                 }
+                model.installMCPOpener {
+                    openWindow(id: "mcp"); NSApp.activate(ignoringOtherApps: true)
+                }
+                model.installSkillOpener {
+                    openWindow(id: "skill-installer"); NSApp.activate(ignoringOtherApps: true)
+                }
             }
     }
 }
@@ -63,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { AppModel.shared.restoreDockVisibility(); AppModel.shared.installGlobalShortcut() }
         #if !SCREENSHOT_PREVIEW && !LIVE_LOG_VALIDATION
         AppModel.shared.updates.start()
+        AppModel.shared.mcp.startIfEnabled()
         #endif
         #if SCREENSHOT_PREVIEW || LIVE_LOG_VALIDATION
         let arguments = ProcessInfo.processInfo.arguments
@@ -169,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
         #else
         let model = AppModel.shared
+        guard !model.skillInstaller.installing else { model.showSkillWindow(); return .terminateCancel }
         guard model.nativeActionProjectID == nil else { return .terminateCancel }
         guard model.busy else { model.finishLogQueriesForQuit(); return .terminateLater }
         let alert = NSAlert()
@@ -187,6 +203,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     let updates = AppUpdateModel()
+    let mcp = MCPServiceController()
+    let skillInstaller = SkillInstallationModel()
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
@@ -253,6 +271,9 @@ final class AppModel: ObservableObject {
     #endif
     private var managerOpener: (() -> Void)?
     private var updateOpener: (() -> Void)?
+    private var mcpOpener: (() -> Void)?
+    private var skillOpener: (() -> Void)?
+    private var checkedSkillOnboarding = false
     private var pendingManagerOpen = false
     private var installedInitialManagerOpener = false
     var quitWhenFinished = false
@@ -274,6 +295,10 @@ final class AppModel: ObservableObject {
             config = try store.loadConfiguration(); try store.recoverInterrupted(); history = try store.sessions()
             self.store = store
             network.configure(root: store.root)
+            skillInstaller.configure(root: store.root)
+            mcp.configure(root: store.root) { [weak self] in
+                await self?.mcpSnapshot() ?? RunbarMCPSnapshot()
+            }
             network.onFinished = { [weak self] in self?.objectWillChange.send() }
             selectedProject = config.projects.first?.id
             let coordinator = ProjectRunCoordinator(store: store)
@@ -336,6 +361,21 @@ final class AppModel: ObservableObject {
         }
     }
     func installUpdateOpener(_ opener: @escaping () -> Void) { updateOpener = opener }
+    func installMCPOpener(_ opener: @escaping () -> Void) { mcpOpener = opener }
+    func showMCPWindow() { mcpOpener?() }
+    func installSkillOpener(_ opener: @escaping () -> Void) {
+        skillOpener = opener
+        guard !checkedSkillOnboarding else { return }
+        checkedSkillOnboarding = true
+        Task { [weak self] in
+            guard let self, await self.skillInstaller.shouldOfferAtLaunch(), !self.quitWhenFinished, !self.logShutdownStarted else { return }
+            self.skillOpener?()
+        }
+    }
+    func showSkillWindow() {
+        skillOpener?()
+        Task { await skillInstaller.refresh() }
+    }
     func showUpdateWindow(check: Bool = true) {
         if check { updates.checkManually() }
         updateOpener?()
@@ -851,6 +891,7 @@ final class AppModel: ObservableObject {
         logQueryTask?.cancel(); logReadTask?.cancel(); logRefreshTask?.cancel(); logLoadingIndicatorTask?.cancel()
         logReadToken = UUID()
         Task {
+            await self.mcp.shutdown()
             // Wait for the cancelled scan to leave its chunk, then close handles
             // and remove the current disk index before completing normal quit.
             for watcher in self.applicationWatchers.values { watcher.cancel() }
@@ -1234,6 +1275,8 @@ struct MenuContent: View {
                 }.padding(.horizontal, 10).padding(.vertical, 5)
                 Divider()
             }
+            MCPMenuEntry(service: model.mcp) { model.showMCPWindow() }
+            SkillMenuEntry(installer: model.skillInstaller) { model.showSkillWindow() }
             UpdateMenuEntry(updater: model.updates) { model.showUpdateWindow() }
             Divider()
             HStack {
