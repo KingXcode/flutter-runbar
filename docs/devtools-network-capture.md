@@ -1,5 +1,7 @@
 # DevTools 网络请求采集可行性
 
+本文描述原有 VM Service 采集；新增的 HTTP / WebSocket 代理独立保留，见 [代理抓包说明](proxy-capture.md)。DevTools 的 WebSocket 限制不表示代理模式也不支持。
+
 结论：可实现独立的网络请求列表与本地缓存。适用对象是启用了 VM Service 和 HTTP profiling 的 Dart / Flutter 调试进程；不需要读取 DevTools 网页。现已接入 Runbar 的「日志 / 网络」面板，支持请求列表、详情、本地历史缓存与基本筛选。原型和正式 Swift 采集器均使用自建回环测试服务验证。
 
 ## 数据来源

@@ -22,6 +22,7 @@ DMG 默认自动选择唯一可用的 Developer ID Application 证书；也可�
 App 默认使用 ad hoc 签名。DMG 无分发证书时会明确报错，可显式指定 - 生成 ad hoc 包。
 同名旧产物先备份。替换桌面 App 前请求旧版正常退出；生成 DMG 不退出 App。
 发布要求：main 干净且已推送，CHANGELOG.md 写清本次更新，gh 已登录。
+构建会按锁定版本下载并校验两个架构的内置抓包引擎，缓存在 .build/；最终用户无需另装抓包工具。
 只上传安装包和校验文件到 GitHub；不进行 Apple 公证，不上传到 Apple。Developer ID 签名会请求签名时间戳。
 TEXT
 }
@@ -115,7 +116,7 @@ install_bundle() {
   mkdir -p "$parent"
   STAGING_DIRECTORY="$(mktemp -d "$parent/.runbar-package.XXXXXX")"
   ditto --norsrc --noextattr "$BUILT_APP" "$STAGING_DIRECTORY/Runbar.app"
-  codesign --verify --strict --verbose=2 "$STAGING_DIRECTORY/Runbar.app"
+  codesign --verify --deep --strict --verbose=2 "$STAGING_DIRECTORY/Runbar.app"
   if [[ -e "$destination" || -L "$destination" ]]; then
     if [[ -L "$destination" || ! -d "$destination" ]]; then
       echo "目标不是普通应用目录，未替换：$destination" >&2
@@ -137,7 +138,7 @@ install_bundle() {
   fi
   rmdir "$STAGING_DIRECTORY"
   STAGING_DIRECTORY=""
-  codesign --verify --strict --verbose=2 "$destination"
+  codesign --verify --deep --strict --verbose=2 "$destination"
   echo "应用：$destination"
   if [[ -n "$backup" ]]; then echo "旧版备份：$backup"; fi
 }
@@ -246,7 +247,7 @@ xcodebuild -project FlutterRunbar.xcodeproj -scheme FlutterRunbar \
   -derivedDataPath "$DERIVED_DATA" "ARCHS=$BUILD_ARCHITECTURES" "ONLY_ACTIVE_ARCH=$BUILD_ACTIVE_ARCH" \
   "${BUILD_SETTINGS[@]}" build 2>&1 | tee "$BUILD_LOG"
 BUILT_APP="$DERIVED_DATA/Build/Products/Release/Runbar.app"
-codesign --verify --strict --verbose=2 "$BUILT_APP"
+codesign --verify --deep --strict --verbose=2 "$BUILT_APP"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$BUILT_APP/Contents/Info.plist")"
 BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$BUILT_APP/Contents/Info.plist")"
 if [[ ! "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ || ! "$BUILD_NUMBER" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then

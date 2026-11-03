@@ -1,0 +1,81 @@
+# 代理抓包：HTTP 与 WebSocket
+
+Runbar 保留 DevTools 的 Dart VM HTTP 采集，同时提供独立的本机正向代理。两套来源分开存储、分开展示，不合并重复请求。代理功能默认关闭，不修改源码或系统全局代理。
+
+## 使用
+
+1. 安装 Runbar 后直接在项目命令旁点击「代理抓包」。默认使用随 App 一起安装的 mitmproxy 12.3.1，不需要安装 Homebrew、Python 或其他抓包工具，也不在首次运行时另行下载引擎。
+2. 通用 App 同时包含 Apple Silicon / Intel 引擎，按当前 Runbar 进程架构选择。高级选项可手动指定外部 mitmdump（10+），也可点击「恢复内置」。旧版设置里明确指定的外部路径会保留；路径失效时恢复内置即可。
+3. 勾选「下次运行时开启代理抓包」并保存，再点击运行。项目设置自动保存；引擎位置是本机偏好。内置沙盒清理操作不启动代理。
+4. 在「网络」中切换「DevTools / 代理 HTTP / WebSocket」。有代理的记录默认进入代理 HTTP。DevTools 的开关与暂停保持原有含义，不控制代理。
+5. WebSocket 列表按采集顺序排列，最新在底部，默认定位最新。向上滚动暂停跟随，按需读取更早的摘要；可拖动全局滚动条、点击最早 / 最新，或重新勾选跟随。选择事件后读取消息、连接信息和握手 Headers。
+
+每次运行启动独立的 mitmdump，只绑定 `127.0.0.1`，由操作系统分配空闲端口；引擎确认监听后才启动命令。命令的登录 shell 初始化后注入以下变量，避免 shell 配置中的旧代理覆盖本次值：
+
+```text
+HTTP_PROXY=http://127.0.0.1:<本次端口>
+HTTPS_PROXY=http://127.0.0.1:<本次端口>
+http_proxy=http://127.0.0.1:<本次端口>
+https_proxy=http://127.0.0.1:<本次端口>
+NO_PROXY=<原有值>,localhost,127.0.0.1,::1
+no_proxy=<原有值>,localhost,127.0.0.1,::1
+```
+
+保留原有绕过规则并追加本机地址，避免 VM Service / DevTools 回环请求进入代理。变量仅作用于该命令及继承其环境的子进程，不改变父进程或其他项目。运行中不能切换代理。命令结束、停止或 Flutter detach 后，所属代理也退出；detach 保留的 App 可能因此失去代理网络。Runbar 异常退出后，引擎检测父进程变化并结束。
+
+## 内置引擎与构建
+
+- 固定 mitmproxy 12.3.1，下载地址、两个架构的 SHA-256 和原发布者 Team ID 记录在 `scripts/proxy-engine.lock.json`。版本随 Runbar 更新，不在用户机器上独立联网升级引擎。
+- Xcode 普通构建、Archive 和现有 App / DMG 打包入口都会执行 `scripts/package-proxy-engine.py`。首次构建下载约 107 MB 的官方独立包到项目 `.build/proxy-engine-cache/`，后续复用已验证缓存；不会写入系统应用目录或安装全局 Python 包。
+- 官方完整签名包保留在 `Contents/Helpers/RunbarProxy-arm64.app` / `RunbarProxy-x86_64.app`，包括 Python、OpenSSL、动态库和依赖许可证，不拆分、不更改原引擎签名。单架构开发构建只嵌入相应架构；Release 通用包包含两套，展开合计约 180 MB。外层 Runbar 按原流程签名并递归验证，仍不做 Apple 公证或上传 Apple。
+- 内置引擎及许可证清单随 App 分发，设置中有「开源许可…」入口。引擎缺失、下载校验失败、架构或签名不符会阻止构建，避免交付需要用户补装依赖的包。
+- 在已验证缓存上可离线构建。需要预先准备缓存时，在源码根目录运行：
+
+```sh
+python3 scripts/package-proxy-engine.py --prepare-only --architectures 'arm64 x86_64'
+```
+
+预备和打包只读取架构及签名，不执行引擎、不生成抓包证书。自定义外部引擎不被复制进 Runbar。默认未发现内置包时仍可兼容检测本机已有的 mitmdump；正式打包会要求内置包完整。
+
+## Flutter 与路由限制
+
+环境变量不是强制拦截：[Dart HttpClient.findProxy](https://api.dart.dev/dart-io/HttpClient/findProxy.html) 默认直连，需要网络库设置代理解析；[findProxyFromEnvironment](https://api.dart.dev/dart-io/HttpClient/findProxyFromEnvironment.html) 只有被网络库使用时才生效。已有网络库支持这些变量时，Runbar 无需改业务项目即可抓包；如果不支持，不能只靠启动环境保证捕获。Runbar 不注入 Dart 代码或改写目标入口。
+
+原生网络库、WebView、子进程、自定义 Socket 是否跟随代理取决于各自实现；QUIC / HTTP/3、原始 TCP/UDP 不属于本次正向 HTTP 代理范围。此入口主要用于本机 macOS 运行，手机、远端设备和其他系统中的模拟器不能通过它们自己的 `127.0.0.1` 自动访问 Mac。已关联的外部 App 无法追溯或重定向已有直连流量，继续使用原有 DevTools 连接。
+
+代理本身不依赖 VM Service，Release 客户端支持代理且满足证书条件也能产生记录；热重载、VS Code 调试仍受原有 Flutter 调试能力限制。
+
+## HTTPS 与 WSS
+
+- 默认 TLS 透传，不解密 HTTPS / WSS，只记录 CONNECT 隧道受理摘要。摘要的 200 不是业务服务器返回的 HTTP 状态，透传时没有 HTTPS 正文或 WSS 消息。
+- 首次勾选「解密 HTTPS / WSS」且尚未检测到系统信任时，自动显示证书授权引导；也可随时点击「配置证书信任…」。界面展示「尚未准备 / 待授权 / 本机 SSL 已信任 / 证书暂不可用」状态。
+- 点击引导中的「打开系统信任设置…」即可直接打开这张证书的 macOS 原生信任窗口，不需要找证书文件或系统设置路径。缺少证书时，先临时启动无业务流量的引擎生成专属 CA；并发生成与项目启动通过文件锁串行初始化，避免生成不同根证书。系统窗口展开信任选项，按引导将「安全套接字层 (SSL)」设为「始终信任」，保存并按 macOS 提示确认。
+- 信任窗口关闭或从钥匙串访问返回 Runbar 后自动重新检测，也可点击「重新检测」。检测使用本机实际 SSL 信任策略，禁止网络拉取，不把抓包 CA 人为设为检测锚点，不把「窗口已打开 / 点击保存」视为信任成功。状态只代表系统信任，不保证目标 App 的自定义证书库接受它。
+- 引导中保留「导入到钥匙串…」「打开钥匙串访问」按钮及 Apple 帮助链接。导入按钮直接调用钥匙串访问打开当前公开证书，手动方式只需选择「登录」钥匙串、打开证书并修改 SSL 信任；证书名称及 SHA-256 指纹可查看和复制。
+- 网络页开启解密的运行记录提供「证书授权…」入口，运行中也能打开。TLS 握手失败的提示旁显示「配置证书…」，无需停止项目去找设置；存储空间等其他告警不显示这个按钮。成功收到 HTTPS 响应后清理旧 TLS 提示。授权后重新发起请求或重连 WebSocket；如果还没开启解密，需要停止后启用再运行。
+- 证书目录是应用数据目录下的 `proxy-certificates`（0700），不使用或修改 `~/.mitmproxy` 的已有 CA。只读取 `mitmproxy-ca-cert.cer` 的公开证书，拒绝含私钥、多张证书或超过 64 KB 的输入，不显示或导入 `mitmproxy-ca.pem` 的私钥。Runbar 不代替用户修改系统信任，不关闭源站证书校验；信任选择及认证由 macOS 原生面板处理。
+- 证书固定、自定义证书库、双向认证等可能阻止解密。TLS 握手失败会提示信任问题，但系统安装证书不保证所有客户端接受。
+
+参见 [Apple 证书信任设置](https://support.apple.com/zh-cn/guide/keychain-access/kyca11871/mac)、[系统证书信任面板 API](https://developer.apple.com/documentation/securityinterface/sfcertificatetrustpanel)、[mitmproxy 证书说明](https://docs.mitmproxy.org/stable/concepts/certificates/)和 [TLS 透传 API](https://docs.mitmproxy.org/stable/api/mitmproxy/tls.html)。
+
+## WebSocket 的连接、订阅和推送
+
+记录连接、发送、接收和关闭，包括连接 ID、URL、时间、文本 / 二进制类型、原始大小、关闭码和握手 Headers。`ws://` 可直接读取，`wss://` 需解密并信任 CA。
+
+WebSocket 没有标准的「订阅」事件，订阅、取消订阅、心跳和业务请求都可能是普通发送消息。Runbar 保留发送原文，不推断订阅是否成功；接收可能是推送或业务响应。二进制按 Base64 显示，不解释私有证券 / Protobuf 协议；Ping / Pong 控制帧不作为业务消息展示。不提供消息注入、重放或修改。
+
+消息默认尝试 JSON 格式化，可切换 XML / 原始并记住选择；格式不符保留原文，二进制明确显示 Base64。自动换行偏好独立保存，正文按页读取。
+
+## 缓存与资源
+
+- 每个运行目录的 `proxy/` 保存 HTTP SQLite / 正文文件、`websockets.sqlite` 和 `status.json`。不写入 DevTools 的 `network/`。删除记录时一并移到废纸篓，历史可离线查看。
+- HTTP 复用筛选、JSON 条件、方案、内容查询、格式化与跟随。HTTP 和 WebSocket 列表各最多保留 256 条摘要，列表不读正文，选中后才读详情和当前文本页。
+- HTTP 请求 / 响应各最多保留 1 MiB，WebSocket 单消息最多保留前 1 MiB；截断原因会注明。gzip / deflate 在 1 MiB 输出限制内解压，其他编码保留压缩原文，不修改网络协商。
+- HTTP 原样流式转发，最多 64 个同时预览请求、合计 16 MiB 预览缓冲。Python 事件队列限制 16 MiB / 2048 项，单事件 4 MiB；写入慢时丢弃采集事件并报告数量，不在转发事件循环等待磁盘。Swift 串行管道读取，不创建无界异步任务。引擎及时释放已完成 WebSocket 消息历史。
+- 缓冲上限不是 mitmdump 整个进程的内存硬上限：活动连接及单条 WebSocket 消息重组有额外内存；极大单条消息可能产生瞬时占用，不能把缓存上限当作转发内存上限。
+- 为系统保留 512 MiB 磁盘及本次写入空间。写入失败提示原因，继续转发，5 秒后自动尝试恢复记录；无法补回的事件计入未记录数量。缓存不因固定条数而自动删除。
+- 本次不扩展 MCP 工具；原有 MCP 网络查询仍针对 DevTools 缓存，不能把工具空结果解释成代理没有流量。
+
+## 验证边界
+
+按既有要求，仅构建 App 与测试目标，检查 Python 语法、资源嵌入、官方包校验值、架构和递归签名。不安装额外系统软件，不执行测试、代理引擎、业务 App、实际授权窗口或真实抓包，不修改当前机器的钥匙串和证书信任；HTTP / TLS / WebSocket 联调仍需目标网络库支持代理及相应证书条件。

@@ -32,8 +32,13 @@ public final class ProcessRunner: @unchecked Sendable {
     private var flutterOperation: UUID?
     private var flutterReply = ""
     private var flutterSandboxDiagnostic: FlutterSandboxDiagnostic?
+    private var proxyConfiguration: ProxyLaunchConfiguration?
+    private var proxy: ProxyCaptureProcess?
     public init(store: SessionStore, handler: @escaping (Event) -> Void) { self.store = store; self.handler = handler }
     deinit { if inputFD >= 0 { close(inputFD) } }
+    public func configureProxy(_ configuration: ProxyLaunchConfiguration?) {
+        queue.async { self.proxyConfiguration = configuration }
+    }
     private func emit(_ event: Event) {
         guard case .output(let text) = event else { DispatchQueue.main.async { self.handler(event) }; return }
         guard !text.isEmpty else { return }
@@ -65,12 +70,27 @@ public final class ProcessRunner: @unchecked Sendable {
         do {
             try store.save(next)
             log = try RunLog(directory: store.directory(next.id))
+            if let configuration = proxyConfiguration {
+                let capture = ProxyCaptureProcess(configuration: configuration,
+                    directory: store.directory(next.id).appendingPathComponent("proxy", isDirectory: true), epoch: next.id)
+                proxy = capture
+                next.proxyCapture = try capture.start()
+                try store.save(next)
+                try log?.append(Data(("[Runbar 代理抓包] \(next.proxyCapture!.address) · 仅代理当前命令及继承环境的子进程；不支持代理的网络库仍会直连。\n").utf8))
+            }
             var child: pid_t = 0; var output: Int32 = -1; var input: Int32 = -1
             let interactive = FlutterRunInput.enabled(project: project, preset: preset)
             let path = CommandEnvironment.extraPath(extraPath)
-            let error = interactive
-                ? rb_spawn_interactive(shell, preset.command, project.path, path, &child, &output, &input)
-                : rb_spawn(shell, preset.command, project.path, path, &child, &output)
+            let error: Int32
+            if let info = next.proxyCapture {
+                error = interactive
+                    ? rb_spawn_proxy(shell, preset.command, project.path, path, info.address, &child, &output, &input)
+                    : rb_spawn_proxy(shell, preset.command, project.path, path, info.address, &child, &output, nil)
+            } else {
+                error = interactive
+                    ? rb_spawn_interactive(shell, preset.command, project.path, path, &child, &output, &input)
+                    : rb_spawn(shell, preset.command, project.path, path, &child, &output)
+            }
             guard error == 0 else { throw RunbarError.message("启动失败：\(String(cString: strerror(error)))") }
             pid = child; session = next; pipeEnded = false; stopped = false
             parser = OutputParser(); serviceDiscovery = VMServiceDiscovery(); start = .now(); stopTime = nil; stopStage = 0
@@ -110,6 +130,7 @@ public final class ProcessRunner: @unchecked Sendable {
                 }
             }
         } catch {
+            proxy?.stop(); proxy = nil
             next.status = .failed; next.endedAt = Date(); next.error = error.localizedDescription
             do { try store.save(next) } catch { next.error = (next.error ?? "") + "；保存失败：\(error.localizedDescription)" }
             try? log?.close(); log = nil
@@ -243,6 +264,7 @@ public final class ProcessRunner: @unchecked Sendable {
     }
     private func finish(code: Int32?) {
         timer?.cancel(); timer = nil
+        proxy?.stop(); proxy = nil
         closeInput(); flutterControls = nil
         flutterOperation = nil; flutterReply = ""
         let final = parser.consume(Data(), final: true); emit(.output(final.text)); addURLs(final.urls)

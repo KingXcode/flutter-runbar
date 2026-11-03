@@ -31,12 +31,14 @@ public enum DevToolsLink {
 }
 
 public protocol ProjectCommandRunning: AnyObject {
+    func configureProxy(_ configuration: ProxyLaunchConfiguration?)
     func start(project: Project, preset: CommandPreset, extraPath: String)
     func stop()
     func runningProcessID() async -> Int32?
     func sendFlutterAction(_ action: FlutterRunAction, sessionID: UUID)
 }
 public extension ProjectCommandRunning {
+    func configureProxy(_ configuration: ProxyLaunchConfiguration?) {}
     func runningProcessID() async -> Int32? { nil }
     func sendFlutterAction(_ action: FlutterRunAction, sessionID: UUID) {}
 }
@@ -79,7 +81,7 @@ public final class ProjectRunCoordinator {
         return displayBuffers[id] ?? ""
     }
     @discardableResult
-    public func start(project: Project, preset: CommandPreset, extraPath: String) -> Bool {
+    public func start(project: Project, preset: CommandPreset, extraPath: String, proxy: ProxyLaunchConfiguration? = nil) -> Bool {
         guard preset.builtInAction == nil else {
             onEvent?(.failure(project.id, "内置操作不能作为 shell 命令运行。")); return false
         }
@@ -101,6 +103,7 @@ public final class ProjectRunCoordinator {
             self?.handle(event, projectID: project.id, generation: generation)
         }
         runners[project.id] = runner
+        runner.configureProxy(proxy)
         runner.start(project: project, preset: preset, extraPath: extraPath)
         return true
     }

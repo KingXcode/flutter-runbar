@@ -13,6 +13,8 @@
 
 两个入口都编译 Apple Silicon / Intel 通用应用。底层 `bash scripts/build-app.sh` 也默认发布，但不复制到桌面。公开发布库固定为 `KingXcode/flutter-runbar`，不自动修改仓库可见性或创建凭据。构建时记录版本、构建号及源码 SHA；标签如 `v0.10.0+47`，同一提交的 App / DMG 加入同一条 Release。
 
+App / DMG 已包含两个架构的完整抓包引擎，用户不需要安装 Homebrew、Python 或 mitmproxy。Xcode 的嵌入步骤从官方地址下载锁定版本到 `.build/proxy-engine-cache/`，检查 SHA-256、Mach-O 架构及原发布者签名后复制到 App 的 `Contents/Helpers`，保留原引擎签名和依赖许可证；外层 Runbar 签名后递归验签。首次构建需要联网下载约 107 MB，后续可复用已验证缓存。使用与预备缓存命令见 [代理抓包说明](proxy-capture.md)。
+
 DMG 默认要求唯一可用的 Developer ID Application 证书，可用 `--signing-identity` 指定。没有分发证书时显式传 `--signing-identity -` 生成 ad hoc DMG。App 默认 ad hoc 签名。签名时间戳可能访问 Apple 签名服务；**不调用 notarytool、不公证、不向 Apple 上传安装包**。
 
 只打本地开发包时用：

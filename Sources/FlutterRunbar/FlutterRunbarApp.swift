@@ -205,6 +205,7 @@ final class AppModel: ObservableObject {
     let updates = AppUpdateModel()
     let mcp = MCPServiceController()
     let skillInstaller = SkillInstallationModel()
+    let proxyCertificates = ProxyCertificateModel()
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
@@ -295,6 +296,7 @@ final class AppModel: ObservableObject {
             config = try store.loadConfiguration(); try store.recoverInterrupted(); history = try store.sessions()
             self.store = store
             network.configure(root: store.root)
+            proxyCertificates.configure(directory: store.root.appendingPathComponent("proxy-certificates", isDirectory: true))
             skillInstaller.configure(root: store.root)
             mcp.configure(root: store.root) { [weak self] in
                 await self?.mcpSnapshot() ?? RunbarMCPSnapshot()
@@ -539,9 +541,27 @@ final class AppModel: ObservableObject {
         if preset.builtInAction == .resetMacOSSandbox {
             resetSandbox(project: project)
         } else {
-            coordinator.start(project: project, preset: preset, extraPath: config.extraPath)
+            var proxy: ProxyLaunchConfiguration?
+            if project.proxyCapture?.enabled == true {
+                guard let executable = ProxyLaunchConfiguration.findExecutable(preferred: UserDefaults.standard.string(forKey: "proxyMitmdumpPath") ?? ""),
+                      let addon = Bundle.main.url(forResource: "runbar_capture", withExtension: "py", subdirectory: "ProxyCapture"),
+                      let certificateDirectory = proxyCertificateDirectory else {
+                    error = "抓包引擎不可用。请在「代理抓包」中恢复内置引擎或选择有效的自定义引擎；安装不完整时请重新安装 Runbar。"; return
+                }
+                proxy = ProxyLaunchConfiguration(executable: executable, addon: addon,
+                    certificateDirectory: certificateDirectory, decryptTLS: project.proxyCapture?.decryptTLS == true)
+            }
+            coordinator.start(project: project, preset: preset, extraPath: config.extraPath, proxy: proxy)
         }
         #endif
+    }
+    var proxyCertificateDirectory: URL? { store?.root.appendingPathComponent("proxy-certificates", isDirectory: true) }
+    func setProxyOptions(_ options: ProxyProjectOptions, projectID: UUID) -> Bool {
+        guard !state(for: projectID).isBusy, let index = config.projects.firstIndex(where: { $0.id == projectID }) else { return false }
+        let previous = config.projects[index].proxyCapture
+        config.projects[index].proxyCapture = options
+        guard persist() else { config.projects[index].proxyCapture = previous; return false }
+        return true
     }
     private func resetSandbox(project: Project) {
         guard let store else { error = "本地存储不可用，未执行清理。"; return }

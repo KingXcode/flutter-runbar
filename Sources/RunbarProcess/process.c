@@ -11,11 +11,28 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/file.h>
 #ifdef __APPLE__
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 #endif
 extern char **environ;
+
+int rb_lock_file(const char *file, int *lock_fd) {
+    if (!file || !lock_fd) return EINVAL;
+    *lock_fd = -1;
+    int descriptor = open(file, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (descriptor < 0) return errno;
+    int result;
+    do { result = flock(descriptor, LOCK_EX); } while (result < 0 && errno == EINTR);
+    if (result < 0) { int error = errno; close(descriptor); return error; }
+    *lock_fd = descriptor;
+    return 0;
+}
+void rb_unlock_file(int lock_fd) {
+    if (lock_fd < 0) return;
+    flock(lock_fd, LOCK_UN); close(lock_fd);
+}
 
 pid_t rb_parent_process(pid_t pid) {
 #ifdef __APPLE__
@@ -67,7 +84,7 @@ static int owned_descriptors(int descriptors[2]) {
 }
 
 static int rb_spawn_unlocked(const char *shell, const char *command, const char *directory,
-             const char *path, pid_t *pid, int *output_fd, int *input_fd) {
+             const char *path, const char *proxy, pid_t *pid, int *output_fd, int *input_fd) {
     int output[2], input[2] = {-1, -1};
     if (pipe(output) < 0) return errno;
     int error = owned_descriptors(output);
@@ -116,7 +133,14 @@ static int rb_spawn_unlocked(const char *shell, const char *command, const char 
     CHECK(posix_spawnattr_setpgroup(&attributes, 0));
     CHECK(posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF));
     // The user's command and PATH are positional arguments, never interpolated.
-    char *argv[] = {(char *)shell, "-l", "-c", "export PATH=\"$1:$PATH\"; eval \"$2\"", "runbar", (char *)path, (char *)command, NULL};
+    const char *script = "export PATH=\"$1:$PATH\"; eval \"$2\"";
+    if (proxy) script = "export PATH=\"$1:$PATH\"; "
+        "export HTTP_PROXY=\"$3\" HTTPS_PROXY=\"$3\" http_proxy=\"$3\" https_proxy=\"$3\"; "
+        "export no_proxy=\"${no_proxy-${NO_PROXY-}}\"; export NO_PROXY=\"${NO_PROXY-${no_proxy-}}\"; "
+        "export NO_PROXY=\"${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,::1\"; "
+        "export no_proxy=\"${no_proxy:+$no_proxy,}localhost,127.0.0.1,::1\"; eval \"$2\"";
+    char *argv[] = {(char *)shell, "-l", "-c", (char *)script, "runbar", (char *)path,
+                    (char *)command, (char *)proxy, NULL};
     if (!error) error = posix_spawn(pid, shell, &actions, &attributes, argv, environ);
     posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
     close(output[1]);
@@ -170,7 +194,7 @@ int rb_spawn(const char *shell, const char *command, const char *directory,
              const char *path, pid_t *pid, int *output_fd) {
     int error = pthread_mutex_lock(&spawn_mutex);
     if (error) return error;
-    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd, NULL);
+    int result = rb_spawn_unlocked(shell, command, directory, path, NULL, pid, output_fd, NULL);
     pthread_mutex_unlock(&spawn_mutex);
     return result;
 }
@@ -180,7 +204,17 @@ int rb_spawn_interactive(const char *shell, const char *command, const char *dir
     *input_fd = -1;
     int error = pthread_mutex_lock(&spawn_mutex);
     if (error) return error;
-    int result = rb_spawn_unlocked(shell, command, directory, path, pid, output_fd, input_fd);
+    int result = rb_spawn_unlocked(shell, command, directory, path, NULL, pid, output_fd, input_fd);
+    pthread_mutex_unlock(&spawn_mutex);
+    return result;
+}
+int rb_spawn_proxy(const char *shell, const char *command, const char *directory,
+                   const char *path, const char *proxy, pid_t *pid, int *output_fd, int *input_fd) {
+    if (!proxy || !*proxy) return EINVAL;
+    if (input_fd) *input_fd = -1;
+    int error = pthread_mutex_lock(&spawn_mutex);
+    if (error) return error;
+    int result = rb_spawn_unlocked(shell, command, directory, path, proxy, pid, output_fd, input_fd);
     pthread_mutex_unlock(&spawn_mutex);
     return result;
 }

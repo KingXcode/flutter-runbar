@@ -9,7 +9,10 @@
 /* Begin PBXBuildFile section */
 		0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */; };
 		0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */; };
+		10C4D1895C3B2CAA0F66E7AA /* ProxyCapture in Resources */ = {isa = PBXBuildFile; fileRef = A82ED9E8049F41FA3FC23F7B /* ProxyCapture */; };
+		1611435DCCFF242E2BC1984D /* ProxyWebSocketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */; };
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
+		199BF03FDD090A2E33451B92 /* ProxyCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */; };
 		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
 		2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */; };
 		22285D24A8A763BF774F25FF /* RunbarMCPQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */; };
@@ -17,6 +20,7 @@
 		2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		353D314D835C4E208E2BEB89 /* ProxyCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */; };
 		401D7E552F16054EE4A4F086 /* MCPSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */; };
 		40E0446C1C3DE04FA930CF84 /* AppUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */; };
 		40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */; };
@@ -44,6 +48,7 @@
 		B5CF035478C12B7C52FDD482 /* GlobalShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */; };
 		B917C5541571C2B18D7C4A00 /* NetworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */; };
 		D1D8400C3C7EE2A7DF000A59 /* LogQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB0EFD74313532934ED48FB /* LogQueryTests.swift */; };
+		D5E22A1C7780B655D50CCD62 /* ProxyCertificateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */; };
 		DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */; };
 		E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F989F55D837BC0137D8965AC /* ProjectKindTests.swift */; };
 		EB88B4D3E791610ADDF50A13 /* LogTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */; };
@@ -69,9 +74,12 @@
 		3C4BA1882F0B204ADE474147 /* setup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = setup.md; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
 		3FE25BD6D3CB404D874DA7C2 /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
+		4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCaptureView.swift; sourceTree = "<group>"; };
+		49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCaptureTests.swift; sourceTree = "<group>"; };
 		4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentView.swift; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
+		69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCertificateView.swift; sourceTree = "<group>"; };
 		6A2C0A687E0FDEB00B0A2C3B /* openai.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = openai.yaml; sourceTree = "<group>"; };
 		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
 		7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationModel.swift; sourceTree = "<group>"; };
@@ -90,12 +98,14 @@
 		A31907D75CF3EDDDDD941ADD /* github-release.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "github-release.py"; sourceTree = "<group>"; };
 		A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
+		A82ED9E8049F41FA3FC23F7B /* ProxyCapture */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ProxyCapture; path = Resources/ProxyCapture; sourceTree = SOURCE_ROOT; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPLocalServer.swift; sourceTree = "<group>"; };
 		AA265515B8A948781CDF2C41 /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
 		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
 		ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
+		B4176923BDDEAA2C43B750A0 /* proxy-engine.lock.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "proxy-engine.lock.json"; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
@@ -108,11 +118,13 @@
 		D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPTests.swift; sourceTree = "<group>"; };
 		DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		E7BFEB43B6014220053D5928 /* package-proxy-engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-proxy-engine.py"; sourceTree = "<group>"; };
 		E843F7341E5B0A609C6A0B71 /* SKILL.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SKILL.md; sourceTree = "<group>"; };
 		E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-vscode-extension.py"; sourceTree = "<group>"; };
 		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPQueueTests.swift; sourceTree = "<group>"; };
+		F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyWebSocketView.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		F988073F96A1983555A9F5EA /* LogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogView.swift; sourceTree = "<group>"; };
 		F989F55D837BC0137D8965AC /* ProjectKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectKindTests.swift; sourceTree = "<group>"; };
@@ -150,6 +162,7 @@
 			isa = PBXGroup;
 			children = (
 				75CB9B8540936580652BC9EC /* Assets.xcassets */,
+				A82ED9E8049F41FA3FC23F7B /* ProxyCapture */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -190,6 +203,7 @@
 				3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
+				49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */,
 				F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */,
 				D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
@@ -251,9 +265,11 @@
 				A31907D75CF3EDDDDD941ADD /* github-release.py */,
 				B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */,
 				7C403F001B892EF0AC7AD6F5 /* package-mcp-skill.py */,
+				E7BFEB43B6014220053D5928 /* package-proxy-engine.py */,
 				E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */,
 				9155C81FA37D89E8A106B833 /* probe-devtools-network.dart */,
 				8BA286984BB626AF54E8C607 /* process-tests.c */,
+				B4176923BDDEAA2C43B750A0 /* proxy-engine.lock.json */,
 				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
 				BEC4844EA1FB283BAA93DA69 /* test-process.sh */,
 			);
@@ -295,6 +311,9 @@
 				A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */,
 				DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */,
 				1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */,
+				4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */,
+				69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */,
+				F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */,
 				7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */,
 				7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */,
 				72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */,
@@ -349,6 +368,7 @@
 				F2EAF89CB7608CCF1264F9BE /* Sources */,
 				CBE78880F38A021AB325E480 /* Resources */,
 				16030357D28652FF245108AC /* Frameworks */,
+				620771D886177741279E2CEA /* Embed bundled proxy engines */,
 				7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */,
 				3F465ECE5D4756465E9D3922 /* Embed Runbar diagnostic Skill */,
 			);
@@ -412,6 +432,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */,
+				10C4D1895C3B2CAA0F66E7AA /* ProxyCapture in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -441,6 +462,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/usr/bin/python3 \"$SRCROOT/scripts/package-mcp-skill.py\" --output \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Skills\"\n";
+		};
+		620771D886177741279E2CEA /* Embed bundled proxy engines */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed bundled proxy engines";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxyEngine/manifest.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/usr/bin/python3 \"$SRCROOT/scripts/package-proxy-engine.py\" --app \"$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME\" --architectures \"$ARCHS\"\n";
 		};
 		7522852BE5FA065C1BB1B8C6 /* Embed Runbar VS Code extension */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -485,6 +526,9 @@
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
 				F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */,
 				861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */,
+				199BF03FDD090A2E33451B92 /* ProxyCaptureView.swift in Sources */,
+				D5E22A1C7780B655D50CCD62 /* ProxyCertificateView.swift in Sources */,
+				1611435DCCFF242E2BC1984D /* ProxyWebSocketView.swift in Sources */,
 				5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */,
 				2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */,
 				2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */,
@@ -511,6 +555,7 @@
 				B917C5541571C2B18D7C4A00 /* NetworkTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
+				353D314D835C4E208E2BEB89 /* ProxyCaptureTests.swift in Sources */,
 				22285D24A8A763BF774F25FF /* RunbarMCPQueueTests.swift in Sources */,
 				9E62AB2D1441582A0A950A36 /* RunbarMCPTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
@@ -614,7 +659,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 51;
+				CURRENT_PROJECT_VERSION = 52;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -628,7 +673,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.11.1;
+				MARKETING_VERSION = 0.12.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -691,7 +736,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 51;
+				CURRENT_PROJECT_VERSION = 52;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -711,7 +756,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.11.1;
+				MARKETING_VERSION = 0.12.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "product": "mitmproxy",
+  "version": "12.3.1",
+  "signingTeam": "S8XHQB96PW",
+  "source": "https://github.com/mitmproxy/mitmproxy/releases/tag/v12.3.1",
+  "checksumSource": "https://github.com/Homebrew/homebrew-cask/blob/master/Casks/m/mitmproxy.rb",
+  "artifacts": {
+    "arm64": {
+      "url": "https://downloads.mitmproxy.org/12.3.1/mitmproxy-12.3.1-macos-arm64.tar.gz",
+      "sha256": "9b7f7a8e3fd1b1544089c937c579ef1f0f503f0ea598c25bda9eab077c735b93"
+    },
+    "x86_64": {
+      "url": "https://downloads.mitmproxy.org/12.3.1/mitmproxy-12.3.1-macos-x86_64.tar.gz",
+      "sha256": "f4cf5e563e7068af297a27be97686f58917760d3c0dcc6a997ca83f6f5ffb3db"
+    }
+  }
+}

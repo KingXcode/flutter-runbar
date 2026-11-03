@@ -18,6 +18,7 @@ struct ManagerView: View {
     @State private var pendingProjectRemoval: Project?
     @State private var expandedLog = false
     @State private var showingNetwork = false
+    @State private var showingProxySettings = false
     @State private var projectGitHeads: [String: ProjectGitHead] = [:]
     @AppStorage("logWrapsLines") private var logWrapsLines = false
     private var gitProjectPaths: [String] { model.config.projects.map(\.path).sorted() }
@@ -143,6 +144,9 @@ struct ManagerView: View {
         }
         .sheet(isPresented: $showingApplicationPicker) {
             ApplicationPickerView(model: model, preferredApplication: model.application)
+        }
+        .sheet(isPresented: $showingProxySettings) {
+            ProxyCaptureSettingsView(model: model, projectID: model.selectedProject)
         }
         .sheet(item: $commandEditor) { request in
             CommandEditorView(model: model, request: request)
@@ -324,6 +328,10 @@ struct ManagerView: View {
                         commandEditor = CommandEditorRequest(project: project, preset: preset)
                     } label: { Image(systemName: "pencil") }
                         .disabled(model.preset == nil || model.preset?.builtInAction != nil || model.selectedState.isBusy).help("编辑所选命令").accessibilityLabel("编辑命令")
+                    Button { showingProxySettings = true } label: {
+                        Label(project.proxyCapture?.enabled == true ? "代理已开启" : "代理抓包", systemImage: "point.3.connected.trianglepath.dotted")
+                    }.disabled(model.selectedState.isBusy)
+                        .help("为下次运行配置独立的 HTTP / WebSocket 代理；现有 DevTools 采集保留")
                     Text(model.preset?.displayCommand ?? "尚未配置命令")
                         .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                         .textSelection(.enabled).frame(minWidth: 100, maxWidth: .infinity, alignment: .leading)
@@ -524,7 +532,7 @@ struct ManagerView: View {
                     Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red).lineLimit(1).help(error)
                 }
                 if showingNetwork {
-                    NetworkPanel(model: model, monitor: model.network, session: session)
+                    NetworkWorkspaceView(model: model, monitor: model.network, session: session)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     LogToolsView(model: model) { logNavigation }

@@ -19,8 +19,8 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    MARKETING_VERSION: "0.11.1"
-    CURRENT_PROJECT_VERSION: "51"
+    MARKETING_VERSION: "0.12.0"
+    CURRENT_PROJECT_VERSION: "52"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
@@ -32,7 +32,15 @@ targets:
     sources:
       - Sources/FlutterRunbar
       - Resources/Assets.xcassets
+      - path: Resources/ProxyCapture
+        type: folder
     postBuildScripts:
+      - name: Embed bundled proxy engines
+        basedOnDependencyAnalysis: false
+        script: |
+          /usr/bin/python3 "$SRCROOT/scripts/package-proxy-engine.py" --app "$TARGET_BUILD_DIR/$FULL_PRODUCT_NAME" --architectures "$ARCHS"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxyEngine/manifest.json
       - name: Embed Runbar VS Code extension
         basedOnDependencyAnalysis: false
         script: |

@@ -246,6 +246,12 @@ struct NetworkPanel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var monitor: NetworkMonitor
     let session: RunSession
+    var proxyMode = false
+    var captureRevision = Date.distantPast
+    private var captureDirectory: URL? {
+        let original = monitor.directory(session.id)
+        return proxyMode ? original?.deletingLastPathComponent().appendingPathComponent("proxy", isDirectory: true) : original
+    }
     @StateObject private var data = NetworkPanelModel()
     @State private var confirmingClear = false
     @State private var showingFieldFilters = false
@@ -266,17 +272,21 @@ struct NetworkPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
+                if proxyMode {
+                    Text("代理 HTTP / HTTPS").font(.caption).foregroundStyle(.secondary)
+                } else {
                 Toggle("网络采集", isOn: Binding(get: { enabled }, set: { value in
                     model.setNetworkCaptureEnabled(value, session: session)
                 })).toggleStyle(.checkbox).fixedSize().disabled(!sourceExists)
                     .help("自动保存当前项目或应用的采集开关。暂停新增请求时，已记录的正文继续补齐；关闭开关停止读取，目标缓冲可能继续记录。")
                 Text(state?.text ?? "本地历史缓存").font(.caption).foregroundStyle(state?.error == true ? .red : .secondary)
                     .lineLimit(1).help(state?.text ?? "已缓存的请求可在进程退出后查看")
+                }
                 Spacer(minLength: 0)
                 Toggle("跟随", isOn: $data.followsOutput).toggleStyle(.checkbox).fixedSize()
                     .help("跟随最新请求并滚动到底部；向上查看会暂停跟随")
                     .accessibilityLabel("跟随网络请求")
-                if monitor.isLive(session.id), enabled, monitor.hasConnection(session.id) {
+                if !proxyMode, monitor.isLive(session.id), enabled, monitor.hasConnection(session.id) {
                     Button(state?.paused == true ? "继续" : "暂停") { monitor.togglePause(session.id) }
                         .help("暂停 / 恢复新增请求，已记录的正文继续补齐，选中的请求优先加载；目标缓冲仍可能增长")
                     if state?.canResumeApplication == true {
@@ -314,14 +324,17 @@ struct NetworkPanel: View {
                 Button("最新") { data.latest() }.disabled(data.window.matching == 0)
                     .accessibilityLabel("最新的网络请求")
             }.font(.caption).foregroundStyle(.secondary)
-            Text("完整列表按需读取 · 磁盘自动增长 · 每个请求 / 响应正文最多 1 MB")
+            Text(proxyMode ? "代理记录按需读取 · 每个请求 / 响应正文最多保留 1 MB；截断情况见概览" : "完整列表按需读取 · 磁盘自动增长 · 每个请求 / 响应正文最多 1 MB")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help("请求摘要和正文按需保存在磁盘，不再受固定 32 MB、50,000 条或 128 MB 总量限制。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。支持 Dart VM 的 HTTP / HTTPS 扩展；WebView、Web 和 WebSocket 不在本版范围。")
+                .help(proxyMode ? "只读取经过本次代理的请求。列表最多保留 256 条摘要；选中后读取详情，每个正文最多保留 1 MB，截断和压缩编码说明见概览。TLS 透传只记录 CONNECT；开启解密并信任证书后才能读取 HTTPS 内容。" : "请求摘要和正文按需保存在磁盘。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。DevTools 支持 Dart VM 的 HTTP / HTTPS；WebSocket 请使用独立代理抓包模式。")
         }.controlSize(.small)
-            .task(id: session.id) { data.configure(directory: monitor.directory(session.id), sessionID: session.id) }
-            .onChange(of: monitor.revision) { _, _ in data.refresh() }
+            .task(id: session.id) {
+                data.configure(directory: captureDirectory, sessionID: session.id)
+            }
+            .onChange(of: monitor.revision) { _, _ in if !proxyMode { data.refresh() } }
+            .onChange(of: captureRevision) { _, _ in if proxyMode { data.refresh() } }
             .onChange(of: data.selectedID) { _, id in
-                if let id { monitor.prioritizeBody(id, sessionID: session.id) }
+                if !proxyMode, let id { monitor.prioritizeBody(id, sessionID: session.id) }
             }
             .onDisappear { data.stop() }
             .confirmationDialog("清理目标采集缓冲？", isPresented: $confirmingClear) {
@@ -505,7 +518,7 @@ struct NetworkPanel: View {
             .overlay {
                 if data.window.matching == 0 {
                     Text(data.queryLoading || !data.window.counts.isComplete ? "正在筛选已缓存内容…" :
-                         data.window.total == 0 ? "暂无已缓存请求\n开启采集后，需要运行支持 HTTP profiling 的 Dart / Flutter 程序" : "没有匹配的请求")
+                         data.window.total == 0 ? (proxyMode ? "暂无代理请求\n请确认目标 App 的网络库已使用本次运行的代理" : "暂无已缓存请求\n开启采集后，需要运行支持 HTTP profiling 的 Dart / Flutter 程序") : "没有匹配的请求")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding().allowsHitTesting(false)
                 }
             }
@@ -547,14 +560,14 @@ struct NetworkPanel: View {
                     } else if let error = monitor.bodyErrors[selected.id] {
                         Text(error).lineLimit(1).help(error)
                     } else {
-                        Text(selected.bodyState == .pending ? "等待正文，选中后优先加载" : selected.bodyState.title)
+                        Text(selected.bodyState == .pending ? (proxyMode ? "等待请求完成后缓存正文" : "等待正文，选中后优先加载") : selected.bodyState.title)
                     }
                     Spacer()
                     if selected.bodyState == .saved || data.showsURLParameters || data.detail == .overview || data.detail == .headers {
                         Button { data.moveBody(-1) } label: { Image(systemName: "chevron.left") }.disabled(data.bodyIndex == 0)
                         Text("\(data.bodyIndex + 1) / \(data.bodyPages)")
                         Button { data.moveBody(1) } label: { Image(systemName: "chevron.right") }.disabled(data.bodyIndex + 1 >= data.bodyPages)
-                    } else if monitor.hasConnection(session.id), enabled {
+                    } else if !proxyMode, monitor.hasConnection(session.id), enabled {
                         Button("重新获取") { monitor.prioritizeBody(selected.id, sessionID: session.id) }
                             .disabled(monitor.loadingBodies.contains(selected.id))
                     }
@@ -768,7 +781,7 @@ private final class NetworkRequestTableView: NSTableView {
     }
 }
 
-private struct NetworkTextView: NSViewRepresentable {
+struct NetworkTextView: NSViewRepresentable {
     let text: String
     let wrapsLines: Bool
     final class Coordinator { var wrapsLines: Bool? }

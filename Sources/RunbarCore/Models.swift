@@ -22,6 +22,8 @@ public struct Project: Codable, Identifiable, Equatable {
     public var presets: [CommandPreset] = []
     public var kind: ProjectKind
     public var networkCaptureEnabled: Bool?
+    /// Opt-in proxy applies only to a newly launched command, independently of VM profiling.
+    public var proxyCapture: ProxyProjectOptions?
     // Optional preserves decoding of configurations written before per-project selection.
     public var selectedPresetID: UUID?
     // Virtual built-in keeps legacy JSON and saved custom commands untouched.
@@ -32,7 +34,7 @@ public struct Project: Codable, Identifiable, Equatable {
         self.path = path; self.presets = presets
         self.kind = kind ?? ProjectDetector.detect(at: path)
     }
-    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID, networkCaptureEnabled }
+    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID, networkCaptureEnabled, proxyCapture }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
@@ -41,6 +43,7 @@ public struct Project: Codable, Identifiable, Equatable {
         selectedPresetID = try values.decodeIfPresent(UUID.self, forKey: .selectedPresetID)
         kind = try values.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? ProjectDetector.detect(at: path)
         networkCaptureEnabled = try values.decodeIfPresent(Bool.self, forKey: .networkCaptureEnabled)
+        proxyCapture = try values.decodeIfPresent(ProxyProjectOptions.self, forKey: .proxyCapture)
     }
 }
 public struct Configuration: Codable {
@@ -70,6 +73,7 @@ public struct RunSession: Codable, Identifiable, Sendable {
     public var error: String?
     public var attachment: ApplicationAttachment?
     public var flutterSandboxAccessFailure: FlutterSandboxAccessFailure?
+    public var proxyCapture: ProxySessionInfo?
     public var sourceName: String { attachment?.application.name ?? URL(fileURLWithPath: projectPath).lastPathComponent }
     public var sourceKey: String { attachment.map { "app:" + $0.application.id.uuidString } ?? projectPath }
     public func belongs(to application: ApplicationTarget) -> Bool { attachment?.application.id == application.id }

@@ -140,7 +140,7 @@ def publish(file, app):
         info = plistlib.load(stream)
     if (info.get('CFBundleIdentifier'), info.get('CFBundleShortVersionString'), str(info.get('CFBundleVersion')), info.get('RunbarSourceRevision')) != ('dev.kingxcode.flutter-runbar', version, str(build), sha):
         raise RuntimeError('安装包版本或源码提交与当前 main 不匹配。')
-    run('codesign', '--verify', '--strict', str(app))
+    run('codesign', '--verify', '--deep', '--strict', str(app))
     architectures = set(run('lipo', '-archs', str(app / 'Contents/MacOS/Runbar')).stdout.split())
     if architectures != {'arm64', 'x86_64'} or '-universal' not in file.name:
         raise RuntimeError('发布包必须同时包含 Apple Silicon 与 Intel 架构。')
