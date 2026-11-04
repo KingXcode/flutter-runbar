@@ -309,9 +309,19 @@ struct NetworkPanel: View {
             if let error = data.filterSaveError { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             GeometryReader { geometry in
                 if geometry.size.width >= 800 {
-                    HSplitView { requests.frame(minWidth: 380); details.frame(minWidth: 300) }
+                    HSplitView {
+                        requests.frame(minWidth: 380, idealWidth: geometry.size.width * 0.55,
+                                       maxWidth: .infinity, maxHeight: .infinity)
+                        details.frame(minWidth: 300, idealWidth: geometry.size.width * 0.45,
+                                      maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
-                    VSplitView { requests.frame(minHeight: 110); details.frame(minHeight: 120) }
+                    VSplitView {
+                        requests.frame(maxWidth: .infinity, minHeight: 110,
+                                       idealHeight: geometry.size.height * 0.55, maxHeight: .infinity)
+                        details.frame(maxWidth: .infinity, minHeight: 120,
+                                      idealHeight: geometry.size.height * 0.45, maxHeight: .infinity)
+                    }
                 }
             }.frame(minHeight: 250)
             HStack {
@@ -515,6 +525,9 @@ struct NetworkPanel: View {
                              onSelection: data.select, onViewport: data.viewportChanged) {
             data.followsOutput = false
         }
+            // Let the AppKit scroll view fill the split pane before drawing
+            // overlays; its measured content width must not leave a blank lane.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
                 if data.window.matching == 0 {
                     Text(data.queryLoading || !data.window.counts.isComplete ? "正在筛选已缓存内容…" :
@@ -541,7 +554,8 @@ struct NetworkPanel: View {
             HStack(spacing: 6) {
                 Picker("显示格式", selection: Binding(get: { data.bodyFormat }, set: data.formatBody)) {
                     ForEach([NetworkBodyFormat.json, .xml, .raw], id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 200).disabled(data.selected == nil)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 160).disabled(data.selected == nil)
+                    .accessibilityLabel("网络正文显示格式")
                     .help("默认 JSON；按当前详情标签记住选择，内容不符合格式时显示原始内容")
                 Spacer(minLength: 0)
                 Toggle("自动换行", isOn: Binding(get: { data.preferences.wrapsLines }, set: data.setWrapsLines))
@@ -590,6 +604,10 @@ private struct NetworkRequestsTable: NSViewRepresentable {
     let onScrollAway: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height, width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: max(0, width), height: max(0, height))
+    }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NetworkRequestsScrollView()
         scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
@@ -786,6 +804,10 @@ struct NetworkTextView: NSViewRepresentable {
     let wrapsLines: Bool
     final class Coordinator { var wrapsLines: Bool? }
     func makeCoordinator() -> Coordinator { Coordinator() }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height, width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: max(0, width), height: max(0, height))
+    }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
         let view = NSTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false

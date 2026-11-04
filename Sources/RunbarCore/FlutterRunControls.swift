@@ -24,28 +24,49 @@ public struct FlutterRunControls: Equatable, Sendable {
     }
 }
 
+public enum FlutterMacOSLaunch {
+    /// Only explicit macOS launches. Attach, builds, mobile targets and compound
+    /// shell commands must not prompt to quit an unrelated desktop app.
+    public static func isRequested(by command: String) -> Bool {
+        guard let invocation = FlutterRunInput.invocation(command), invocation.verb == "run" else { return false }
+        let arguments = Array(invocation.arguments.prefix { $0 != "--" })
+        guard !arguments.contains(where: { ["--help", "-h", "--version"].contains($0) }) else { return false }
+        var device: String?
+        for (index, argument) in arguments.enumerated() {
+            if argument.hasPrefix("--device-id=") { device = String(argument.dropFirst("--device-id=".count)) }
+            else if argument.hasPrefix("-d"), !argument.hasPrefix("--"), argument.count > 2 { device = String(argument.dropFirst(2)) }
+            else if ["-d", "--device-id"].contains(argument), arguments.indices.contains(index + 1) { device = arguments[index + 1] }
+        }
+        return device == "macos"
+    }
+}
+
 /// Opt in only for direct Flutter resident commands. Other commands retain
 /// /dev/null stdin. This never rewrites or executes the user's shell command.
 enum FlutterRunInput {
     static func enabled(project: Project, preset: CommandPreset) -> Bool {
         guard project.kind == .flutter, preset.builtInAction == nil,
-              let words = words(preset.command), !words.isEmpty else { return false }
+              let invocation = invocation(preset.command), ["run", "attach"].contains(invocation.verb) else { return false }
+        return !invocation.arguments.contains {
+            ["--machine", "--no-resident", "--resident=false", "--help", "-h"].contains($0) || $0.hasPrefix("--machine=")
+        }
+    }
+    static func invocation(_ command: String) -> (verb: String, arguments: [String])? {
+        guard let words = words(command), !words.isEmpty else { return nil }
         var index = 0
         if words[index] == "exec" { index += 1 }
         if index < words.count, URL(fileURLWithPath: words[index]).lastPathComponent == "env" { index += 1 }
         while index < words.count, words[index].range(of: "^[A-Za-z_][A-Za-z0-9_]*=", options: .regularExpression) != nil { index += 1 }
-        guard index < words.count else { return false }
+        guard index < words.count else { return nil }
         if URL(fileURLWithPath: words[index]).lastPathComponent == "fvm" {
             index += 1
             if index < words.count, words[index] == "exec" { index += 1 }
         }
-        guard index < words.count, URL(fileURLWithPath: words[index]).lastPathComponent == "flutter" else { return false }
+        guard index < words.count, URL(fileURLWithPath: words[index]).lastPathComponent == "flutter" else { return nil }
         index += 1
         while index < words.count, ["-v", "--verbose", "--suppress-analytics", "--no-version-check"].contains(words[index]) { index += 1 }
-        guard index < words.count, ["run", "attach"].contains(words[index]) else { return false }
-        return !words.dropFirst(index + 1).contains {
-            ["--machine", "--no-resident", "--resident=false", "--help", "-h"].contains($0) || $0.hasPrefix("--machine=")
-        }
+        guard index < words.count else { return nil }
+        return (words[index], Array(words.dropFirst(index + 1)))
     }
 
     // A deliberately small shell-word reader. Compound commands, redirections

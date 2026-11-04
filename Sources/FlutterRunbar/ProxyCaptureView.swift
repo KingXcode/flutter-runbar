@@ -107,33 +107,22 @@ struct NetworkWorkspaceView: View {
     private var directory: URL? { monitor.directory(session.id)?.deletingLastPathComponent().appendingPathComponent("proxy", isDirectory: true) }
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Picker("网络数据来源", selection: $source) {
-                    ForEach(Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 310)
-                if source != .devtools, let info = session.proxyCapture {
-                    Text(session.status == .running ? (status?.message ?? info.address) : "本地历史缓存 · 代理已结束").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        .help("\(info.address) · 每次运行独立代理，仅记录经过该端口的流量")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    sourcePicker
+                    captureStatus
+                    Spacer(minLength: 0)
+                    captureActions
                 }
-                Spacer(minLength: 0)
-                if source != .devtools {
-                    if let info = session.proxyCapture {
-                        Menu {
-                            Button("复制代理地址") { model.copy(info.address) }
-                            if let directory {
-                                Button("在 Finder 中显示抓包缓存") { NSWorkspace.shared.activateFileViewerSelecting([directory]) }
-                            }
-                            Button("证书信任设置…") { showingCertificates = true }
-                        } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
-                            .accessibilityLabel("代理抓包操作")
-                    }
-                    if session.proxyCapture?.decryptTLS == true {
-                        Button("证书授权…", systemImage: "lock.shield") { showingCertificates = true }
-                    }
-                    Button("抓包设置", systemImage: "gearshape") { showingSettings = true }
-                        .disabled(model.selectedProject.map { model.state(for: $0).isBusy } == true)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) { sourcePicker; Spacer(minLength: 0) }
+                    HStack(spacing: 8) { captureStatus; Spacer(minLength: 0); captureActions }
                 }
-            }.controlSize(.small)
+                VStack(alignment: .leading, spacing: 5) {
+                    sourcePicker
+                    HStack(spacing: 8) { captureStatus; Spacer(minLength: 0); captureActions.labelStyle(.iconOnly) }
+                }
+            }.fixedSize(horizontal: false, vertical: true).controlSize(.small)
             if source != .devtools, let warning = status?.warning {
                 HStack(spacing: 8) {
                     Text(warning).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +149,7 @@ struct NetworkWorkspaceView: View {
                     Text("在命令旁的「代理抓包」中开启后重新运行项目。关联到已运行 App 时，继续使用 DevTools；代理无法追溯直连流量。")
                 }
             }
-        }.task(id: session.id) {
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).task(id: session.id) {
             source = session.proxyCapture == nil ? .devtools : .proxyHTTP
             status = nil
             guard let directory, session.proxyCapture != nil else { return }
@@ -173,6 +162,41 @@ struct NetworkWorkspaceView: View {
             ProxyCaptureSettingsView(model: model, projectID: model.selectedProject)
         }.sheet(isPresented: $showingCertificates) {
             ProxyCertificateSetupView(model: model)
+        }
+    }
+    private var sourcePicker: some View {
+        Picker("网络数据来源", selection: $source) {
+            ForEach(Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }.pickerStyle(.segmented).labelsHidden().frame(width: 290)
+            .accessibilityLabel("网络数据来源")
+    }
+    @ViewBuilder private var captureStatus: some View {
+        if source != .devtools, let info = session.proxyCapture {
+            Text(session.status == .running ? (status?.message ?? info.address) : "本地历史缓存 · 代理已结束")
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                .frame(minWidth: 80, alignment: .leading)
+                .help("\(info.address) · 每次运行独立代理，仅记录经过该端口的流量")
+        }
+    }
+    @ViewBuilder private var captureActions: some View {
+        if source != .devtools {
+            HStack(spacing: 8) {
+                if let info = session.proxyCapture {
+                    Menu {
+                        Button("复制代理地址") { model.copy(info.address) }
+                        if let directory {
+                            Button("在 Finder 中显示抓包缓存") { NSWorkspace.shared.activateFileViewerSelecting([directory]) }
+                        }
+                        Button("证书信任设置…") { showingCertificates = true }
+                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton)
+                        .accessibilityLabel("代理抓包操作")
+                }
+                if session.proxyCapture?.decryptTLS == true {
+                    Button("证书授权…", systemImage: "lock.shield") { showingCertificates = true }
+                }
+                Button("抓包设置", systemImage: "gearshape") { showingSettings = true }
+                    .disabled(model.selectedProject.map { model.state(for: $0).isBusy } == true)
+            }.fixedSize()
         }
     }
 }

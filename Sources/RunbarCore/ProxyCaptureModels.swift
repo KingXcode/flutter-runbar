@@ -139,10 +139,23 @@ public struct ProxyWebSocketSummary: Identifiable, Equatable, Sendable {
     public let opcode: Int
     public let bytes: Int64
     public let note: String
+    public var preview = ""
     public var date: Date { Date(timeIntervalSince1970: Double(timestamp) / 1_000_000) }
 }
 
-public struct ProxyWebSocketWindow: Sendable {
+public struct ProxyWebSocketURLWindow: Equatable, Sendable {
+    public static let capacity = 256
+    public var total: Int
+    public var offset: Int
+    public var urls: [String]
+    public static let empty = Self(total: 0, offset: 0, urls: [])
+    public func url(at index: Int) -> String? {
+        let relative = index - offset
+        return urls.indices.contains(relative) ? urls[relative] : nil
+    }
+}
+
+public struct ProxyWebSocketWindow: Equatable, Sendable {
     public static let capacity = 256
     public var total: Int
     public var offset: Int

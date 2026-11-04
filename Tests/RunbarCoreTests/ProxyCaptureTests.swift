@@ -134,4 +134,96 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertTrue(metadata.text.contains("Origin"))
         XCTAssertTrue(metadata.text.contains("connection-1"))
     }
+    func testConnectionsGroupReconnectsByExactURLAndMessagesOnlyIncludeSendReceive() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        let url = "wss://example.invalid/quotes?channel='A'"
+        var opened = event(1, kind: .open); opened.url = url
+        var sent = event(2, kind: .send, payload: Data("{\"subscribe\":true}".utf8)); sent.url = url
+        var other = event(3, payload: Data("other".utf8)); other.url = url + "-other"; other.flowID = "other"
+        var reconnected = event(4); reconnected.url = url; reconnected.flowID = "connection-2"
+        var received = event(5, payload: Data("{\"price\":12.34}".utf8)); received.url = url
+        var closed = event(6, kind: .close); closed.url = url; closed.closeCode = 1000; closed.note = "normal closure"
+        for value in [opened, sent, other, reconnected, received, closed] { try store.append(value) }
+        store.close()
+        let reader = ProxyWebSocketReader()
+        let connections = try await reader.connections(directory: directory, filter: "QUOTES", around: 0)
+        XCTAssertEqual(connections.total, 2)
+        XCTAssertEqual(Set(connections.urls), [url, other.url])
+        let messages = try await reader.messages(directory: directory, url: url, kind: "", around: .max)
+        XCTAssertEqual(messages.rows.map(\.id), [2, 4, 5])
+        XCTAssertEqual(messages.rows.first?.preview, "{\"subscribe\":true}")
+        let sends = try await reader.messages(directory: directory, url: url, kind: "send", around: .max)
+        XCTAssertEqual(sends.rows.map(\.id), [2])
+        let receives = try await reader.messages(directory: directory, url: url, kind: "receive", around: .max)
+        XCTAssertEqual(receives.rows.map(\.id), [4, 5])
+        let metadata = try await reader.detail(directory: directory, id: 2, metadata: true, format: .json, page: 0)
+        XCTAssertTrue(metadata.text.contains("normal closure"))
+        XCTAssertTrue(metadata.text.contains("1000"))
+        let differentConnection = try await reader.detail(directory: directory, id: 4, metadata: true, format: .json, page: 0)
+        XCTAssertFalse(differentConnection.text.contains("normal closure"))
+    }
+    func testMessagePreviewIsBoundedAndFullJSONRemainsAvailableOnSelection() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        let payload = Data(("{\"value\":\"" + String(repeating: "x", count: 2000) + "tail-only\"}").utf8)
+        try store.append(event(1, payload: payload))
+        try store.append(event(2, payload: Data([0, 255]), opcode: 2)); store.close()
+        let reader = ProxyWebSocketReader()
+        let messages = try await reader.messages(directory: directory, url: "wss://example.invalid/quotes", kind: "", around: .max)
+        XCTAssertLessThan(try XCTUnwrap(messages.rows.first?.preview.utf8.count), 600)
+        XCTAssertFalse(try XCTUnwrap(messages.rows.first?.preview.contains("tail-only")))
+        XCTAssertTrue(try XCTUnwrap(messages.rows.last?.preview.contains("二进制 / Base64")))
+        let detail = try await reader.detail(directory: directory, id: 1, metadata: false, format: .json, page: 0)
+        XCTAssertTrue(detail.text.contains("tail-only"))
+        XCTAssertTrue(detail.text.contains("\n"))
+    }
+    func testMessageWindowsRemainBoundedAcrossEntireHistoryOfSelectedURL() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        for id in 1...600 { try store.append(event(Int64(id), payload: Data("row \(id)".utf8))) }
+        store.close()
+        let reader = ProxyWebSocketReader(), url = "wss://example.invalid/quotes"
+        let latest = try await reader.messages(directory: directory, url: url, kind: "", around: .max)
+        XCTAssertEqual(latest.total, 600)
+        XCTAssertEqual(latest.rows.count, 256)
+        XCTAssertEqual(latest.rows.first?.id, 345)
+        XCTAssertEqual(latest.rows.last?.id, 600)
+        let earliest = try await reader.messages(directory: directory, url: url, kind: "", around: 0)
+        XCTAssertEqual(earliest.rows.count, 256)
+        XCTAssertEqual(earliest.rows.first?.id, 1)
+    }
+    func testDuplicateEventRollbackDoesNotAddAnUnrelatedConnectionURL() throws {
+        let store = try ProxyWebSocketStore(directory: temporary())
+        defer { store.close() }
+        try store.append(event(1))
+        var duplicate = event(1); duplicate.url = "wss://not-inserted.invalid"
+        XCTAssertThrowsError(try store.append(duplicate))
+        let connections = try store.connections(filter: "", around: 0)
+        XCTAssertEqual(connections.total, 1)
+        XCTAssertEqual(connections.urls, ["wss://example.invalid/quotes"])
+    }
+    func testLegacyReadOnlyCacheListsConnectionsWithoutWritingAnIndex() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        try store.append(event(1, kind: .open)); try store.append(event(2)); store.close()
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("websockets.sqlite").path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, "DROP TABLE connection_urls", nil, nil, nil), SQLITE_OK)
+        let reader = ProxyWebSocketReader()
+        let connections = try await reader.connections(directory: directory, filter: "", around: 0)
+        XCTAssertEqual(connections.urls, ["wss://example.invalid/quotes"])
+        let messages = try await reader.messages(directory: directory, url: "wss://example.invalid/quotes", kind: "", around: .max)
+        XCTAssertEqual(messages.rows.map(\.id), [2])
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE name='connection_urls'", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+    }
+    func testMacOSLaunchPreflightDoesNotTreatAttachBuildMobileOrCompoundCommandsAsLaunches() {
+        for command in ["fvm flutter run -d macos", "flutter run --device-id=macos --profile", "env TEST=1 fvm exec flutter -v run -dmacos"] {
+            XCTAssertTrue(FlutterMacOSLaunch.isRequested(by: command), command)
+        }
+        for command in ["flutter attach -d macos", "flutter build macos", "flutter run -d android", "flutter run -d macos --help",
+                        "flutter run -d macos; echo done", "flutter run -- --device-id=macos", "flutter run -d macos --device-id=android"] {
+            XCTAssertFalse(FlutterMacOSLaunch.isRequested(by: command), command)
+        }
+    }
 }

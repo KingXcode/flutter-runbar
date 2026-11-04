@@ -536,24 +536,88 @@ final class AppModel: ObservableObject {
         #else
         guard !quitWhenFinished, nativeActionProjectID == nil, !state(for: projectID).isBusy,
               let project = config.projects.first(where: { $0.id == projectID }),
-              let preset = project.selectedPreset, let coordinator else { return }
+              let preset = project.selectedPreset, coordinator != nil else { return }
         guard persist() else { return }
         if preset.builtInAction == .resetMacOSSandbox {
             resetSandbox(project: project)
         } else {
-            var proxy: ProxyLaunchConfiguration?
-            if project.proxyCapture?.enabled == true {
-                guard let executable = ProxyLaunchConfiguration.findExecutable(preferred: UserDefaults.standard.string(forKey: "proxyMitmdumpPath") ?? ""),
-                      let addon = Bundle.main.url(forResource: "runbar_capture", withExtension: "py", subdirectory: "ProxyCapture"),
-                      let certificateDirectory = proxyCertificateDirectory else {
-                    error = "抓包引擎不可用。请在「代理抓包」中恢复内置引擎或选择有效的自定义引擎；安装不完整时请重新安装 Runbar。"; return
-                }
-                proxy = ProxyLaunchConfiguration(executable: executable, addon: addon,
-                    certificateDirectory: certificateDirectory, decryptTLS: project.proxyCapture?.decryptTLS == true)
-            }
-            coordinator.start(project: project, preset: preset, extraPath: config.extraPath, proxy: proxy)
+            guard prepareFlutterLaunch(project: project, preset: preset) else { return }
+            startCommand(project: project, preset: preset)
         }
         #endif
+    }
+    private func startCommand(project: Project, preset: CommandPreset) {
+        guard !quitWhenFinished, let coordinator else { return }
+        var proxy: ProxyLaunchConfiguration?
+        if project.proxyCapture?.enabled == true {
+            guard let executable = ProxyLaunchConfiguration.findExecutable(preferred: UserDefaults.standard.string(forKey: "proxyMitmdumpPath") ?? ""),
+                  let addon = Bundle.main.url(forResource: "runbar_capture", withExtension: "py", subdirectory: "ProxyCapture"),
+                  let certificateDirectory = proxyCertificateDirectory else {
+                error = "抓包引擎不可用。请在「代理抓包」中恢复内置引擎或选择有效的自定义引擎；安装不完整时请重新安装 Runbar。"; return
+            }
+            proxy = ProxyLaunchConfiguration(executable: executable, addon: addon,
+                certificateDirectory: certificateDirectory, decryptTLS: project.proxyCapture?.decryptTLS == true)
+        }
+        coordinator.start(project: project, preset: preset, extraPath: config.extraPath, proxy: proxy)
+    }
+    private func conflictingFlutterApplications(project: Project) -> [RunningApplicationCandidate] {
+        let products = (try? SandboxResetService().discoverApplications(projectPath: project.path)) ?? []
+        let paths = Set(products.map { $0.standardizedFileURL.resolvingSymlinksInPath().path })
+        let identifiers = Set(products.compactMap { Bundle(url: $0)?.bundleIdentifier })
+        return ApplicationDiscovery.running().filter {
+            paths.contains($0.application.bundlePath) || $0.application.bundleIdentifier.map(identifiers.contains) == true
+        }
+    }
+    private func prepareFlutterLaunch(project: Project, preset: CommandPreset) -> Bool {
+        guard project.kind == .flutter, FlutterMacOSLaunch.isRequested(by: preset.command) else { return true }
+        let applications = conflictingFlutterApplications(project: project)
+        guard !applications.isEmpty else { return true }
+        nativeActionProjectID = project.id
+        var waitingForExit = false
+        defer { if !waitingForExit { nativeActionProjectID = nil } }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "此 Flutter App 已在运行"
+        alert.informativeText = "检测到此项目构建的 App 或相同 Bundle ID 的运行实例。单实例 App 会主动退出新进程，使 Flutter 报 DevFS / 调试服务连接断开。\n\n" +
+            applications.prefix(8).map { "\($0.application.name) · PID \($0.processID)\n\($0.application.bundlePath)" }.joined(separator: "\n\n") +
+            "\n\n可以先退出这些实例再重新运行，或显示当前 App。退出时如有保存提示，请先完成保存；Runbar 不会强制结束进程。"
+        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "退出旧实例并运行")
+        alert.addButton(withTitle: "显示当前 App")
+        let response = alert.runModal()
+        if response == .alertThirdButtonReturn {
+            for candidate in applications where ApplicationDiscovery.isCurrent(candidate) {
+                _ = NSRunningApplication(processIdentifier: candidate.processID)?.activate(options: [.activateAllWindows])
+            }
+            return false
+        }
+        guard response == .alertSecondButtonReturn else { return false }
+        waitingForExit = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.nativeActionProjectID = nil }
+            for candidate in applications where ApplicationDiscovery.isCurrent(candidate) {
+                guard NSRunningApplication(processIdentifier: candidate.processID)?.terminate() == true else {
+                    self.error = "无法请求退出 \(candidate.application.name)，请手动退出后重新运行。"; return
+                }
+            }
+            let deadline = ContinuousClock.now + .seconds(15)
+            while applications.contains(where: ApplicationDiscovery.isCurrent) {
+                guard ContinuousClock.now < deadline else {
+                    self.error = "App 尚未退出。请完成 App 的保存 / 退出提示，再重新运行；本次未启动重复实例。"; return
+                }
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            }
+            guard !self.quitWhenFinished, !self.state(for: project.id).isBusy,
+                  let current = self.config.projects.first(where: { $0.id == project.id }),
+                  current.selectedPreset?.id == preset.id, current.selectedPreset?.command == preset.command else { return }
+            guard self.conflictingFlutterApplications(project: current).isEmpty else {
+                self.error = "检测到新的同名实例，请退出后再运行。"; return
+            }
+            self.startCommand(project: current, preset: preset)
+        }
+        return false
     }
     var proxyCertificateDirectory: URL? { store?.root.appendingPathComponent("proxy-certificates", isDirectory: true) }
     func setProxyOptions(_ options: ProxyProjectOptions, projectID: UUID) -> Bool {
