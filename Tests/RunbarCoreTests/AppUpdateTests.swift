@@ -55,4 +55,27 @@ final class AppUpdateTests: XCTestCase {
                             "browser_download_url": "https://evil.example/download.dmg"]]
         XCTAssertTrue(try AppUpdateRelease.parse(JSONSerialization.data(withJSONObject: object)).assets.isEmpty)
     }
+
+    func testInAppDownloadRequiresDMGWithDigestAndVerifiesContents() throws {
+        let unverified = try XCTUnwrap(AppUpdateRelease.parse(payload()).assets.first)
+        XCTAssertFalse(unverified.supportsInAppDownload)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: payload()) as? [String: Any])
+        var files = try XCTUnwrap(object["assets"] as? [[String: Any]])
+        files[0]["size"] = 3
+        files[0]["digest"] = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        object["assets"] = files
+        let release = try AppUpdateRelease.parse(JSONSerialization.data(withJSONObject: object))
+        let asset = try XCTUnwrap(release.assets.first)
+        XCTAssertTrue(asset.supportsInAppDownload)
+
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data("abc".utf8).write(to: file)
+        XCTAssertNoThrow(try asset.verifyDownloadedFile(file))
+        try Data("abd".utf8).write(to: file)
+        XCTAssertThrowsError(try asset.verifyDownloadedFile(file))
+        try Data("ab".utf8).write(to: file)
+        XCTAssertThrowsError(try asset.verifyDownloadedFile(file))
+    }
 }

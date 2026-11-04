@@ -4,10 +4,19 @@ import RunbarCore
 
 @MainActor
 final class AppUpdateModel: ObservableObject {
+    enum InstallationPhase: Equatable {
+        case downloading(Double)
+        case verifying
+        case opening
+    }
+
     @Published private(set) var checking = false
     @Published private(set) var release: AppUpdateRelease?
     @Published private(set) var message = "可手动检查 GitHub 上的最新正式版本。"
     @Published private(set) var lastChecked: Date?
+    @Published private(set) var installationPhase: InstallationPhase?
+    @Published private(set) var downloadedInstaller: URL?
+    @Published private(set) var readyToQuit = false
     @Published var automatic = UserDefaults.standard.object(forKey: "appUpdateAutomatic") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(automatic, forKey: "appUpdateAutomatic")
@@ -18,6 +27,10 @@ final class AppUpdateModel: ObservableObject {
     let build = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
     private var timer: Task<Void, Never>?
     private var manualTask: Task<Void, Never>?
+    private var downloadTask: Task<Void, Never>?
+    private var downloadID: UUID?
+    var installing: Bool { installationPhase != nil }
+    var canCancelDownload: Bool { installing && installationPhase != .opening }
     var hasUpdate: Bool {
         guard let current = try? AppReleaseVersion(version: version, build: build) else { return false }
         return release?.isNewer(than: current) == true
@@ -46,13 +59,17 @@ final class AppUpdateModel: ObservableObject {
             }
         }
     }
-    func stop() { timer?.cancel(); timer = nil; manualTask?.cancel(); manualTask = nil }
+    func stop() {
+        timer?.cancel(); timer = nil
+        manualTask?.cancel(); manualTask = nil
+        downloadTask?.cancel()
+    }
     func checkManually() {
-        guard !checking else { return }
+        guard !checking, !installing else { return }
         manualTask = Task { [weak self] in await self?.check(manual: true) }
     }
     private func check(manual: Bool) async {
-        guard !checking else { return }
+        guard !checking, !installing else { return }
         let now = Date(), defaults = UserDefaults.standard
         if !manual {
             guard automatic, AppUpdateSchedule.shouldCheck(lastAutomaticAttempt: defaults.object(forKey: "appUpdateAutomaticAttempt") as? Date, now: now) else { return }
@@ -66,6 +83,10 @@ final class AppUpdateModel: ObservableObject {
             let bytes = try await GitHubAppUpdates.latest()
             try Task.checkCancellation()
             let value = try bytes.map(AppUpdateRelease.parse)
+            if release != value {
+                downloadedInstaller = nil
+                readyToQuit = false
+            }
             release = value; lastChecked = now
             defaults.set(now, forKey: "appUpdateLastChecked")
             if let bytes { defaults.set(bytes, forKey: "appUpdateReleaseCache") }
@@ -76,12 +97,90 @@ final class AppUpdateModel: ObservableObject {
         }
     }
     func openDownload() {
-        guard hasUpdate, let asset = download else { return }
-        // Download through the system browser. Never execute an installer or
-        // overwrite a running app / its projects from an automatic check.
-        NSWorkspace.shared.open(asset.url)
+        guard !checking, !installing, hasUpdate, let asset = download else { return }
+        guard asset.supportsInAppDownload else {
+            NSWorkspace.shared.open(asset.url)
+            return
+        }
+        let id = UUID()
+        downloadID = id
+        installationPhase = .downloading(0)
+        downloadedInstaller = nil
+        readyToQuit = false
+        message = "正在下载安装包…"
+        downloadTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.downloadID = nil
+                self.downloadTask = nil
+                self.installationPhase = nil
+            }
+            do {
+                let file = try await GitHubAppUpdates.downloadDiskImage(asset, progress: { [weak self] bytes in
+                    Task { @MainActor in
+                        guard let self, self.downloadID == id,
+                              case .downloading(let previous) = self.installationPhase else { return }
+                        let fraction = (100 * Double(bytes) / Double(asset.bytes)).rounded(.down) / 100
+                        if fraction > previous { self.installationPhase = .downloading(fraction) }
+                    }
+                }, verifying: { [weak self] in
+                    Task { @MainActor in
+                        guard let self, self.downloadID == id, case .downloading = self.installationPhase else { return }
+                        self.installationPhase = .verifying
+                        self.message = "正在校验安装包…"
+                    }
+                })
+                self.downloadedInstaller = file
+                try Task.checkCancellation()
+                self.installationPhase = .opening
+                self.message = "正在打开安装包…"
+                let volume = try await Self.mountDiskImage(file)
+                try Task.checkCancellation()
+                guard NSWorkspace.shared.open(volume) else {
+                    throw RunbarError.message("Finder 未能打开安装盘，请从「下载」文件夹打开 DMG。")
+                }
+                self.readyToQuit = true
+                self.message = "安装盘已打开。退出 Runbar 后，将新版拖到「应用程序」。"
+                NSApp.terminate(nil)
+            } catch where Task.isCancelled {
+                self.message = "已取消更新。"
+            } catch {
+                self.message = error.localizedDescription
+            }
+        }
     }
+    func cancelDownload() { if canCancelDownload { downloadTask?.cancel() } }
+    func revealInstaller() {
+        if let downloadedInstaller { NSWorkspace.shared.activateFileViewerSelecting([downloadedInstaller]) }
+    }
+    func quitForInstallation() { NSApp.terminate(nil) }
     func openReleasePage() { NSWorkspace.shared.open(release?.page ?? AppUpdateRelease.releasesPage) }
+
+    private nonisolated static func mountDiskImage(_ file: URL) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let process = Process()
+                    let output = Pipe()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+                    process.arguments = ["attach", "-readonly", "-noautoopen", "-plist", file.path]
+                    process.standardInput = FileHandle.nullDevice
+                    process.standardOutput = output
+                    process.standardError = FileHandle.nullDevice
+                    try process.run()
+                    let data = output.fileHandleForReading.readDataToEndOfFile()
+                    process.waitUntilExit()
+                    let failure = RunbarError.message("安装盘未能打开，请从「下载」文件夹打开 DMG。")
+                    guard process.terminationStatus == 0,
+                          let result = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                          let entities = result["system-entities"] as? [[String: Any]],
+                          let mount = entities.compactMap({ $0["mount-point"] as? String }).first,
+                          mount.hasPrefix("/") else { throw failure }
+                    continuation.resume(returning: URL(fileURLWithPath: mount, isDirectory: true))
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
 }
 
 struct AppUpdateView: View {
@@ -95,7 +194,13 @@ struct AppUpdateView: View {
                     Text("当前版本 \(updater.version)（\(updater.build)）").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if updater.checking { ProgressView().controlSize(.small) }
+                if case .downloading(let progress) = updater.installationPhase {
+                    ProgressView(value: progress) {
+                        Text(progress, format: .percent.precision(.fractionLength(0))).font(.caption)
+                    }.frame(width: 100).accessibilityLabel("下载进度")
+                } else if updater.checking || updater.installing {
+                    ProgressView().controlSize(.small)
+                }
             }
             Text(updater.message).font(.callout).textSelection(.enabled)
             if let date = updater.lastChecked { Text("上次检查：\(date.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
@@ -112,15 +217,26 @@ struct AppUpdateView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else { Spacer(minLength: 20) }
-            Text("下载由浏览器完成。下载后先停止任务并退出 Runbar，再手动替换 App；项目配置和本地记录会保留。")
+            Text(updater.download?.supportsInAppDownload == true
+                 ? "Runbar 会下载并打开 DMG，再请求退出。打开安装盘后，将新版拖到「应用程序」。"
+                 : "也可从 GitHub 发布页获取安装包，退出 Runbar 后手动替换。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("GitHub 发布页", action: updater.openReleasePage)
+                if updater.downloadedInstaller != nil {
+                    Button("在 Finder 中显示", action: updater.revealInstaller)
+                }
                 Spacer()
-                Button("检查更新", action: updater.checkManually).disabled(updater.checking)
-                if updater.hasUpdate, let asset = updater.download {
-                    Button("下载更新（\(ByteCountFormatter.string(fromByteCount: asset.bytes, countStyle: .file))）", action: updater.openDownload)
+                Button("检查更新", action: updater.checkManually).disabled(updater.checking || updater.installing)
+                if updater.canCancelDownload {
+                    Button("取消更新", action: updater.cancelDownload)
+                } else if updater.readyToQuit {
+                    Button("退出 Runbar", action: updater.quitForInstallation).buttonStyle(.borderedProminent)
+                } else if updater.hasUpdate, let asset = updater.download {
+                    let title = asset.supportsInAppDownload ? "下载更新" : "浏览器下载"
+                    Button("\(title)（\(ByteCountFormatter.string(fromByteCount: asset.bytes, countStyle: .file))）", action: updater.openDownload)
                         .buttonStyle(.borderedProminent)
+                        .disabled(updater.checking || updater.installing)
                 }
             }
         }.padding(20).frame(width: 560, height: 550)

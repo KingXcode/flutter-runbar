@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct AppReleaseVersion: Equatable, Comparable, Sendable {
     public let version: String
@@ -24,6 +25,29 @@ public struct AppUpdateRelease: Equatable, Sendable {
         public let name: String
         public let url: URL
         public let bytes: Int64
+        public let sha256: String?
+        public var supportsInAppDownload: Bool { name.hasSuffix(".dmg") && sha256 != nil }
+
+        func verifyDownloadedFile(_ file: URL) throws {
+            guard let sha256, let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                  Int64(size) == bytes else {
+                throw RunbarError.message("安装包大小与发布信息不符，请重新下载。")
+            }
+            let handle = try FileHandle(forReadingFrom: file)
+            defer { try? handle.close() }
+            var hash = SHA256()
+            var count: Int64 = 0
+            while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+                try Task.checkCancellation()
+                count += Int64(chunk.count)
+                guard count <= bytes else { break }
+                hash.update(data: chunk)
+            }
+            let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
+            guard count == bytes, actual == sha256 else {
+                throw RunbarError.message("安装包校验失败，请重新下载。")
+            }
+        }
     }
     public let tag: String
     public let version: String
@@ -42,7 +66,12 @@ public struct AppUpdateRelease: Equatable, Sendable {
 
     public static func parse(_ data: Data) throws -> Self {
         struct Payload: Decodable {
-            struct File: Decodable { let name: String; let browser_download_url: String; let size: Int64 }
+            struct File: Decodable {
+                let name: String
+                let browser_download_url: String
+                let size: Int64
+                let digest: String?
+            }
             let tag_name: String; let body: String?; let html_url: String
             let draft: Bool; let prerelease: Bool; let assets: [File]
         }
@@ -62,7 +91,13 @@ public struct AppUpdateRelease: Equatable, Sendable {
                   let url = URL(string: file.browser_download_url),
                   validURL(url, prefix: "/\(repository)/releases/download/\(value.tag_name)/"),
                   url.path == "/\(repository)/releases/download/\(value.tag_name)/\(file.name)" else { return nil }
-            return Asset(name: file.name, url: url, bytes: file.size)
+            let sha256 = file.digest.flatMap { digest -> String? in
+                guard digest.hasPrefix("sha256:"), digest.utf8.count == 71 else { return nil }
+                let hex = digest.dropFirst(7)
+                guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+                return hex.lowercased()
+            }
+            return Asset(name: file.name, url: url, bytes: file.size, sha256: sha256)
         }
         let notes = (value.body ?? "本次发布未提供更新说明，请查看 GitHub 发布页。")
             .replacingOccurrences(of: "<!-- runbar-notes-sha256:[a-f0-9]{64} -->", with: "", options: .regularExpression)
@@ -126,5 +161,84 @@ public enum GitHubAppUpdates {
             data.append(byte)
         }
         return data
+    }
+
+    public static func downloadDiskImage(_ asset: AppUpdateRelease.Asset,
+                                         progress: @escaping @Sendable (Int64) -> Void,
+                                         verifying: @escaping @Sendable () -> Void) async throws -> URL {
+        guard asset.supportsInAppDownload else {
+            throw RunbarError.message("这个安装包需要从 GitHub 发布页下载。")
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 30 * 60
+        let delegate = DiskImageDownloadDelegate(bytes: asset.bytes, progress: progress)
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (temporary, response) = try await session.download(from: asset.url)
+        let files = FileManager.default
+        defer { try? files.removeItem(at: temporary) }
+        try Task.checkCancellation()
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
+              DiskImageDownloadDelegate.allows(response.url) else {
+            throw RunbarError.message("GitHub 未返回有效的安装包，请稍后重试。")
+        }
+        verifying()
+        try asset.verifyDownloadedFile(temporary)
+        try Task.checkCancellation()
+        let downloads = try files.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let staging = try files.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: downloads, create: true)
+        defer { try? files.removeItem(at: staging) }
+        let staged = staging.appendingPathComponent(asset.name)
+        try files.moveItem(at: temporary, to: staged)
+        try Task.checkCancellation()
+        let base = String(asset.name.dropLast(4))
+        for index in 0..<1000 {
+            let name = index == 0 ? asset.name : "\(base) (\(index)).dmg"
+            let destination = downloads.appendingPathComponent(name)
+            do {
+                try files.moveItem(at: staged, to: destination)
+                return destination
+            } catch let error as CocoaError where error.code == .fileWriteFileExists {
+                continue
+            }
+        }
+        throw RunbarError.message("下载文件夹里有太多同名安装包，请清理后重试。")
+    }
+}
+
+private final class DiskImageDownloadDelegate: NSObject, URLSessionDownloadDelegate, Sendable {
+    let bytes: Int64
+    let progress: @Sendable (Int64) -> Void
+
+    init(bytes: Int64, progress: @escaping @Sendable (Int64) -> Void) {
+        self.bytes = bytes
+        self.progress = progress
+    }
+
+    static func allows(_ url: URL?) -> Bool {
+        guard let url, url.scheme == "https", url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443, let host = url.host?.lowercased() else { return false }
+        return ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+                "github-releases.githubusercontent.com"].contains(host)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(Self.allows(request.url) ? request : nil)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard totalBytesWritten <= bytes, totalBytesExpectedToWrite <= bytes else {
+            downloadTask.cancel()
+            return
+        }
+        progress(totalBytesWritten)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // URLSession.download(from:) returns the file through its async result.
     }
 }

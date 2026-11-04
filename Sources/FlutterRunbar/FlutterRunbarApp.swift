@@ -187,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !model.skillInstaller.installing else { model.showSkillWindow(); return .terminateCancel }
         guard model.nativeActionProjectID == nil else { return .terminateCancel }
         guard model.busy else { model.finishLogQueriesForQuit(); return .terminateLater }
+        sender.activate()
         let alert = NSAlert()
         alert.messageText = "命令仍在运行"
         alert.informativeText = "退出将停止所有正在运行的项目，并等待每份日志保存完成。"
@@ -959,6 +960,7 @@ final class AppModel: ObservableObject {
     }
     func stopAllForQuit() {
         quitWhenFinished = true
+        updates.stop()
         coordinator?.stopAll()
         finishQuitIfReady()
     }
@@ -972,6 +974,7 @@ final class AppModel: ObservableObject {
     func finishLogQueriesForQuit() {
         guard !logShutdownStarted else { return }
         logShutdownStarted = true
+        updates.stop()
         logQueryTask?.cancel(); logReadTask?.cancel(); logRefreshTask?.cancel(); logLoadingIndicatorTask?.cancel()
         logReadToken = UUID()
         Task {
