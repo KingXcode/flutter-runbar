@@ -134,13 +134,19 @@ public struct CommandTemplate: Identifiable, Equatable {
 }
 
 extension Project {
-    /// Preserves identities/selection on edits and refuses duplicate command text.
+    /// Preserves identities and selection while allowing separate workflows for the same command.
     /// Only trim outer whitespace; never rewrite shell quoting or internal whitespace.
-    public mutating func savePreset(name: String, command: String, id: UUID? = nil) throws {
+    public mutating func savePreset(name: String, command: String, id: UUID? = nil, workflow: CommandWorkflow? = nil) throws {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !command.isEmpty else { throw RunbarError.message("名称和命令不能为空。") }
-        guard !presets.contains(where: { $0.id != id && $0.command.trimmingCharacters(in: .whitespacesAndNewlines) == command }) else {
+        let validated = try workflow?.validated(command: command)
+        let options = validated.flatMap { value -> CommandWorkflow? in
+            value.hasHooks || !value.variables.isEmpty || value.expandVariables && command.contains("{{") ? value : nil
+        }
+        guard !presets.contains(where: {
+            $0.id != id && $0.command.trimmingCharacters(in: .whitespacesAndNewlines) == command && $0.workflow == options
+        }) else {
             throw RunbarError.message("该项目已保存相同命令，请选择已有配置，或修改后再保存。")
         }
         if let id {
@@ -148,8 +154,10 @@ extension Project {
             guard let index = presets.firstIndex(where: { $0.id == id }) else { throw RunbarError.message("原命令已不存在，请重新选择。") }
             presets[index].name = name
             presets[index].command = command
+            presets[index].workflow = options
         } else {
-            let preset = CommandPreset(name: name, command: command)
+            var preset = CommandPreset(name: name, command: command)
+            preset.workflow = options
             presets.append(preset)
             selectedPresetID = preset.id
         }

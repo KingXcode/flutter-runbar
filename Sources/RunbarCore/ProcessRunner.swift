@@ -7,7 +7,11 @@ import Glibc
 #endif
 
 public final class ProcessRunner: @unchecked Sendable {
-    public enum Event { case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String), service(VMServiceEndpoint), flutterControls(FlutterRunControls?), interactionRejected(String) }
+    public enum Event {
+        case started(RunSession), output(String), updated(RunSession), finished(RunSession), failure(String), rejected(String)
+        case service(VMServiceEndpoint), flutterControls(FlutterRunControls?), interactionRejected(String)
+        case variablesChanged(presetID: UUID, values: [CommandVariable])
+    }
     private let queue = DispatchQueue(label: "runbar.process")
     private let outputLock = NSLock()
     private var pendingOutput = ""
@@ -34,6 +38,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private var flutterSandboxDiagnostic: FlutterSandboxDiagnostic?
     private var proxyConfiguration: ProxyLaunchConfiguration?
     private var proxy: ProxyCaptureProcess?
+    private var workflow: CommandWorkflowExecution?
     public init(store: SessionStore, handler: @escaping (Event) -> Void) { self.store = store; self.handler = handler }
     deinit { if inputFD >= 0 { close(inputFD) } }
     public func configureProxy(_ configuration: ProxyLaunchConfiguration?) {
@@ -70,6 +75,9 @@ public final class ProcessRunner: @unchecked Sendable {
         do {
             try store.save(next)
             log = try RunLog(directory: store.directory(next.id))
+            workflow = try CommandWorkflowExecution.prepare(project: project, preset: preset, session: next,
+                                                            sessionDirectory: store.directory(next.id))
+            let command = workflow?.command ?? preset.command
             if let configuration = proxyConfiguration {
                 let capture = ProxyCaptureProcess(configuration: configuration,
                     directory: store.directory(next.id).appendingPathComponent("proxy", isDirectory: true), epoch: next.id)
@@ -84,12 +92,12 @@ public final class ProcessRunner: @unchecked Sendable {
             let error: Int32
             if let info = next.proxyCapture {
                 error = interactive
-                    ? rb_spawn_proxy(shell, preset.command, project.path, path, info.address, &child, &output, &input)
-                    : rb_spawn_proxy(shell, preset.command, project.path, path, info.address, &child, &output, nil)
+                    ? rb_spawn_proxy(shell, command, project.path, path, info.address, &child, &output, &input)
+                    : rb_spawn_proxy(shell, command, project.path, path, info.address, &child, &output, nil)
             } else {
                 error = interactive
-                    ? rb_spawn_interactive(shell, preset.command, project.path, path, &child, &output, &input)
-                    : rb_spawn(shell, preset.command, project.path, path, &child, &output)
+                    ? rb_spawn_interactive(shell, command, project.path, path, &child, &output, &input)
+                    : rb_spawn(shell, command, project.path, path, &child, &output)
             }
             guard error == 0 else { throw RunbarError.message("启动失败：\(String(cString: strerror(error)))") }
             pid = child; session = next; pipeEnded = false; stopped = false
@@ -130,6 +138,7 @@ public final class ProcessRunner: @unchecked Sendable {
                 }
             }
         } catch {
+            workflow?.removeFiles(); workflow = nil
             proxy?.stop(); proxy = nil
             next.status = .failed; next.endedAt = Date(); next.error = error.localizedDescription
             do { try store.save(next) } catch { next.error = (next.error ?? "") + "；保存失败：\(error.localizedDescription)" }
@@ -183,10 +192,19 @@ public final class ProcessRunner: @unchecked Sendable {
                 self.emit(.flutterControls(self.flutterControls))
                 self.emit(.interactionRejected("Flutter 尚未就绪、正在接收操作或不支持此功能。")); return
             }
+            if action == .detach {
+                do { try self.workflow?.skipRemaining() }
+                catch {
+                    self.emit(.flutterControls(controls))
+                    self.emit(.interactionRejected("无法安全跳过后置脚本，分离操作未发送。"))
+                    return
+                }
+            }
             controls.isSending = true; self.flutterControls = controls
             self.emit(.flutterControls(controls))
             let error = rb_send_key(self.inputFD, CChar(bitPattern: action.rawValue.utf8.first!))
             guard error == 0 else {
+                if action == .detach { self.workflow?.resumeAfterRejectedDetach() }
                 self.closeInput(); self.flutterControls = nil; self.emit(.flutterControls(nil))
                 self.emit(.interactionRejected("无法向当前 Flutter 运行发送操作：\(String(cString: strerror(error)))")); return
             }
@@ -211,6 +229,7 @@ public final class ProcessRunner: @unchecked Sendable {
                     guard let self, self.session?.id == sessionID, self.stopTime == nil,
                           var value = self.flutterControls, value.isDetaching else { return }
                     self.requestedDetach = false; value.isDetaching = false
+                    self.workflow?.resumeAfterRejectedDetach()
                     self.flutterControls = value; self.emit(.flutterControls(value))
                     self.emit(.interactionRejected("Flutter 命令尚未退出，请查看分离操作的输出后重试。"))
                 }
@@ -235,6 +254,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private func requestStop() {
         guard session != nil, stopTime == nil else { return }
         stopped = true; stopTime = .now(); stopStage = 1
+        try? workflow?.skipRemaining()
         closeInput()
         signal(SIGINT)
     }
@@ -280,9 +300,22 @@ public final class ProcessRunner: @unchecked Sendable {
         }
         flutterSandboxDiagnostic = nil
         value.status = value.error != nil ? .failed : stopped ? .stopped : code == 0 ? (requestedDetach ? .detached : .succeeded) : .failed
+        var variableUpdate: (UUID, [CommandVariable])?
+        if let workflow {
+            defer { workflow.removeFiles(); self.workflow = nil }
+            if value.status == .succeeded {
+                do {
+                    let values = try workflow.finalValues()
+                    if values != workflow.variables { variableUpdate = (workflow.presetID, values) }
+                } catch { value.error = error.localizedDescription; value.status = .failed }
+            }
+        }
         do { try store.save(value) } catch {
             value.error = "保存运行记录失败：\(error.localizedDescription)"; value.status = .failed
             value.flutterSandboxAccessFailure = nil
+        }
+        if value.status == .succeeded, let (presetID, values) = variableUpdate {
+            emit(.variablesChanged(presetID: presetID, values: values))
         }
         session = nil; pid = 0; emit(.finished(value))
     }

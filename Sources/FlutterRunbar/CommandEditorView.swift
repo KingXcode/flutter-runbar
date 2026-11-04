@@ -20,6 +20,7 @@ struct CommandEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var presetName: String
     @State private var command: String
+    @State private var workflow: CommandWorkflow
     @State private var templateID: String?
     @State private var useFVM: Bool
     @State private var flutterRunMode: FlutterRunMode = .debug
@@ -32,6 +33,7 @@ struct CommandEditorView: View {
         self.templates = templates
         _presetName = State(initialValue: request.preset?.name ?? "")
         _command = State(initialValue: request.preset?.command ?? "")
+        _workflow = State(initialValue: request.preset?.workflow ?? CommandWorkflow(expandVariables: request.preset?.command.contains("{{") != true))
         _templateID = State(initialValue: templates.first?.id)
         _useFVM = State(initialValue: request.project.kind == .flutter)
     }
@@ -42,23 +44,87 @@ struct CommandEditorView: View {
                     Text(request.preset == nil ? "添加命令" : "编辑命令").font(.title2)
                     if request.preset == nil { templatePicker }
                     TextField("名称", text: $presetName)
-                    TextEditor(text: $command).font(.system(.body, design: .monospaced)).frame(height: 120)
+                    variableEditor
+                    scriptEditor("前置执行脚本", text: $workflow.before, height: 76, hint: "可选。前置脚本成功后执行正文。")
+                    scriptEditor("命令正文", text: $command, height: 150, hint: "可用 {{version}} 或 {{build-number}} 传入变量。")
+                    scriptEditor("后置执行脚本", text: $workflow.after, height: 76, hint: "可选。正文成功后执行，整次运行成功才保存变量改动。")
                     Text("命令由登录 zsh 执行，支持参数、引号与管道。只保存你信任的命令，它拥有你当前用户的权限。运行输出永远不会作为命令执行。不要使用后台化或守护进程命令。")
                         .font(.caption).foregroundStyle(.secondary)
-                    if let editorError {
-                        Text(editorError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                    }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(height: request.preset == nil ? 420 : 280)
+            }.frame(height: 550)
+            if let editorError {
+                Text(editorError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }
                 Button("保存") {
-                    if model.savePreset(name: presetName, command: command, id: request.preset?.id, projectID: request.project.id) { dismiss() }
+                    if model.savePreset(name: presetName, command: command, id: request.preset?.id,
+                                        projectID: request.project.id, workflow: workflow) { dismiss() }
                     else { editorError = model.error ?? "项目正在运行或不可用，暂时无法保存。"; model.error = nil }
                 }.disabled(presetName.isEmpty || command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(24).frame(width: 520)
+        }.padding(24).frame(width: 860)
+    }
+
+    private var variableEditor: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Toggle("启用 {{变量}}", isOn: $workflow.expandVariables)
+                    Spacer()
+                    Menu("复制系统变量") {
+                        ForEach(CommandWorkflow.systemVariables, id: \.self) { name in
+                            Button("{{\(name)}}") {
+                                workflow.expandVariables = true
+                                model.copy("{{\(name)}}")
+                            }
+                        }
+                    }.fixedSize()
+                    Button("添加变量", systemImage: "plus") {
+                        workflow.expandVariables = true
+                        workflow.variables.append(CommandVariable())
+                    }.disabled(workflow.variables.count >= 32)
+                }
+                if !workflow.variables.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("变量名").frame(width: 150, alignment: .leading)
+                        Text("默认值").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("当前值").frame(maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(width: 102, height: 1).accessibilityHidden(true)
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach($workflow.variables) { $variable in
+                    HStack(spacing: 8) {
+                        TextField("例如 build-number", text: $variable.name).frame(width: 150)
+                            .accessibilityLabel("变量名")
+                        TextField("默认值", text: $variable.defaultValue)
+                        TextField("当前值", text: Binding(get: { variable.currentValue }, set: { value in
+                            variable.overrideValue = value == variable.defaultValue ? nil : value
+                        }))
+                        Button("恢复默认") { variable.overrideValue = nil }.disabled(variable.overrideValue == nil)
+                        Button(role: .destructive) { workflow.variables.removeAll { $0.id == variable.id } } label: {
+                            Image(systemName: "minus.circle")
+                        }.buttonStyle(.borderless).accessibilityLabel("删除变量 \(variable.name)")
+                    }.textFieldStyle(.roundedBorder)
+                }
+                Text("变量随此命令保存在本机。脚本中可独占一行写 {{build-number}}++、-- 或 =1。增减只作用于整数。日期格式可自定义，例如 {{Date-yyyy/MM/dd HH:mm:ss}}。")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }.padding(.top, 3)
+        } label: {
+            Text("环境变量")
+        }
+    }
+
+    private func scriptEditor(_ title: String, text: Binding<String>, height: CGFloat, hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.headline)
+            Text(hint).font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: text)
+                .font(.system(.body, design: .monospaced))
+                .frame(height: height)
+                .accessibilityLabel(title)
+        }
     }
 
     @ViewBuilder

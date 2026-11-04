@@ -518,8 +518,11 @@ final class NetworkContentSearchTests: XCTestCase {
         let index = try NetworkContentIndex(directory: root, query: NetworkQuery())
         try index.prepare(NetworkSearchSnapshot(total: 400, lastRow: 400, revision: 400, modified: .distantPast))
         for base in stride(from: 0, to: 400, by: 20) {
-            let entries = try (base..<(base + 20)).map { number in
-                (NetworkSearchCandidate(record: try sampleRecord(String(number), start: Int64(number)), row: Int64(number + 1), revision: Int64(number + 1)), true)
+            let entries: [(NetworkSearchCandidate, Bool)] = try (base..<(base + 20)).map { number in
+                let record = try sampleRecord(String(number), start: Int64(number))
+                let position = Int64(number + 1)
+                let candidate = NetworkSearchCandidate(record: record, row: position, revision: position)
+                return (candidate, true)
             }
             try index.apply(entries)
         }

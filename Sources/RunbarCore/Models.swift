@@ -7,6 +7,7 @@ public struct CommandPreset: Codable, Identifiable, Equatable {
     public var name: String
     public var command: String
     public var builtInAction: BuiltInAction?
+    public var workflow: CommandWorkflow?
     public var displayCommand: String { builtInAction == .resetMacOSSandbox ? "内置操作 · 确认后将整个 App 沙盒移到废纸篓" : command }
     public static var sandboxReset: CommandPreset {
         var value = CommandPreset(name: "清空 macOS App 沙盒", command: "")

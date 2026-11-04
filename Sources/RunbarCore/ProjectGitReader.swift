@@ -22,6 +22,11 @@ public enum ProjectGitHead: Equatable, Sendable {
 /// A .git file points at the per-worktree / submodule git directory, whose HEAD
 /// must be used instead of the main repository's HEAD.
 public enum ProjectGitReader {
+    static func head(at path: String) -> ProjectGitHead? {
+        guard let directory = gitDirectory(for: path) else { return nil }
+        return readHead(in: directory)
+    }
+
     public static func snapshot(paths: [String]) async -> [String: ProjectGitHead] {
         let task = Task.detached(priority: .utility) {
             var result: [String: ProjectGitHead] = [:]

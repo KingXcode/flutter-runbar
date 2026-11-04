@@ -60,6 +60,7 @@ public final class ProjectRunCoordinator {
         case finished(UUID, RunSession)
         case failure(UUID, String)
         case service(projectID: UUID, sessionID: UUID, endpoint: VMServiceEndpoint)
+        case variablesChanged(projectID: UUID, presetID: UUID, values: [CommandVariable])
     }
     public typealias Factory = (SessionStore, @escaping (ProcessRunner.Event) -> Void) -> ProjectCommandRunning
     public var onEvent: ((Event) -> Void)?
@@ -177,6 +178,8 @@ public final class ProjectRunCoordinator {
             // An input failure must not terminate the user's running app.
             guard state.phase == .running else { return }
             onEvent?(.failure(projectID, message))
+        case .variablesChanged(let presetID, let values):
+            onEvent?(.variablesChanged(projectID: projectID, presetID: presetID, values: values))
         case .finished(let session):
             // Launch failure can finish without .started; generation still owns it.
             clear(projectID, error: session.error); onEvent?(.finished(projectID, session))

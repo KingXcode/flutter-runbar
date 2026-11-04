@@ -520,12 +520,12 @@ final class AppModel: ObservableObject {
               config.projects[index].availablePresets.contains(where: { $0.id == presetID }) else { return }
         config.projects[index].selectedPresetID = presetID; persist()
     }
-    func savePreset(name: String, command: String, id: UUID?, projectID: UUID?) -> Bool {
+    func savePreset(name: String, command: String, id: UUID?, projectID: UUID?, workflow: CommandWorkflow? = nil) -> Bool {
         guard let index = config.projects.firstIndex(where: { $0.id == projectID }),
               !state(for: config.projects[index].id).isBusy else { return false }
         let original = config.projects[index]
         do {
-            try config.projects[index].savePreset(name: name, command: command, id: id)
+            try config.projects[index].savePreset(name: name, command: command, id: id, workflow: workflow)
             guard persist() else { config.projects[index] = original; return false }
             return true
         } catch { self.error = error.localizedDescription; return false }
@@ -1006,6 +1006,8 @@ final class AppModel: ObservableObject {
             if selectedSession == sessionID { refreshLogAfterOutput() }
         case .updated(_, let value): replace(value)
         case .service(_, let sessionID, let endpoint): network.discovered(endpoint, sessionID: sessionID)
+        case .variablesChanged(let projectID, let presetID, let values):
+            saveWorkflowValues(values, projectID: projectID, presetID: presetID)
         case .finished(let id, let value):
             network.finished(value.id)
             let hadStarted = history.contains { $0.id == value.id }
@@ -1019,6 +1021,17 @@ final class AppModel: ObservableObject {
             } else if let problem = value.error { report(problem, projectID: id) }
             finishQuitIfReady()
         case .failure(let id, let message): report(message, projectID: id); finishQuitIfReady()
+        }
+    }
+    private func saveWorkflowValues(_ values: [CommandVariable], projectID: UUID, presetID: UUID) {
+        guard let project = config.projects.firstIndex(where: { $0.id == projectID }),
+              let preset = config.projects[project].presets.firstIndex(where: { $0.id == presetID }),
+              let previous = config.projects[project].presets[preset].workflow,
+              previous.variables.map(\.id) == values.map(\.id) else { return }
+        config.projects[project].presets[preset].workflow?.variables = values
+        if !persist() {
+            config.projects[project].presets[preset].workflow = previous
+            report("命令已完成，变量当前值保存失败。\(error ?? "")", projectID: projectID)
         }
     }
     private func report(_ message: String, projectID: UUID) {
