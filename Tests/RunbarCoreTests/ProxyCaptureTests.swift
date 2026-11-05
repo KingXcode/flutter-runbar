@@ -190,6 +190,118 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertEqual(earliest.rows.count, 256)
         XCTAssertEqual(earliest.rows.first?.id, 1)
     }
+    private func searched(_ reader: ProxyWebSocketReader, directory: URL, filter: ProxyWebSocketFilter,
+                          url: String = "wss://example.invalid/quotes", kind: String = "") async throws -> ProxyWebSocketWindow {
+        for _ in 0..<2000 {
+            let result = try await reader.messages(directory: directory, url: url, kind: kind, around: .max, filter: filter)
+            if result.isComplete { return result }
+        }
+        XCTFail("WebSocket search did not finish its bounded slices")
+        return .empty
+    }
+    func testWebSocketSearchReadsBeyondPreviewAndAcrossUTF8ChunkBoundaries() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        let payload = String(repeating: "x", count: 63 * 1024 - 2) + "跨界关键词" + String(repeating: "z", count: 80_000) + "尾部 Match"
+        try store.append(event(1, payload: Data(payload.utf8)))
+        try store.append(event(2, payload: Data("preview-only Match".utf8))); store.close()
+        var filter = ProxyWebSocketFilter(); filter.search = "跨界关键词"; filter.includes = "尾部, mAtCh"
+        let reader = ProxyWebSocketReader()
+        let result = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(result.rows.map(\.id), [1])
+        XCTAssertEqual(result.sourceTotal, 2)
+        XCTAssertFalse(try XCTUnwrap(result.rows.first?.preview).contains("尾部"))
+        XCTAssertLessThan(try XCTUnwrap(result.rows.first?.preview.utf8.count), 600)
+        filter.excludes = "尾部"
+        let excluded = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(excluded.total, 0)
+    }
+    func testWebSocketIncludesAnyAllAndExclusionPrecedence() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        for (index, text) in ["quote stock heartbeat", "QUOTE STOCK ok", "quote future", "other"].enumerated() {
+            try store.append(event(Int64(index + 1), payload: Data(text.utf8)))
+        }
+        var other = event(5, kind: .send, payload: Data("quote stock".utf8)); other.url += "/other"
+        try store.append(other); store.close()
+        var filter = ProxyWebSocketFilter(); filter.includes = "quote，stock"; filter.excludes = "heartbeat; ping"
+        let reader = ProxyWebSocketReader()
+        let all = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(all.rows.map(\.id), [2])
+        XCTAssertEqual(all.sourceTotal, 4)
+        filter.mode = .any
+        let any = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(any.rows.map(\.id), [2, 3])
+        filter.includes = ""
+        let exclusionOnly = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(exclusionOnly.rows.map(\.id), [2, 3, 4])
+        filter.search = "future"
+        let search = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(search.rows.map(\.id), [3])
+        let sends = try await searched(reader, directory: directory, filter: filter, kind: "send")
+        XCTAssertEqual(sends.total, 0)
+        let otherURL = try await searched(reader, directory: directory, filter: ProxyWebSocketFilter(), url: other.url)
+        XCTAssertEqual(otherURL.rows.map(\.id), [5])
+    }
+    func testBinaryWebSocketSearchUsesDisplayedBase64AcrossChunkBoundaries() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        var bytes = Data(repeating: 1, count: 63 * 1024 - 3)
+        bytes.append(contentsOf: [254, 253, 252, 251, 250, 249, 248])
+        try store.append(event(1, payload: bytes, opcode: 2)); store.close()
+        let base64 = bytes.base64EncodedString()
+        var filter = ProxyWebSocketFilter()
+        filter.search = String(base64.dropFirst(63 * 1024 / 3 * 4 - 8).prefix(16))
+        let result = try await searched(ProxyWebSocketReader(), directory: directory, filter: filter)
+        XCTAssertEqual(result.rows.map(\.id), [1])
+    }
+    func testWebSocketSearchIndexIsBoundedIncrementalAndAnchorsOlderMatches() throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        defer { store.close() }
+        for id in 1...600 { try store.append(event(Int64(id), payload: Data("needle \(id)".utf8))) }
+        var filter = ProxyWebSocketFilter(); filter.search = "needle"
+        let index = try ProxyWebSocketSearchIndex(directory: directory, url: "wss://example.invalid/quotes", kind: "", filter: filter)
+        try index.scanSlice(store)
+        XCTAssertFalse(index.isComplete)
+        XCTAssertLessThanOrEqual(index.scannedMessages, 512)
+        let first = try index.window(around: .max, anchorID: nil)
+        XCTAssertEqual(first.ids.last, 600)
+        XCTAssertLessThanOrEqual(first.ids.count, 256)
+        let anchorID = try XCTUnwrap(first.ids.first)
+        for _ in 0..<100 where !index.isComplete { try index.scanSlice(store) }
+        XCTAssertTrue(index.isComplete)
+        XCTAssertEqual(index.scannedMessages, 600)
+        let anchored = try index.window(around: 0, anchorID: anchorID)
+        XCTAssertEqual(anchored.anchor, Int(anchorID - 1))
+        let earliest = try index.window(around: 0, anchorID: nil)
+        XCTAssertEqual(earliest.ids.first, 1)
+        try index.scanSlice(store)
+        XCTAssertEqual(index.scannedMessages, 600)
+        try store.append(event(601, payload: Data("needle newest".utf8)))
+        try store.append(event(602, payload: Data("ignored".utf8)))
+        for _ in 0..<100 {
+            try index.scanSlice(store)
+            if index.isComplete { break }
+        }
+        XCTAssertEqual(index.sourceTotal, 602)
+        XCTAssertEqual(index.scannedMessages, 602)
+        let latest = try index.window(around: .max, anchorID: nil)
+        XCTAssertEqual(latest.total, 601)
+        XCTAssertEqual(latest.ids.last, 601)
+        XCTAssertEqual(latest.ids.count, 256)
+    }
+    func testWebSocketFiltersAreCodableBoundedAndTreatSearchLiterally() async throws {
+        var filter = ProxyWebSocketFilter(); filter.includes = "key,值"; filter.excludes = "heartbeat"; filter.mode = .any
+        XCTAssertEqual(try JSONDecoder().decode(ProxyWebSocketFilter.self, from: JSONEncoder().encode(filter)), filter)
+        XCTAssertEqual(filter.conditionCount, 3)
+        filter.includes = (0..<17).map { "word\($0)" }.joined(separator: ",")
+        XCTAssertThrowsError(try filter.validate())
+        filter.includes = String(repeating: "a", count: 1025)
+        XCTAssertThrowsError(try filter.validate())
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        try store.append(event(1, payload: Data("a.* b' OR 1=1 --".utf8)))
+        try store.append(event(2, payload: Data("aaa".utf8))); store.close()
+        filter = ProxyWebSocketFilter(); filter.search = "a.* b' OR 1=1 --"
+        let literal = try await searched(ProxyWebSocketReader(), directory: directory, filter: filter)
+        XCTAssertEqual(literal.rows.map(\.id), [1])
+    }
     func testDuplicateEventRollbackDoesNotAddAnUnrelatedConnectionURL() throws {
         let store = try ProxyWebSocketStore(directory: temporary())
         defer { store.close() }
@@ -212,6 +324,9 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertEqual(connections.urls, ["wss://example.invalid/quotes"])
         let messages = try await reader.messages(directory: directory, url: "wss://example.invalid/quotes", kind: "", around: .max)
         XCTAssertEqual(messages.rows.map(\.id), [2])
+        var filter = ProxyWebSocketFilter(); filter.excludes = "heartbeat"
+        let filtered = try await searched(reader, directory: directory, filter: filter)
+        XCTAssertEqual(filtered.rows.map(\.id), [2])
         var statement: OpaquePointer?
         XCTAssertEqual(sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE name='connection_urls'", -1, &statement, nil), SQLITE_OK)
         defer { sqlite3_finalize(statement) }

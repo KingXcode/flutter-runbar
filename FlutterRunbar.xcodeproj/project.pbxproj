@@ -48,6 +48,7 @@
 		B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */; };
 		B5CF035478C12B7C52FDD482 /* GlobalShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */; };
 		B917C5541571C2B18D7C4A00 /* NetworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */; };
+		C5D44C77693D264FA43818C9 /* CommandScriptEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86E183CF74D4ECA19B3FB7C /* CommandScriptEditor.swift */; };
 		D1D8400C3C7EE2A7DF000A59 /* LogQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB0EFD74313532934ED48FB /* LogQueryTests.swift */; };
 		D5E22A1C7780B655D50CCD62 /* ProxyCertificateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */; };
 		DD1100355809CD55FF8CE4D4 /* LogFileReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */; };
@@ -128,6 +129,7 @@
 		F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPQueueTests.swift; sourceTree = "<group>"; };
 		F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyWebSocketView.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		F86E183CF74D4ECA19B3FB7C /* CommandScriptEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScriptEditor.swift; sourceTree = "<group>"; };
 		F988073F96A1983555A9F5EA /* LogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogView.swift; sourceTree = "<group>"; };
 		F989F55D837BC0137D8965AC /* ProjectKindTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectKindTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -302,6 +304,7 @@
 				4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */,
 				3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */,
 				614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */,
+				F86E183CF74D4ECA19B3FB7C /* CommandScriptEditor.swift */,
 				0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */,
 				2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */,
 				08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */,
@@ -517,6 +520,7 @@
 				0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */,
 				8F780EF2B810CD072F0B194A /* ApplicationAttachmentView.swift in Sources */,
 				63B74450BA3D456966E201D4 /* CommandEditorView.swift in Sources */,
+				C5D44C77693D264FA43818C9 /* CommandScriptEditor.swift in Sources */,
 				823A5EF6704D6933F137C23C /* FlutterRunbarApp.swift in Sources */,
 				6326D10ABC37026E77E5AD7D /* GlobalHotKey.swift in Sources */,
 				B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */,
@@ -663,7 +667,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -677,7 +681,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.13.0;
+				MARKETING_VERSION = 0.14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -740,7 +744,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 55;
+				CURRENT_PROJECT_VERSION = 56;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -760,7 +764,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.13.0;
+				MARKETING_VERSION = 0.14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

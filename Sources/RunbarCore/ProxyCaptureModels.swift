@@ -160,6 +160,9 @@ public struct ProxyWebSocketWindow: Equatable, Sendable {
     public var total: Int
     public var offset: Int
     public var rows: [ProxyWebSocketSummary]
+    public var sourceTotal: Int? = nil
+    public var isComplete = true
+    public var anchorRow: Int? = nil
     public static let empty = Self(total: 0, offset: 0, rows: [])
     public func row(at index: Int) -> ProxyWebSocketSummary? {
         let relative = index - offset

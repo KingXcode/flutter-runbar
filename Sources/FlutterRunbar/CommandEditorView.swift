@@ -108,7 +108,7 @@ struct CommandEditorView: View {
                         }.buttonStyle(.borderless).accessibilityLabel("删除变量 \(variable.name)")
                     }.textFieldStyle(.roundedBorder)
                 }
-                Text("变量随此命令保存在本机。脚本中可独占一行写 {{build-number}}++、-- 或 =1。增减只作用于整数。日期格式可自定义，例如 {{Date-yyyy/MM/dd HH:mm:ss}}。")
+                Text("输入反斜杠（\\）可插入变量。蓝色为环境变量，紫色为系统变量。脚本中可独占一行写 {{build-number}}++、-- 或 =1。增减只作用于整数。")
                     .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }.padding(.top, 3)
         } label: {
@@ -120,8 +120,7 @@ struct CommandEditorView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(.headline)
             Text(hint).font(.caption).foregroundStyle(.secondary)
-            TextEditor(text: text)
-                .font(.system(.body, design: .monospaced))
+            CommandScriptEditor(text: text, workflow: workflow) { workflow.expandVariables = true }
                 .frame(height: height)
                 .accessibilityLabel(title)
         }

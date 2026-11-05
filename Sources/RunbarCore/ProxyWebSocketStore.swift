@@ -209,6 +209,88 @@ final class ProxyWebSocketStore {
             requestHeaders: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : text(stmt, 10),
             responseHeaders: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : text(stmt, 11))
     }
+    func searchSnapshot(url: String, kind: String) throws -> ProxyWebSocketSearchSnapshot {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        let column = kind == "send" ? "send_count" : kind == "receive" ? "receive_count" : "send_count+receive_count"
+        let countSQL = try hasURLIndex() ?
+            "coalesce((SELECT \(column) FROM connection_urls WHERE url=?1),0)" :
+            "(SELECT count(*) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2))"
+        let stmt = try statement("SELECT \(countSQL),coalesce((SELECT max(id) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2)),0)")
+        defer { sqlite3_finalize(stmt) }
+        try bind(url, to: stmt, at: 1); try bind(kind, to: stmt, at: 2)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { throw failure() }
+        return ProxyWebSocketSearchSnapshot(total: Int(clamping: sqlite3_column_int64(stmt, 0)), latest: sqlite3_column_int64(stmt, 1))
+    }
+    func searchCandidates(url: String, kind: String, after: Int64, through: Int64,
+                          newestFirst: Bool) throws -> [ProxyWebSocketSearchCandidate] {
+        let stmt = try statement("SELECT id,opcode,length(payload) FROM events WHERE url=? AND (?='' OR kind=?) AND kind IN ('send','receive') AND id>? AND id<=? ORDER BY id \(newestFirst ? "DESC" : "ASC") LIMIT 32")
+        defer { sqlite3_finalize(stmt) }
+        try bind(url, to: stmt, at: 1); try bind(kind, to: stmt, at: 2); try bind(kind, to: stmt, at: 3)
+        sqlite3_bind_int64(stmt, 4, after); sqlite3_bind_int64(stmt, 5, through)
+        var rows: [ProxyWebSocketSearchCandidate] = []
+        while true {
+            try Task.checkCancellation()
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw failure() }
+            rows.append(.init(id: sqlite3_column_int64(stmt, 0), opcode: Int(sqlite3_column_int(stmt, 1)),
+                              storedBytes: Int(sqlite3_column_int64(stmt, 2))))
+        }
+        return rows
+    }
+    func matches(_ candidate: ProxyWebSocketSearchCandidate, matcher: ProxyWebSocketMatcher) throws -> Bool {
+        var blob: OpaquePointer?
+        guard sqlite3_blob_open(db, "main", "events", "payload", candidate.id, 0, &blob) == SQLITE_OK, let blob else { throw failure() }
+        defer { sqlite3_blob_close(blob) }
+        let length = Int(sqlite3_blob_bytes(blob))
+        guard length <= 1024 * 1024 else { throw RunbarError.message("WebSocket 缓存消息超过 1 MB。") }
+        var offset = 0, tail = Data(), hits = Set<String>()
+        let words = matcher.words
+        while offset < length {
+            try Task.checkCancellation()
+            // A multiple of three keeps Base64 chunks aligned with the full
+            // binary detail representation. Text keeps raw UTF-8 overlap.
+            let count = min(63 * 1024, length - offset)
+            var bytes = Data(count: count)
+            let result = bytes.withUnsafeMutableBytes { sqlite3_blob_read(blob, $0.baseAddress, Int32(count), Int32(offset)) }
+            guard result == SQLITE_OK else { throw failure() }
+            offset += count
+            if candidate.opcode == 2 { bytes = Data(bytes.base64EncodedString().utf8) }
+            var combined = tail; combined.append(bytes)
+            hits.formUnion(matcher.hits(in: String(decoding: combined, as: UTF8.self), words: words.filter { !hits.contains($0) }))
+            if !hits.isDisjoint(with: matcher.excludes) { return false }
+            if !matcher.needsFullScan, matcher.accepts(hits) { return true }
+            tail = Data(combined.suffix(matcher.overlap))
+        }
+        return matcher.accepts(hits)
+    }
+    func summaries(ids: [Int64]) throws -> [ProxyWebSocketSummary] {
+        guard !ids.isEmpty else { return [] }
+        let ids = Array(ids.prefix(ProxyWebSocketWindow.capacity))
+        let stmt = try statement("SELECT id,flow_id,url,timestamp,kind,opcode,bytes,note,substr(payload,1,512) FROM events WHERE id IN (\(Array(repeating: "?", count: ids.count).joined(separator: ","))) ORDER BY id")
+        defer { sqlite3_finalize(stmt) }
+        for (index, id) in ids.enumerated() { sqlite3_bind_int64(stmt, Int32(index + 1), id) }
+        var rows: [ProxyWebSocketSummary] = []
+        while true {
+            try Task.checkCancellation()
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW, let kind = ProxyWebSocketEvent.Kind(rawValue: text(stmt, 4)) else { throw failure() }
+            var summary = ProxyWebSocketSummary(id: sqlite3_column_int64(stmt, 0), flowID: text(stmt, 1), url: text(stmt, 2),
+                timestamp: sqlite3_column_int64(stmt, 3), kind: kind, opcode: Int(sqlite3_column_int(stmt, 5)),
+                bytes: sqlite3_column_int64(stmt, 6), note: text(stmt, 7))
+            if let pointer = sqlite3_column_blob(stmt, 8) {
+                let bytes = Data(bytes: pointer, count: min(512, Int(sqlite3_column_bytes(stmt, 8))))
+                summary.preview = summary.opcode == 2 ? "[二进制 / Base64] " + bytes.base64EncodedString() :
+                    String(decoding: bytes, as: UTF8.self).replacingOccurrences(of: "\r\n", with: " ↵ ")
+                        .replacingOccurrences(of: "\n", with: " ↵ ").replacingOccurrences(of: "\r", with: " ↵ ")
+                        .replacingOccurrences(of: "\t", with: " ")
+                if summary.bytes > 512 { summary.preview += " …" }
+            }
+            rows.append(summary)
+        }
+        return rows
+    }
     func handshake(_ flowID: String) throws -> (String, String) {
         let stmt = try statement("SELECT request_headers,response_headers FROM events WHERE flow_id=? AND kind='open' ORDER BY id LIMIT 1")
         defer { sqlite3_finalize(stmt) }; try bind(flowID, to: stmt, at: 1)
@@ -235,6 +317,7 @@ public struct ProxyWebSocketDetail: Sendable {
 }
 
 public actor ProxyWebSocketReader {
+    private var searchIndex: ProxyWebSocketSearchIndex?
     public init() {}
     public func connections(directory: URL, filter: String, around row: Int) throws -> ProxyWebSocketURLWindow {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else { return .empty }
@@ -242,11 +325,34 @@ public actor ProxyWebSocketReader {
         defer { store.close() }
         return try store.connections(filter: filter, around: row)
     }
-    public func messages(directory: URL, url: String, kind: String, around row: Int) throws -> ProxyWebSocketWindow {
-        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else { return .empty }
+    public func messages(directory: URL, url: String, kind: String, around row: Int,
+                         filter: ProxyWebSocketFilter = ProxyWebSocketFilter(), anchorID: Int64? = nil) throws -> ProxyWebSocketWindow {
+        try filter.validate()
+        guard ["", "send", "receive"].contains(kind) else { throw RunbarError.message("未知的 WebSocket 消息方向。") }
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else {
+            searchIndex = nil; return .empty
+        }
         let store = try ProxyWebSocketStore(directory: directory, readOnly: true)
         defer { store.close() }
+        if filter.isActive {
+            let index: ProxyWebSocketSearchIndex
+            if let current = searchIndex, current.directory == directory, current.url == url,
+               current.kind == kind, current.filter == filter { index = current }
+            else {
+                searchIndex = nil
+                index = try ProxyWebSocketSearchIndex(directory: directory, url: url, kind: kind, filter: filter)
+                searchIndex = index
+            }
+            try index.scanSlice(store)
+            let result = try index.window(around: row, anchorID: anchorID)
+            return ProxyWebSocketWindow(total: result.total, offset: result.offset, rows: try store.summaries(ids: result.ids),
+                sourceTotal: index.sourceTotal, isComplete: index.isComplete, anchorRow: result.anchor)
+        }
+        searchIndex = nil
         return try store.window(url: "", kind: kind, around: row, exactURL: url, messagesOnly: true, includePreview: true)
+    }
+    public func cancelSearch(directory: URL) {
+        if searchIndex?.directory == directory { searchIndex = nil }
     }
     public func window(directory: URL, url: String, kind: String, around row: Int) throws -> ProxyWebSocketWindow {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else { return .empty }

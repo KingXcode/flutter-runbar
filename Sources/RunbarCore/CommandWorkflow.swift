@@ -29,9 +29,35 @@ public struct CommandWorkflow: Codable, Equatable, Sendable {
 
     public static let systemVariables = ["Date-yyyy/MM/dd HH:mm:ss", "Date-yyyyMMdd", "Timestamp",
                                          "ProjectName", "ProjectPath", "CommandName", "GitBranch", "RunID"]
+    fileprivate static let placeholder = try! NSRegularExpression(pattern: #"\{\{([^{}\r\n]+)\}\}"#)
     static let valueLimit = 4096
     static let variableLimit = 32
     var hasHooks: Bool { !before.isEmpty || !after.isEmpty }
+
+    public var variableNames: [String] {
+        var seen = Set<String>()
+        return variables.compactMap { variable in
+            let name = variable.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Self.isVariableName(name) && seen.insert(name).inserted ? name : nil
+        }
+    }
+
+    public func recognizedPlaceholders(in script: String) -> [(range: NSRange, system: Bool)] {
+        guard expandVariables, script.contains("{{") else { return [] }
+        let names = Set(variableNames)
+        let text = script as NSString
+        return Self.placeholder.matches(in: script, range: NSRange(location: 0, length: text.length)).compactMap { match in
+            let name = text.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+            if names.contains(name) { return (match.range, false) }
+            if (try? WorkflowSystemValues.resolve(name, context: nil)) != nil { return (match.range, true) }
+            return nil
+        }
+    }
+
+    private static func isVariableName(_ name: String) -> Bool {
+        name.range(of: "^[A-Za-z_][A-Za-z0-9_-]{0,63}$", options: .regularExpression) != nil &&
+            !systemVariables.contains(name) && !name.hasPrefix("Date-") && !name.hasPrefix("Data-")
+    }
 
     func validated(command: String) throws -> Self {
         var result = self
@@ -41,8 +67,7 @@ public struct CommandWorkflow: Codable, Equatable, Sendable {
         var names = Set<String>()
         for index in result.variables.indices {
             let name = result.variables[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard name.range(of: "^[A-Za-z_][A-Za-z0-9_-]{0,63}$", options: .regularExpression) != nil,
-                  !Self.systemVariables.contains(name), !name.hasPrefix("Date-"), !name.hasPrefix("Data-") else {
+            guard Self.isVariableName(name) else {
                 throw RunbarError.message("变量名须以字母或下划线开头，可含字母、数字、下划线和连字符，且不能与系统变量重名。")
             }
             guard names.insert(name).inserted else { throw RunbarError.message("变量名重复「\(name)」。") }
@@ -77,7 +102,7 @@ private struct WorkflowCompiler {
     let systemValues: WorkflowSystemValues?
     private(set) var bindings: [(key: String, value: String)] = []
     private var systemSlots: [String: String] = [:]
-    private let token = try! NSRegularExpression(pattern: #"\{\{([^{}\r\n]+)\}\}"#)
+    private let token = CommandWorkflow.placeholder
     private let directive = try! NSRegularExpression(pattern: #"^\{\{([^{}]+)\}\}[ \t]*(\+\+|--|=)(.*)$"#)
 
     init(workflow: CommandWorkflow, namespace: String, systemValues: WorkflowSystemValues?) {

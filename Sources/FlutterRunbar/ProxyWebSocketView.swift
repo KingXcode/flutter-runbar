@@ -6,10 +6,22 @@ import RunbarCore
 private final class ProxyWebSocketModel: ObservableObject {
     @Published var url = "" { didSet { if url != oldValue { resetConnections() } } }
     @Published var kind = "" { didSet { if kind != oldValue { resetMessages(delay: true) } } }
+    @Published var filter = ProxyWebSocketModel.savedFilter() {
+        didSet {
+            guard filter != oldValue else { return }
+            if (try? filter.validate()) != nil, let value = try? JSONEncoder().encode(filter) {
+                UserDefaults.standard.set(value, forKey: "proxyWebSocketFilter")
+            }
+            resetMessages(delay: true)
+        }
+    }
     @Published var follows = UserDefaults.standard.object(forKey: "proxyWebSocketFollows") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(follows, forKey: "proxyWebSocketFollows")
-            if follows, !oldValue { visibleRow = Int.max; scrollsToLatest = true; scrollRevision += 1; refreshMessages() }
+            if follows, !oldValue {
+                visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; scrollRevision += 1
+                selectLatestMessage(); refreshMessages()
+            }
         }
     }
     @Published var format = NetworkBodyFormat(rawValue: UserDefaults.standard.string(forKey: "proxyWebSocketFormat") ?? "") ?? .json {
@@ -21,19 +33,29 @@ private final class ProxyWebSocketModel: ObservableObject {
     @Published private(set) var window = ProxyWebSocketWindow.empty
     @Published private(set) var selectedID: Int64?
     @Published private(set) var detail: ProxyWebSocketDetail?
+    @Published private(set) var detailError: String?
     @Published private(set) var error: String?
     @Published private(set) var connectionRevision = 0
     @Published private(set) var scrollRevision = 0
     @Published private(set) var scrollsToLatest = true
     @Published private(set) var position = 100
+    @Published private(set) var searching = false
     private let reader = ProxyWebSocketReader()
     private var directory: URL?
     private var connectionRow = 0
     private var visibleRow = Int.max
+    private var viewportAnchorID: Int64?
     private var page = 0
     private var connectionTask: Task<Void, Never>?
     private var windowTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
+    private var searchRefreshTask: Task<Void, Never>?
+    private static func savedFilter() -> ProxyWebSocketFilter {
+        guard let data = UserDefaults.standard.data(forKey: "proxyWebSocketFilter"), data.count <= 512 * 1024,
+              let filter = try? JSONDecoder().decode(ProxyWebSocketFilter.self, from: data),
+              (try? filter.validate()) != nil else { return ProxyWebSocketFilter() }
+        return filter
+    }
     func configure(_ directory: URL) {
         stop(); self.directory = directory; resetConnections()
     }
@@ -42,10 +64,12 @@ private final class ProxyWebSocketModel: ObservableObject {
         selectedURL = nil; resetMessages(); refreshConnections(delay: true)
     }
     private func resetMessages(delay: Bool = false) {
+        searchRefreshTask?.cancel(); searchRefreshTask = nil
         windowTask?.cancel(); windowTask = nil
         detailTask?.cancel(); detailTask = nil
-        visibleRow = Int.max; scrollsToLatest = true; selectedID = nil; detail = nil
+        visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; selectedID = nil; detail = nil; detailError = nil
         window = .empty; position = 100; page = 0; error = nil; scrollRevision += 1
+        searching = selectedURL != nil && filter.isActive
         refreshMessages(delay: delay)
     }
     func refresh(periodic: Bool = false) {
@@ -71,17 +95,30 @@ private final class ProxyWebSocketModel: ObservableObject {
     }
     private func refreshMessages(delay: Bool = false, periodic: Bool = false) {
         if periodic, windowTask != nil { return }
+        searchRefreshTask?.cancel(); searchRefreshTask = nil
         windowTask?.cancel()
         guard let directory, let selectedURL else { return }
-        let kind = kind, row = follows ? Int.max : visibleRow
+        let kind = kind, filter = filter, row = follows ? Int.max : visibleRow
+        let anchorID = follows ? nil : viewportAnchorID
         windowTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
-                let result = try await reader.messages(directory: directory, url: selectedURL, kind: kind, around: row)
-                guard !Task.isCancelled, self.selectedURL == selectedURL, self.kind == kind else { return }
+                let result = try await reader.messages(directory: directory, url: selectedURL, kind: kind,
+                    around: row, filter: filter, anchorID: anchorID)
+                guard !Task.isCancelled, self.selectedURL == selectedURL, self.kind == kind, self.filter == filter else { return }
                 if self.window != result { self.window = result }
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+                self.selectLatestMessage()
+                self.searching = !result.isComplete; self.error = nil
+                if !result.isComplete {
+                    self.searchRefreshTask = Task { [weak self] in
+                        do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                        self?.searchRefreshTask = nil; self?.refreshMessages()
+                    }
+                }
+            } catch {
+                if !Task.isCancelled { self.error = error.localizedDescription; self.searching = false }
+            }
             if !Task.isCancelled { self.windowTask = nil }
         }
     }
@@ -95,27 +132,44 @@ private final class ProxyWebSocketModel: ObservableObject {
         let percent = Int((min(1, max(0, progress)) * 100).rounded())
         if position != percent { position = percent }
         visibleRow = first + max(0, last - first) / 2
+        viewportAnchorID = follows ? nil : window.row(at: first)?.id
         guard !follows, window.total > 0 else { return }
         let lower = max(0, first - 16), upper = min(window.total - 1, last + 16)
         if window.row(at: lower) == nil || window.row(at: upper) == nil { refreshMessages() }
     }
-    func earliest() { follows = false; visibleRow = 0; scrollsToLatest = false; scrollRevision += 1; refreshMessages() }
+    func earliest() { follows = false; visibleRow = 0; viewportAnchorID = nil; scrollsToLatest = false; scrollRevision += 1; refreshMessages() }
     func latest() {
-        scrollsToLatest = true; visibleRow = Int.max
-        if !follows { follows = true } else { scrollRevision += 1; refreshMessages() }
+        scrollsToLatest = true; visibleRow = Int.max; viewportAnchorID = nil
+        if !follows { follows = true } else { scrollRevision += 1; selectLatestMessage(); refreshMessages() }
     }
     func selectURL(_ url: String?) {
         guard selectedURL != url else { return }
         selectedURL = url; resetMessages()
     }
-    func select(_ id: Int64?) {
+    private func selectLatestMessage() {
+        guard follows else { return }
+        if window.total == 0 { select(nil); return }
+        // A just-enabled follow may still hold a historical window. Select
+        // only the actual last row after the latest window has been loaded.
+        guard let latest = window.row(at: window.total - 1) else { return }
+        select(latest.id, keepVisible: true)
+    }
+    func selectFromList(_ id: Int64?) {
+        if follows, id != window.row(at: window.total - 1)?.id { follows = false }
+        select(id)
+    }
+    private func select(_ id: Int64?, keepVisible: Bool = false) {
         guard selectedID != id else { return }
         selectedID = id; page = 0
-        if metadata { metadata = false } else { loadDetail() }
+        if metadata { metadata = false } else { loadDetail(keepVisible: keepVisible && id != nil) }
     }
     func movePage(_ delta: Int) { page = min(max(0, page + delta), max(0, (detail?.pages ?? 1) - 1)); loadDetail() }
-    private func loadDetail() {
-        detailTask?.cancel(); detail = nil
+    private func loadDetail(keepVisible: Bool = false) {
+        detailTask?.cancel(); detailError = nil
+        // Keep the previous body visible during a follow update, avoiding a
+        // blank/loading flash on every captured batch. Stale reads are still
+        // cancelled and cannot replace the newest selection's detail.
+        if !keepVisible { detail = nil }
         guard let directory, let id = selectedID else { return }
         let format = format, metadata = metadata, page = page
         detailTask = Task { [weak self] in
@@ -124,12 +178,18 @@ private final class ProxyWebSocketModel: ObservableObject {
                 let result = try await reader.detail(directory: directory, id: id, metadata: metadata, format: format, page: page)
                 guard !Task.isCancelled, self.selectedID == id else { return }
                 self.detail = result
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+            } catch {
+                if !Task.isCancelled {
+                    self.detail = nil; self.detailError = error.localizedDescription; self.error = error.localizedDescription
+                }
+            }
         }
     }
     func stop() {
+        searchRefreshTask?.cancel(); searchRefreshTask = nil
         connectionTask?.cancel(); connectionTask = nil
         windowTask?.cancel(); windowTask = nil; detailTask?.cancel(); detailTask = nil
+        if let directory { Task { await reader.cancelSearch(directory: directory) } }
     }
 }
 
@@ -138,16 +198,16 @@ struct ProxyWebSocketView: View {
     let sessionID: UUID
     let captureRevision: Date
     @StateObject private var data = ProxyWebSocketModel()
+    @State private var showingFilters = false
     @AppStorage("proxyWebSocketWraps") private var wraps = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("筛选 WebSocket 连接 URL", text: $data.url).textFieldStyle(.roundedBorder)
-                Picker("消息方向", selection: $data.kind) {
-                    Text("全部消息").tag(""); Text("发送").tag("send"); Text("接收").tag("receive")
-                }.labelsHidden().frame(width: 95).accessibilityLabel("WebSocket 消息方向")
-                Toggle("跟随", isOn: $data.follows).toggleStyle(.checkbox).fixedSize()
-                    .help("跟随所选 URL 的最新消息；向上查看暂停跟随")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { urlFilter; messageSearch; filterButton; direction; followToggle }
+                VStack(spacing: 5) {
+                    HStack(spacing: 8) { urlFilter; direction; followToggle }
+                    HStack(spacing: 8) { messageSearch; filterButton }
+                }
             }.fixedSize(horizontal: false, vertical: true)
             if let error = data.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             GeometryReader { geometry in
@@ -174,13 +234,72 @@ struct ProxyWebSocketView: View {
                     }
                 }
             }.frame(minHeight: 290)
-            Text("同 URL 的连接合并展示 · 消息从旧到新排列 · 单条消息最多保留 1 MB，截断会注明")
+            Text("同 URL 的连接合并展示 · 搜索完整缓存消息，忽略大小写 · 单条最多保留 1 MB，截断会注明")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help("发送含业务订阅指令，接收含服务端推送。URL 与消息列表各最多保留 256 行；消息预览最多读取前 512 字节，选中后读取完整缓存正文的当前页。")
+                .help("搜索范围为所选 URL 下全部已缓存的收发消息，按当前方向筛选。JSON 搜索原文中的键或值；二进制搜索 Base64。URL 与消息列表各最多保留 256 行，预览最多 512 字节。完整内容分块检索，命中序号临时保存在磁盘，条件自动保存。")
         }.controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: sessionID) { data.configure(directory) }
             .onChange(of: captureRevision) { _, _ in data.refresh(periodic: true) }
             .onDisappear { data.stop() }
+    }
+    private var urlFilter: some View {
+        TextField("筛选连接 URL", text: $data.url).textFieldStyle(.roundedBorder).frame(minWidth: 160)
+            .accessibilityLabel("筛选 WebSocket 连接 URL")
+    }
+    private var messageSearch: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("搜索完整消息内容", text: $data.filter.search).textFieldStyle(.plain)
+                .accessibilityLabel("搜索 WebSocket 完整消息内容")
+            if !data.filter.search.isEmpty {
+                Button { data.filter.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("清空 WebSocket 搜索")
+            }
+        }.padding(.horizontal, 6).padding(.vertical, 4).frame(minWidth: 190)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+            .help("按原始消息全文查找，不区分大小写，搜索内容自动保存")
+    }
+    private var direction: some View {
+        Picker("消息方向", selection: $data.kind) {
+            Text("全部消息").tag(""); Text("发送").tag("send"); Text("接收").tag("receive")
+        }.labelsHidden().frame(width: 95).accessibilityLabel("WebSocket 消息方向")
+    }
+    private var followToggle: some View {
+        Toggle("跟随", isOn: $data.follows).toggleStyle(.checkbox).fixedSize()
+            .help("自动选中所选 URL 下符合当前条件的最新消息并更新右侧详情；向上滚动或选择历史消息暂停跟随")
+    }
+    private var filterButton: some View {
+        Button(data.filter.conditionCount == 0 ? "筛选" : "筛选 \(data.filter.conditionCount)",
+               systemImage: "line.3.horizontal.decrease") { showingFilters.toggle() }
+            .fixedSize().accessibilityLabel("WebSocket 消息包含和排除筛选")
+            .popover(isPresented: $showingFilters, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("消息筛选").font(.headline)
+                        Spacer()
+                        Button("清空") { data.filter = ProxyWebSocketFilter() }.disabled(!data.filter.isActive)
+                    }
+                    HStack {
+                        Text("包含词关系")
+                        Picker("包含词关系", selection: $data.filter.mode) {
+                            ForEach(NetworkKeywordMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }.pickerStyle(.segmented).labelsHidden()
+                    }
+                    HStack {
+                        Text("包含").frame(width: 32, alignment: .leading)
+                        TextField("如 subscribe, 行情", text: $data.filter.includes)
+                    }
+                    HStack {
+                        Text("排除").frame(width: 32, alignment: .leading)
+                        TextField("如 ping, heartbeat", text: $data.filter.excludes)
+                    }
+                    Text("逗号、分号或换行分隔多个词。先保留满足搜索和包含条件的消息，再剔除命中任一排除词的消息。只填排除词可直接隐藏心跳等消息。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("修改即时生效，自动记住。每组最多 16 个关键词，不区分大小写。检索原始缓存内容，JSON 可直接输入字段名或字段值。")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.padding(16).frame(width: 420).textFieldStyle(.roundedBorder).controlSize(.small)
+            }
     }
     private var connections: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -211,12 +330,12 @@ struct ProxyWebSocketView: View {
             }.font(.caption).frame(height: 22)
             ProxySocketTable(rows: .messages(data.window), selection: data.selectedID.map(ProxySocketSelection.message),
                 follows: data.follows, revision: data.scrollRevision, latest: data.scrollsToLatest,
-                onSelect: { selection in if case .message(let id) = selection { data.select(id) } else if selection == nil { data.select(nil) } },
+                onSelect: { selection in if case .message(let id) = selection { data.selectFromList(id) } else if selection == nil { data.selectFromList(nil) } },
                 onViewport: data.viewport, onPause: { data.follows = false })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     if data.window.total == 0 {
-                        empty(data.selectedURL == nil ? "选择左侧连接查看消息" : "暂无匹配的收发消息",
+                        empty(data.selectedURL == nil ? "选择左侧连接查看消息" : data.searching ? "正在检索完整缓存消息…" : "暂无匹配的收发消息",
                               hint: "每行单行预览，点击查看完整缓存内容")
                     }
                 }.overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
@@ -230,7 +349,12 @@ struct ProxyWebSocketView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var messagePosition: some View {
-        Text("\(data.window.total) 条 · \(data.position)%").monospacedDigit().fixedSize()
+        HStack(spacing: 4) {
+            if let total = data.window.sourceTotal { Text("\(data.window.total) / \(total) 条") }
+            else { Text("\(data.window.total) 条") }
+            Text("· \(data.position)%")
+            if data.searching { Text("· 检索中") }
+        }.monospacedDigit().fixedSize().help("检索中时显示已找到的结果，完成后为全部匹配数量")
     }
     private var messageNavigation: some View {
         HStack(spacing: 5) {
@@ -258,7 +382,7 @@ struct ProxyWebSocketView: View {
                         HStack { Spacer(minLength: 0); wrapToggle }
                     }
                 }.fixedSize(horizontal: false, vertical: true)
-                NetworkTextView(text: data.detail?.text ?? "正在读取…", wrapsLines: wraps)
+                NetworkTextView(text: data.detail?.text ?? data.detailError ?? "正在读取…", wrapsLines: wraps)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
                 if let detail = data.detail {
@@ -371,6 +495,12 @@ private struct ProxySocketTable: NSViewRepresentable {
         if follows && (!previous.follows || previous.revision != revision) { coordinator.userPaused = false }
         guard let table = coordinator.table else { return }
         coordinator.updating = true
+        let previousVisible = table.rows(in: scroll.contentView.bounds)
+        let previousFirst = previousVisible.location != NSNotFound && previousVisible.length > 0 ? previousVisible.location : nil
+        let previousID: Int64? = previousFirst.flatMap { row in
+            if case .message(let id) = previous.rows.selection(at: row) { return id }; return nil
+        }
+        let pixelOffset = previousFirst.map { scroll.contentView.bounds.minY - table.rect(ofRow: $0).minY } ?? 0
         let countChanged = table.numberOfRows != rows.total
         if countChanged { table.noteNumberOfRowsChanged() }
         if countChanged || rows != previous.rows {
@@ -398,6 +528,14 @@ private struct ProxySocketTable: NSViewRepresentable {
                 table.layoutSubtreeIfNeeded(); table.scrollRowToVisible(latest ? table.numberOfRows - 1 : 0)
                 coordinator.updating = false; coordinator.scheduleViewport()
             }
+        } else if !follows, case .messages(let window) = rows, let anchor = window.anchorRow,
+                  let previousID, window.row(at: anchor)?.id == previousID, anchor != previousFirst {
+            // Older matches can be prepended while the initial search runs.
+            // Keep the same message under the user's eyes as its rank changes.
+            table.layoutSubtreeIfNeeded()
+            scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX,
+                y: table.rect(ofRow: anchor).minY + pixelOffset))
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
         coordinator.updating = false; coordinator.scheduleViewport()
     }
