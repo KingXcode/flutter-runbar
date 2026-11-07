@@ -120,6 +120,7 @@ public actor RunbarMCPDataSource {
                 value["cachedRequests"] = try store.listCounts(query: NetworkQuery()).total
             } else { value["cachedRequests"] = 0 }
             value["networkCapture"] = current.live[id]?.networkState ?? "历史缓存；本次采集已结束"
+            value["webSocketCache"] = try RunbarMCPWebSocketDataSource.statistics(directory: checkedWebSockets(inside: directory))
             return try json(value)
         }
         if name == "runbar_read_logs" {
@@ -146,6 +147,9 @@ public actor RunbarMCPDataSource {
             let query = try args.requiredString("query", max: 4096)
             guard !query.isEmpty else { throw RunbarMCPToolError.invalidArguments("query 不能为空。") }
             return try search(file, query: query, offset: args.integer("offset", fallback: 0, max: 9_007_199_254_740_991), limit: args.integer("limit", fallback: 20, min: 1, max: 50))
+        }
+        if RunbarMCPWebSocketDataSource.names.contains(name) {
+            return try RunbarMCPWebSocketDataSource.call(name, args: args, directory: checkedWebSockets(inside: directory))
         }
         let networkDirectory = try checked("network", inside: directory)
         _ = try checked("requests.sqlite", inside: networkDirectory)
@@ -206,6 +210,11 @@ public actor RunbarMCPDataSource {
         }
         return value
     }
+    private func checkedWebSockets(inside directory: URL) throws -> URL {
+        let proxy = try checked("proxy", inside: directory)
+        for file in ["websockets.sqlite", "websockets.sqlite-wal", "websockets.sqlite-shm"] { _ = try checked(file, inside: proxy) }
+        return proxy
+    }
     private func search(_ url: URL, query: String, offset: Int, limit: Int) throws -> Data {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         let size = try handle.seekToEnd(), start = min(UInt64(offset), size), end = start + min(size - start, 8 * 1024 * 1024)
@@ -256,7 +265,7 @@ public actor RunbarMCPDataSource {
     }
 }
 
-private struct MCPArguments {
+struct MCPArguments {
     let values: [String: Any]
     init(_ data: Data, fields: [String: Any], required: [String]) throws {
         guard let values = try JSONSerialization.jsonObject(with: data) as? [String: Any], Set(values.keys).isSubset(of: Set(fields.keys)), required.allSatisfy({ values[$0] != nil }) else {
@@ -272,7 +281,7 @@ private struct MCPArguments {
             case "boolean": _ = try boolean(key, fallback: false)
             case "array": _ = try words(key)
             case "string":
-                let value = try requiredString(key)
+                let value = try requiredString(key, max: field["maxLength"] as? Int ?? 4096)
                 if let choices = field["enum"] as? [String], !choices.contains(value) { throw RunbarMCPToolError.invalidArguments("\(key) 的选项不受支持。") }
             default: break
             }

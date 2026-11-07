@@ -309,6 +309,83 @@ final class ProxyWebSocketStore {
     }
 }
 
+extension ProxyWebSocketStore {
+    /// Read-only catalogues also support older caches without writing a
+    /// migration/index into the original database.
+    private func mcpURLSource() throws -> String {
+        try hasURLIndex() ? "connection_urls" :
+            "(SELECT url,min(id) AS first_id,sum(kind='send') AS send_count,sum(kind='receive') AS receive_count FROM events GROUP BY url)"
+    }
+    func mcpStatistics() throws -> (urls: Int64, messages: Int64, latest: Int64) {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        let stmt = try statement("SELECT count(*),coalesce(sum(send_count+receive_count),0),coalesce((SELECT max(id) FROM events WHERE kind IN ('send','receive')),0) FROM \(try mcpURLSource())")
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { throw failure() }
+        return (sqlite3_column_int64(stmt, 0), sqlite3_column_int64(stmt, 1), sqlite3_column_int64(stmt, 2))
+    }
+    func mcpConnections(filter: String, offset: Int, limit: Int) throws -> (total: Int, rows: [MCPWebSocketURL]) {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        try execute("BEGIN DEFERRED"); defer { try? execute("ROLLBACK") }
+        let source = try mcpURLSource(), predicate = " WHERE (?='' OR instr(lower(url),lower(?))>0)"
+        func prepare(_ sql: String) throws -> OpaquePointer {
+            let stmt = try statement(sql)
+            do { try bind(filter, to: stmt, at: 1); try bind(filter, to: stmt, at: 2) }
+            catch { sqlite3_finalize(stmt); throw error }
+            return stmt
+        }
+        let count = try prepare("SELECT count(*) FROM \(source)" + predicate)
+        guard sqlite3_step(count) == SQLITE_ROW else { sqlite3_finalize(count); throw failure() }
+        let total = Int(clamping: sqlite3_column_int64(count, 0)); sqlite3_finalize(count)
+        let stmt = try prepare("SELECT url,send_count,receive_count,(SELECT timestamp FROM events WHERE id=first_id) FROM \(source)" +
+                               predicate + " ORDER BY first_id DESC LIMIT \(min(100, max(1, limit))) OFFSET \(max(0, offset))")
+        defer { sqlite3_finalize(stmt) }
+        var rows: [MCPWebSocketURL] = []
+        while true {
+            try Task.checkCancellation()
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw failure() }
+            rows.append(MCPWebSocketURL(url: text(stmt, 0), sent: sqlite3_column_int64(stmt, 1), received: sqlite3_column_int64(stmt, 2),
+                firstSeen: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 3)))
+        }
+        return (total, rows)
+    }
+    func mcpCandidates(query: MCPWebSocketQuery, cursor: Int64?, through: Int64,
+                       limit: Int = 32) throws -> [ProxyWebSocketSearchCandidate] {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        let lower = query.ascending ? cursor ?? 0 : 0
+        let upper = query.ascending ? through : min(through, cursor.map { $0 - 1 } ?? through)
+        if upper <= lower { return [] }
+        let conditions = (query.connectionID.isEmpty ? "" : " AND flow_id=?") + (query.kind.isEmpty ? "" : " AND kind=?")
+        let stmt = try statement("SELECT id,opcode,length(payload) FROM events WHERE url=? AND kind IN ('send','receive') AND id>? AND id<=?" + conditions + " ORDER BY id \(query.ascending ? "ASC" : "DESC") LIMIT \(min(32, max(1, limit)))")
+        defer { sqlite3_finalize(stmt) }
+        try bind(query.url, to: stmt, at: 1)
+        sqlite3_bind_int64(stmt, 2, lower); sqlite3_bind_int64(stmt, 3, upper)
+        var parameter: Int32 = 4
+        if !query.connectionID.isEmpty { try bind(query.connectionID, to: stmt, at: parameter); parameter += 1 }
+        if !query.kind.isEmpty { try bind(query.kind, to: stmt, at: parameter) }
+        var rows: [ProxyWebSocketSearchCandidate] = []
+        while true {
+            try Task.checkCancellation()
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw failure() }
+            rows.append(.init(id: sqlite3_column_int64(stmt, 0), opcode: Int(sqlite3_column_int(stmt, 1)),
+                              storedBytes: Int(sqlite3_column_int64(stmt, 2))))
+        }
+        return rows
+    }
+    func mcpCachedBytes(_ id: Int64) throws -> Int {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        let stmt = try statement("SELECT length(payload) FROM events WHERE id=?")
+        defer { sqlite3_finalize(stmt) }; sqlite3_bind_int64(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { throw failure() }
+        let size = Int(sqlite3_column_int64(stmt, 0))
+        guard size <= 1024 * 1024 else { throw RunbarError.message("WebSocket 缓存消息超过 1 MB。") }
+        return size
+    }
+}
+
 public struct ProxyWebSocketDetail: Sendable {
     public let text: String
     public let page: Int

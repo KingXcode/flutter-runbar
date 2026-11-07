@@ -24,11 +24,13 @@ Skill 教 AI 使用 Runbar 工具，不代替 MCP 连接。先在本机 Runbar �
 | 现象 | 检查 |
 | --- | --- |
 | 没有 Runbar 工具 | MCP 配置是否已加入、客户端是否已重连，所用 Runbar 构建是否包含并开启该功能。单独安装 Skill 不会创建连接。 |
+| 有日志 / HTTP 工具，没有 WebSocket 工具 | 使用包含 WebSocket MCP 的新版 Runbar，重新连接 MCP 或刷新客户端工具列表。更新 Skill 本身不会给旧服务端增加工具，不将工具缺失解释成没有 WebSocket 流量。 |
 | Connection refused / 超时 | Runbar 是否在运行，服务是否开启，地址是否仍是窗口显示值，端口是否占用。其他电脑或云端环境不能直接访问本机回环地址。 |
 | HTTP 401 | 连接配置中的访问令牌是否已重置，重新从 Runbar 复制完整配置。不使用 OAuth 登录代替本机令牌。 |
 | HTTP 403 | 客户端地址 / Host / Origin 是否是正确的本机服务地址；不要为连接外部域名而关闭本机校验。 |
 | 正在等待查询结果 | 新版 Runbar 对重查询自动排队，最多 7 个等待、最长等待 30 秒；排队与执行合计仍受 40 秒服务端期限限制。等待期间不要重复提交；来源 / 会话列表不进入重查询队列。 |
 | 队列已满 / 排队超时 / 查询超时 | 稍后重试，或减少页大小与筛选范围。不是业务请求失败，不通过并发重复调用绕过限额；旧版 Runbar 的繁忙提示也可按此处理。 |
 | 没有网络记录 / 正文不可用 | 查看会话的采集状态和请求的 bodyState，区分未开启、未落盘、未缓存与正文超限；不把缺失当成空响应。 |
+| WebSocket available:false / 没有消息 | 确认选中正确的 sessionId，是否为该次运行开启代理抓包，以及消息是否实际通过代理并已保存。WebSocket 使用代理缓存，关联 App 的 DevTools HTTP 采集不自动提供 WebSocket。 |
 
 官方参考：[Codex Skill 安装位置](https://learn.chatgpt.com/docs/build-skills)、[Codex MCP 配置](https://developers.openai.com/codex/mcp)。

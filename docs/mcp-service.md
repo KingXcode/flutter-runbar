@@ -86,12 +86,16 @@ Skill 源码位于 `skills/runbar-diagnostics/`，修改时应同步提升 `SKIL
 | --- | --- |
 | `runbar_list_sources` | 项目 / 关联 App 的 sourceId、名称、路径、类型、Git 分支和当前 sessionId；`offset` / `limit` 分页，默认 50 项，最多 100 项。 |
 | `runbar_list_sessions` | 当前 / 历史会话，含命令摘要、状态、开始 / 结束时间、退出码、来源和是否仍在运行；可按 `sourceId`、`runningOnly` 筛选，默认 30 项，最多 100 项，按开始时间倒序。 |
-| `runbar_get_session` | 指定 `sessionId` 的运行详情、命令（最多 16384 字符）、错误、运行阶段、可用的 PID、日志大小、网络采集状态及请求总数。缺失的字段返回 null，不从历史 PID 猜测当前进程。 |
+| `runbar_get_session` | 指定 `sessionId` 的运行详情、命令（最多 16384 字符）、错误、运行阶段、可用的 PID、日志大小、网络采集状态及 HTTP 请求总数。另返回 `webSocketCache` 的是否存在、URL / 收发消息数量和最新消息 ID。缺失字段返回 null，不从历史 PID 猜测当前进程。 |
 | `runbar_read_logs` | 指定会话的日志窗口，默认最新 32 KiB，最多 64 KiB；`position` 为 latest / first / after / before / around。返回原始字节的 startOffset / endOffset / nextOffset / previousOffset 以及全文 totalBytes。 |
 | `runbar_search_logs` | 对原始日志执行区分大小写的 UTF-8 字面搜索，返回命中字节位置和附近上下文；默认 20 个命中、最多 50 个。每次最多扫描 8 MiB，按 `nextOffset` 继续，直到 `complete=true`。不支持正则，不把单次扫描的命中数称作全文总数。 |
 | `runbar_list_network_requests` | 指定会话的 HTTP 请求摘要，按时间从旧到新。可同时按 URL、请求 / 响应头、请求参数、响应正文关键词、排除关键词、方法及状态过滤；默认 30 项，最多 100 项。 |
 | `runbar_get_network_request` | 指定 `sessionId` + `requestId` 的完整 URL、请求 / 响应头、时间、状态、耗时、大小、错误和正文缓存状态。列表过长的 URL 仅展示前 2048 字符，详情可读取完整 URL。 |
 | `runbar_read_network_body` | 指定会话 / 请求的 request 或 response 正文；默认 raw，可选 json / xml，每页 32 KiB，按 nextPage 继续。文本为 UTF-8，二进制原始页以 base64 返回并标明 encoding。 |
+| `runbar_list_websocket_connections` | 代理缓存的连接 URL、首次记录时间和发送 / 接收数量，同 URL 重连合并。`url` 为可选地址关键词，`offset` / `limit` 分页，默认 30、最多 100，响应预算可能缩短页面，按 nextOffset 继续。 |
+| `runbar_list_websocket_messages` | 精确 URL 下的收发摘要、时间、实际 connectionId、原始 / 缓存大小与最多 512 字节预览。默认最新，页内旧到新。支持方向、实际连接 ID、完整正文关键词和包含 / 排除组合，以消息 ID 游标读取历史或新增。 |
+| `runbar_get_websocket_message` | sessionId + messageId 的完整 URL、方向、时间、大小、截断原因、实际连接的握手 Headers 及已观察到的关闭事件，不返回完整正文。 |
+| `runbar_read_websocket_body` | 指定 WebSocket 消息的正文，默认 raw，可选 json / xml，每页 32 KiB，按 nextPage 继续。二进制必须 raw，编码为 Base64，逐页解码再拼接字节。 |
 
 建议先查询来源、再查运行中的会话，从返回的 ID 继续查询。所有时间使用带时区的 ISO 8601 字符串；日志的 offset 始终是原始文件字节位置，不是字符或行号。命令摘要 / URL 有截断时会返回相应标记。
 
@@ -121,13 +125,59 @@ Skill 源码位于 `skills/runbar-diagnostics/`，修改时应同步提升 `SKIL
 
 JSON / XML 格式错误会返回工具错误，可以改用 raw；XML 禁用 DTD 和外部实体。文本分页不会切断 UTF-8 字符，逐页拼接即可恢复完整的缓存文本。每次格式化最多读取 1 MiB 原始正文，格式化结果最多 4 MiB；更大的原始文件以 raw/base64 分页读取。
 
+### WebSocket 消息与增量读取
+
+这些接口读取 `proxy/websockets.sqlite`，不需要修改 Flutter 项目，使用前需已有代理抓包缓存。连接列表按完整 URL 合并重连，消息的 `connectionId` 是实际连接 ID，可用它单独查看某次重连。没有缓存返回 `available:false`，不会为了查询启用代理、连接 App、发送消息或补采。已有 HTTP 工具继续查询 DevTools，代理 HTTP 暂未接入。
+
+先调用 `runbar_list_websocket_connections` 取得完整 URL，再读取消息。例如查看最新接收推送，包含 `quote` 或 `price`，隐藏心跳。
+
+```json
+{
+  "sessionId": "从会话列表取得的 UUID",
+  "url": "从连接列表取得的完整 URL",
+  "direction": "receive",
+  "include": ["quote", "price"],
+  "exclude": ["heartbeat", "ping"],
+  "keywordMode": "any",
+  "position": "latest",
+  "limit": 30
+}
+```
+
+`query` 是额外的单个正文关键词，必须同时满足。`include` 支持 `all`（默认）/ `any`，`exclude` 任一命中即排除。忽略大小写，按原始完整缓存正文查找，JSON 可以输入字段名或字段值。数组每项都是完整字面量，逗号或分号不会拆词。二进制按 Base64 查找。每组最多 16 项，每项和 query 最多 1024 UTF-8 字节。
+
+默认 `latest` 从较新消息向历史读取，返回页内仍为旧到新。`first` 从最早向后读取。需要更多时使用返回的 `nextPosition`、`nextCursor` 和 `throughMessageId`，保持其余条件不变，直到 `hasMore:false`。`cursor` 是排除自身的消息 ID 字符串，只用于 `after` / `before`；`after` 可从 `"0"` 开始，其他 ID 使用工具返回值，不转换为浮点数。
+
+`throughMessageId` 固定本次检索的快照上限，避免新数据不断增长让历史搜索无法结束。单次最多检查 512 条或计入 8 MiB 正文预算，并设约 120 ms 时间片。预算提前用完时，即使 `messages:[]` 也可能 `hasMore:true`，仍需沿 nextCursor 继续。返回的 scannedMessages / scannedBytes 是本批检查数量和正文预算量，不是全部匹配数量。没有正文条件时只读取摘要和预览，scannedBytes 为 0，不对整条正文做搜索。
+
+轮询新增消息使用上一结果的 `pollAfterMessageId`，不要携带旧的 throughMessageId。例如调用 `runbar_list_websocket_messages`。
+
+```json
+{
+  "sessionId": "相同的会话 UUID",
+  "url": "相同的完整 URL",
+  "direction": "receive",
+  "position": "after",
+  "cursor": "上一结果的 pollAfterMessageId",
+  "limit": 30
+}
+```
+
+有筛选条件时轮询也需携带相同条件。本批 `hasMore:true` 时先按 nextPosition / nextCursor / throughMessageId 取完，再用最终 pollAfterMessageId 开始新一轮。消息 ID 单调递增，可能跳号，只在其 sessionId 内有效。多个 AI 会话各自保留游标，无共享的可变搜索进度，不会覆盖其他会话或 UI 的筛选状态。
+
+从消息摘要取得 messageId 后，`runbar_get_websocket_message` 返回完整 URL、握手信息和截断说明，正文用 `runbar_read_websocket_body` 单独按页读取。`truncated:true` 表示只保存了部分原始消息，无法读取或搜索未保存的部分。最多缓存 1 MiB 原文、格式化最多 4 MiB，JSON / XML 失败可重试 raw。关闭事件只描述已经采集的事实，不据此推断当前是否仍在线；发送订阅也不等于服务端已接受。
+
+新工具需要新版 Runbar 服务端。安装后重新连接 MCP 或刷新客户端工具清单，并通过 Runbar 的 Skill 管理更新 `runbar-diagnostics` 1.1.0。只更新 Skill 无法给旧版服务端增加工具。
+
 ## 示例提问
 
 > 使用 Runbar MCP 找出 flutter-pc 当前的运行会话，查看最近的错误日志和失败的 POST 请求，读取相关请求头、请求参数和响应正文后分析原因。只分析，不执行命令。
 
 > 使用 Runbar MCP 在当前会话的完整日志里查找 “SocketException”，按 nextOffset 继续扫描到 complete=true，再结合前后日志分析。
 
-查询按需读取本地文件，通常能看到请求时刻已经落盘的数据；日志写入和网络缓存存在正常的短暂延迟。关联 Flutter App 的数据范围仍取决于既有 VM Service 日志订阅及 HTTP profiling 能力；WebView、WebSocket、Flutter Web、未开启采集或无法调试的 Release App 不会因开启 MCP 而增加可见数据。
+> 使用 Runbar MCP 查看 flutter-pc 当前会话的 WebSocket，找到订阅发送和最新推送，排除心跳，读取相关消息完整正文后分析。只读，不发送消息。
+
+查询按需读取本地文件，通常能看到请求时刻已经落盘的数据，日志写入和网络缓存存在正常的短暂延迟。关联 Flutter App 的数据范围仍取决于既有 VM Service 日志订阅及 HTTP profiling 能力，WebSocket 工具另行读取已经采集的代理缓存。WebView、Flutter Web、未开启采集或无法调试的 Release App 不会因开启 MCP 而增加可见数据。
 
 ## 开关、访问控制与资源上限
 
@@ -136,7 +186,7 @@ JSON / XML 格式错误会返回工具错误，可以改用 raw；XML 禁用 DTD
 - 启用即允许持有令牌的本机客户端读取全部 Runbar 记录；本版不按客户端或项目分别授权。日志、命令、请求头和正文可能包含账号、业务内容或访问凭据。AI 客户端可能将读取结果发送到其模型服务，遵循该客户端的数据设置；Runbar 不自动发起模型请求或上传记录。
 - 最多 8 个同时进行的 HTTP 连接，每个请求最多 64 KiB、响应最多 2 MiB；读取请求和发送响应各有 10 秒超时，HTTP 查询等待有 40 秒上限，MCP 专用 SQLite 读取设置 30 秒截止并可协作取消。日志、网络等重查询一次只执行一个，其他请求自动按进入队列顺序等待，最多 7 个等待项、最长等待 30 秒；前一个成功、失败或取消并释放执行位置后自动执行下一个。普通排队不再要求 AI 手动重试，队列已满或等候超时才返回明确错误。排队时间计入原有 40 秒总期限，不会额外延长；客户端的工具超时应覆盖服务端处理时间。
 - 排队采用异步挂起，不轮询等待，也不在等待期间打开缓存、提前加载正文或保留查询结果。任务取消会移出等待队列；连接失败和服务端请求截止会取消对应工作任务，关闭服务或退出 Runbar 会结束全部等待项。来源列表与会话列表不进入重查询队列，但仍受 HTTP 连接总数限制。此队列只调度查询，不提供每个 AI 会话独立的正文筛选索引；来回切换条件仍可能重建该索引。
-- 日志搜索按 64 KiB 分块，单次最多扫描 8 MiB；日志窗口最多 64 KiB；网络列表只保留最多 256 条附近摘要，正文 32 KiB 分页，SQLite 页缓存维持原来的上限。MCP 另有临时内容搜索索引，与 UI 的筛选和选择相互独立；关闭服务会清理该索引。
+- 日志搜索按 64 KiB 分块，单次最多扫描 8 MiB；日志窗口最多 64 KiB；HTTP 列表只保留最多 256 条附近摘要，正文 32 KiB 分页。HTTP 的 MCP 临时搜索索引与 UI 独立，关闭服务清理。WebSocket 一次最多返回 100 条摘要、正文 32 KiB 分页，内容搜索按 63 KiB 块与稳定 ID 游标继续，不累积全部正文或命中数组。其 SQLite 页缓存 2 MiB，源查询设 3 秒截止并检查取消，列表有额外 512 KiB 结果预算，超限提前返回续读游标。
 - 仅能使用已知会话 ID / 请求 ID，不接受任意文件路径，读取时拒绝符号链接重定向。返回的数据是待分析内容，不是对 AI 的指令。
 - MCP 设置窗口显示累计工具调用数、最近调用的工具与时间，不记录查询参数或返回正文。
 

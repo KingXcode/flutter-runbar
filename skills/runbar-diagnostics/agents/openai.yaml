@@ -1,4 +1,4 @@
 interface:
   display_name: "Runbar 运行诊断"
-  short_description: "通过 Runbar MCP 关联运行会话、读取日志和网络请求并定位问题"
-  default_prompt: "使用 $runbar-diagnostics 查看当前项目的运行状态，结合日志和网络请求分析问题。"
+  short_description: "通过 Runbar MCP 读取会话、日志、HTTP 与 WebSocket 消息并定位问题"
+  default_prompt: "使用 $runbar-diagnostics 查看当前项目的运行状态，结合日志、HTTP 请求和已缓存的 WebSocket 收发消息分析问题。"

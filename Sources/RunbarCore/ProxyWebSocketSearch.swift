@@ -41,10 +41,18 @@ struct ProxyWebSocketMatcher {
     let overlap: Int
     init(_ filter: ProxyWebSocketFilter) throws {
         try filter.validate()
-        includes = try ProxyWebSocketFilter.words(filter.includes)
-        excludes = try ProxyWebSocketFilter.words(filter.excludes)
-        search = filter.search.trimmingCharacters(in: .whitespacesAndNewlines)
-        mode = filter.mode
+        try self.init(search: filter.search, includes: ProxyWebSocketFilter.words(filter.includes),
+                      excludes: ProxyWebSocketFilter.words(filter.excludes), mode: filter.mode)
+    }
+    /// Array terms remain literal, including commas and semicolons in JSON.
+    /// MCP callers must not pass through the UI's delimiter-based text fields.
+    init(search: String, includes: [String], excludes: [String], mode: NetworkKeywordMode) throws {
+        guard search.unicodeScalars.count <= 1024, includes.count <= 16, excludes.count <= 16,
+              (includes + excludes).allSatisfy({ !$0.isEmpty && $0.unicodeScalars.count <= 1024 }) else {
+            throw RunbarError.message("WebSocket 关键词超过长度或数量限制。")
+        }
+        self.includes = includes; self.excludes = excludes
+        self.search = search.trimmingCharacters(in: .whitespacesAndNewlines); self.mode = mode
         overlap = min(32 * 1024, ((includes + excludes + [search]).map { $0.utf8.count }.max() ?? 0) * 4 + 16)
     }
     func hits(in text: String, words: [String]) -> Set<String> {

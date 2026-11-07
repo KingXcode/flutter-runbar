@@ -36,7 +36,7 @@ struct MCPSettingsView: View {
             Text(service.address).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
             Divider()
             Text("可查询的数据").font(.headline)
-            Text("项目与关联 App、当前及历史会话、命令与退出状态、Git 分支；日志分页与全文字面搜索；HTTP 请求列表、请求头、请求参数、响应正文及缓存状态。")
+            Text("项目与关联 App、当前及历史会话、命令与退出状态、Git 分支；日志分页与全文字面搜索；DevTools HTTP 请求及正文；代理 WebSocket 连接、收发消息、搜索筛选、握手信息和新增消息读取。")
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
             Text("只读查询，不启动或停止任务、不清理缓存。日志和正文按页读取，大文件搜索按游标分批继续；未缓存的网络正文会明确标记。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
