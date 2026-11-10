@@ -2,7 +2,7 @@
 name: runbar-diagnostics
 description: "通过 Runbar MCP 查询本机项目或关联 App 的会话、日志、HTTP 请求及代理 WebSocket 收发消息，定位运行、接口和推送问题。用于分析 Runbar 已采集的数据，或明确调用本 Skill 的请求。"
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # Runbar 运行诊断

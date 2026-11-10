@@ -45,6 +45,8 @@ final class MCPServiceController: ObservableObject {
     @Published private(set) var lastCall: String?
     @Published private(set) var lastCallAt: Date?
     @Published private(set) var copied: String?
+    @Published private(set) var configurationRevision = UUID()
+    let clientInstaller = MCPClientInstallationModel()
     private let server = MCPLocalServer()
     private var root: URL?
     private var snapshot: (@Sendable () async -> RunbarMCPSnapshot)?
@@ -54,6 +56,10 @@ final class MCPServiceController: ObservableObject {
     private var generation = UUID()
     private var token: String?
     var address: String { "http://127.0.0.1:\(port)/mcp" }
+    var installationConnection: RunbarMCPConnection? {
+        guard running, let token else { return nil }
+        return RunbarMCPConnection(address: address, token: token)
+    }
     private var skillPackage: URL? { Bundle.main.url(forResource: "runbar-diagnostics", withExtension: "zip", subdirectory: "Skills") }
     var skillPackageAvailable: Bool { skillPackage != nil }
     init() {
@@ -63,6 +69,7 @@ final class MCPServiceController: ObservableObject {
     }
     func configure(root: URL, snapshot: @escaping @Sendable () async -> RunbarMCPSnapshot) {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath(); self.snapshot = snapshot
+        clientInstaller.configure(root: root)
     }
     func setEnabled(_ value: Bool) {
         enabled = value; UserDefaults.standard.set(value, forKey: "mcpEnabled")
@@ -101,6 +108,7 @@ final class MCPServiceController: ObservableObject {
                 })
                 guard !Task.isCancelled, self.generation == generation else { return }
                 self.running = true; self.starting = false; self.message = "已开启 · 仅本机 · 只读"
+                self.configurationRevision = UUID()
             } catch is CancellationError {} catch {
                 guard self.generation == generation else { return }
                 self.starting = false; self.running = false; self.message = "服务未启动"; self.error = error.localizedDescription
@@ -110,6 +118,7 @@ final class MCPServiceController: ObservableObject {
     func stop() {
         generation = UUID(); startup?.cancel(); startup = nil; server.stop()
         running = false; starting = false; token = nil; copied = nil; message = "服务未开启"
+        configurationRevision = UUID()
         let old = source, previous = cleanup; source = nil
         cleanup = Task { await previous?.value; await old?.shutdown() }
     }
@@ -151,7 +160,7 @@ final class MCPServiceController: ObservableObject {
         panel.nameFieldStringValue = "runbar-diagnostics.zip"
         panel.allowedContentTypes = [.zip]
         panel.title = "保存 Runbar 诊断 Skill"
-        panel.message = "导出供其他环境安装；本机可直接使用「安装 / 更新 AI Skill」向导。MCP 连接仍需配置一次。"
+        panel.message = "导出供其他环境安装；本机可直接使用「安装 / 更新 AI Skill」向导，并在 MCP 窗口选择 Agent 安装连接。"
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         do {
             try Data(contentsOf: package).write(to: destination, options: .atomic)

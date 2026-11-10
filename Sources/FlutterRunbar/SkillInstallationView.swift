@@ -34,7 +34,7 @@ struct SkillInstallationView: View {
                 Spacer()
                 if let message = installer.message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
             }
-            Text("更新前保留旧 Skill 备份；检测到手动修改或其他来源的同名 Skill 时，需勾选「先备份再替换」。安装不改 AI 的其他配置，Skill 使用 Runbar 数据仍需连接 MCP。")
+            Text("更新前保留旧 Skill 备份；检测到手动修改或其他来源的同名 Skill 时，需勾选「先备份再替换」。Skill 使用 Runbar 数据还需连接 MCP，可在 MCP 窗口选择 Agent 一键安装。")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("连接 MCP…", action: onOpenMCP).disabled(installer.installing)

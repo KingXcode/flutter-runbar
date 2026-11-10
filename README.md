@@ -14,11 +14,13 @@ WebSocket 页先选连接 URL，再搜索其全部已缓存收发消息。搜索
 
 ## 连接 AI（MCP 服务）
 
-从应用菜单、菜单栏面板或设置进入「AI 连接（MCP）」，开启后复制 Codex 或通用 HTTP 配置，让本机 AI 查询项目 / 关联 App 的当前与历史会话、日志、搜索结果、DevTools HTTP 请求及正文，以及代理已缓存的 WebSocket 连接和收发消息。WebSocket 支持完整缓存内容搜索、包含 / 排除、握手信息、正文分页与消息 ID 增量读取。默认关闭；固定本机地址 `http://127.0.0.1:47821/mcp`，可改端口，使用访问令牌并记住开关。只读、分页、有资源上限，不依赖业务项目改代码，也不影响 UI 中的选中项目、筛选或阅读位置。接入步骤、工具参数、数据范围和资源限制见 [MCP 服务说明](docs/mcp-service.md)。
+从应用菜单、菜单栏面板或设置进入「AI 连接（MCP）」，开启后勾选 Agent 并点击「安装 / 更新所选」，直接写入 Codex、Claude Code、Cursor、Qoder CLI、Qoder CN CLI 或 WorkBuddy 的用户级 MCP 配置。可以选择多个 Agent，也可从所选 Agent 卸载；服务关闭时仍能卸载。每行显示配置位置和安装状态，支持选择已有配置文件；修改前备份，只管理 Runbar 条目。修改端口或重置令牌后再次更新所选 Agent，并按客户端要求重连或重启。其他客户端保留 Codex / 通用 HTTP 配置复制入口。
+
+连接后，本机 AI 可查询项目 / 关联 App 的当前与历史会话、日志、搜索结果、DevTools HTTP 请求及正文，以及代理已缓存的 WebSocket 连接和收发消息。WebSocket 支持完整缓存内容搜索、包含 / 排除、握手信息、正文分页与消息 ID 增量读取。默认关闭；固定本机地址 `http://127.0.0.1:47821/mcp`，可改端口，使用访问令牌并记住开关。只读、分页、有资源上限，不依赖业务项目改代码，也不影响 UI 中的选中项目、筛选或阅读位置。接入步骤、工具参数、数据范围和资源限制见 [MCP 服务说明](docs/mcp-service.md)。
 
 多个本机 AI 会话可以共用服务。日志、网络等重查询自动排队，保持一个执行、最多七个等待；最长等待 30 秒，排队和执行仍受单次 HTTP 查询 40 秒期限限制。成功、失败或任务取消后自动释放执行位置，正常等待无需重复提交。队列满或等待超时会明确提示；关闭服务清空等待项。
 
-可选安装配套的 [runbar-diagnostics Skill](skills/runbar-diagnostics/SKILL.md)，指导 AI 选择会话、分页取证和分析日志 / 网络问题。首次打开会显示安装向导，勾选 Codex、Claude Code、Qoder、Qoder CN、WorkBuddy、OpenCode 后直接安装，也支持更改目录或添加其他工具。之后可从设置、菜单栏或 MCP 窗口「安装 / 检查更新…」管理；新版 Runbar 内置 Skill 变化时会检查已安装副本，并提示更新，同一次更新选「稍后」后不反复弹窗。替换前保留旧版备份，有手动修改的内容需明确勾选后才替换。MCP 仍需配置一次，安装后按客户端要求刷新或重开会话。
+可选安装配套的 [runbar-diagnostics Skill](skills/runbar-diagnostics/SKILL.md)，指导 AI 选择会话、分页取证和分析日志 / 网络问题。首次打开会显示安装向导，勾选 Codex、Claude Code、Qoder、Qoder CN、WorkBuddy、OpenCode 后直接安装，也支持更改目录或添加其他工具。之后可从设置、菜单栏或 MCP 窗口「安装 / 检查更新…」管理；新版 Runbar 内置 Skill 变化时会检查已安装副本，并提示更新，同一次更新选「稍后」后不反复弹窗。替换前保留旧版备份，有手动修改的内容需明确勾选后才替换。Skill 和 MCP 连接分别管理；单独安装 Skill 不会创建 MCP 连接，仍需在 MCP 窗口选择 Agent 安装连接或使用手动配置。安装后按客户端要求刷新或重开会话。
 
 开发时可运行 `python3 scripts/package-mcp-skill.py` 生成 `dist/skills/runbar-diagnostics.zip` 及带版本 / 文件指纹清单的展开资源；正常 Xcode / App / DMG 构建自动包含。MCP 窗口保留「导出 ZIP…」供手动安装到其他环境，完整目录和更新规则见 [Skill 安装与更新说明](docs/mcp-service.md#可选安装-runbar-诊断-skill)。
 

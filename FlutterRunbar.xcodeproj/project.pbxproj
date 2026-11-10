@@ -13,6 +13,7 @@
 		1611435DCCFF242E2BC1984D /* ProxyWebSocketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */; };
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
 		199BF03FDD090A2E33451B92 /* ProxyCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */; };
+		1DEC58F30E458273AB004218 /* MCPClientInstallationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCEA8961B1D72C5604F4C21A /* MCPClientInstallationView.swift */; };
 		2010F4473E36D2912A0A9DA7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 75CB9B8540936580652BC9EC /* Assets.xcassets */; };
 		2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */; };
 		22285D24A8A763BF774F25FF /* RunbarMCPQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */; };
@@ -55,10 +56,13 @@
 		E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F989F55D837BC0137D8965AC /* ProjectKindTests.swift */; };
 		EB88B4D3E791610ADDF50A13 /* LogTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */; };
 		EC606EAB008A3CCCA22C2B6F /* HistoryManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */; };
+		F77C1CBBB4E69B982C404CA6 /* MCPClientInstallationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B1B0E8148C4E912DE4D250 /* MCPClientInstallationModel.swift */; };
+		F7D5EF5D515CBCA7A47F1C02 /* MCPInstallationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013743BD27C67AB9E1CFF3EB /* MCPInstallationTests.swift */; };
 		F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		013743BD27C67AB9E1CFF3EB /* MCPInstallationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPInstallationTests.swift; sourceTree = "<group>"; };
 		0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterRunbarApp.swift; sourceTree = "<group>"; };
 		0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateTests.swift; sourceTree = "<group>"; };
 		08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogResponsivenessProbe.swift; sourceTree = "<group>"; };
@@ -111,6 +115,7 @@
 		B4176923BDDEAA2C43B750A0 /* proxy-engine.lock.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "proxy-engine.lock.json"; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
+		BCEA8961B1D72C5604F4C21A /* MCPClientInstallationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientInstallationView.swift; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
 		CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServiceController.swift; sourceTree = "<group>"; };
 		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -128,6 +133,7 @@
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPQueueTests.swift; sourceTree = "<group>"; };
 		F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyWebSocketView.swift; sourceTree = "<group>"; };
+		F6B1B0E8148C4E912DE4D250 /* MCPClientInstallationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientInstallationModel.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		F86E183CF74D4ECA19B3FB7C /* CommandScriptEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandScriptEditor.swift; sourceTree = "<group>"; };
 		F988073F96A1983555A9F5EA /* LogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogView.swift; sourceTree = "<group>"; };
@@ -205,6 +211,7 @@
 				ADB0EFD74313532934ED48FB /* LogQueryTests.swift */,
 				8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */,
 				6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */,
+				013743BD27C67AB9E1CFF3EB /* MCPInstallationTests.swift */,
 				3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */,
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
@@ -311,6 +318,8 @@
 				9BC0C281B047474B3C8BE784 /* LogToolsView.swift */,
 				F988073F96A1983555A9F5EA /* LogView.swift */,
 				AEF95A87D2186443FE029E19 /* ManagerView.swift */,
+				F6B1B0E8148C4E912DE4D250 /* MCPClientInstallationModel.swift */,
+				BCEA8961B1D72C5604F4C21A /* MCPClientInstallationView.swift */,
 				A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */,
 				8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */,
 				CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */,
@@ -526,6 +535,8 @@
 				B09784A4156C60835FD92736 /* LogResponsivenessProbe.swift in Sources */,
 				286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */,
 				673CC5846603D7C9C0D66235 /* LogView.swift in Sources */,
+				F77C1CBBB4E69B982C404CA6 /* MCPClientInstallationModel.swift in Sources */,
+				1DEC58F30E458273AB004218 /* MCPClientInstallationView.swift in Sources */,
 				0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */,
 				629CAF4816992E4EFFB435F9 /* MCPRuntimeSnapshot.swift in Sources */,
 				8F4E93AE6DAC2ADFB05333AD /* MCPServiceController.swift in Sources */,
@@ -560,6 +571,7 @@
 				D1D8400C3C7EE2A7DF000A59 /* LogQueryTests.swift in Sources */,
 				A803486EBC6D49F61DC76278 /* LogTailReaderTests.swift in Sources */,
 				EB88B4D3E791610ADDF50A13 /* LogTimelineTests.swift in Sources */,
+				F7D5EF5D515CBCA7A47F1C02 /* MCPInstallationTests.swift in Sources */,
 				B917C5541571C2B18D7C4A00 /* NetworkTests.swift in Sources */,
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
@@ -667,7 +679,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 57;
+				CURRENT_PROJECT_VERSION = 58;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -681,7 +693,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.15.0;
+				MARKETING_VERSION = 0.16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -744,7 +756,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 57;
+				CURRENT_PROJECT_VERSION = 58;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -764,7 +776,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.15.0;
+				MARKETING_VERSION = 0.16.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

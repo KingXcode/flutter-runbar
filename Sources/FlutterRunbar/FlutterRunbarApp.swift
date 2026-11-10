@@ -184,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
         #else
         let model = AppModel.shared
+        guard !model.mcp.clientInstaller.installing else { model.showMCPWindow(); return .terminateCancel }
         guard !model.skillInstaller.installing else { model.showSkillWindow(); return .terminateCancel }
         guard model.nativeActionProjectID == nil else { return .terminateCancel }
         guard model.busy else { model.finishLogQueriesForQuit(); return .terminateLater }

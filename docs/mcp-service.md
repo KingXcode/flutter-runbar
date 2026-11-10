@@ -5,9 +5,9 @@ Runbar 可以作为只读的 MCP 服务，让 Codex 等本机 AI 客户端查询
 ## 开启与连接
 
 1. 在 Runbar 应用菜单、菜单栏面板或设置中打开「AI 连接（MCP）」。首次默认关闭，点击「开启」。开启状态和端口会记住，下次启动 Runbar 自动恢复。
-2. 默认地址是 `http://127.0.0.1:47821/mcp`。端口被占用时可填写 1024–65535 的其他端口并点「应用」，然后重新复制客户端配置。
-3. 点击「复制 Codex 配置」，将配置合并到 `~/.codex/config.toml`，不要覆盖文件中其他设置；也可在支持相应字段的客户端 MCP 设置中填入地址和 Authorization 请求头。保存后按客户端要求重连或重启。
-4. Cursor / Claude Code 等支持 Streamable HTTP 的客户端可以使用「复制通用 HTTP 配置」；各客户端的外层配置格式可能不同，关键参数是 HTTP 地址和 `Authorization: Bearer <访问令牌>`。
+2. 默认地址是 `http://127.0.0.1:47821/mcp`。端口被占用时可填写 1024–65535 的其他端口并点「应用」，然后更新对应 Agent 的连接配置。
+3. 在「安装到 AI Agent」勾选需要连接的客户端，核对配置位置并点击「安装 / 更新所选」。支持同时选择 Codex、Claude Code、Cursor、Qoder CLI、Qoder CN CLI 和 WorkBuddy，写入用户级配置。安装后按客户端要求重连 MCP 或重启；Qoder CLI 也可使用 `/mcp reload`。客户端仍可能要求启用服务器或批准工具权限。
+4. OpenCode 等其他支持 Streamable HTTP 的客户端可使用「复制通用 HTTP 配置」，按其实际格式填写地址及 `Authorization: Bearer <访问令牌>`。Codex 也保留「复制 Codex 配置」，可手动合并到 `~/.codex/config.toml`，不要覆盖其他设置。
 5. 保持 Runbar 运行。在 AI 中说明要使用 Runbar MCP 查询哪个项目或 App，必要时允许该客户端的工具读取权限。
 
 Codex 配置示例（令牌以窗口复制的实际值为准）：
@@ -33,7 +33,29 @@ tool_timeout_sec = 45
 }
 ```
 
-不自动写入 AI 客户端的全局配置。仅支持本机可访问的客户端；云端 AI 服务、其他电脑和某些隔离环境不能直接访问这个回环地址。只支持 HTTP 的客户端无需 stdio 启动命令；仅支持 stdio 的客户端需要自行使用兼容的 HTTP 桥接器。
+仅支持本机可访问的客户端；云端 AI 服务、其他电脑和某些隔离环境不能直接访问这个回环地址。只支持 HTTP 的客户端无需 stdio 启动命令；仅支持 stdio 的客户端需要自行使用兼容的 HTTP 桥接器。
+
+### 按 Agent 管理连接
+
+每行显示「未安装 / 已安装 / 配置需更新 / 同名配置冲突 / 无法读取配置」和配置文件位置。「刷新状态」重新读取文件；已安装只表示文件中的连接配置匹配，不代表客户端已经连接或完成权限授权。
+
+| Agent | 默认用户级配置文件 |
+| --- | --- |
+| Codex | `~/.codex/config.toml` |
+| Claude Code | `~/.claude.json`；不等同于网页 Claude。 |
+| Cursor | `~/.cursor/mcp.json` |
+| Qoder CLI | `~/.qoder/settings.json`；不等同于 Qoder IDE 的 MCP 配置。 |
+| Qoder CN CLI | `~/.qoder-cn/settings.json` |
+| WorkBuddy | `~/.workbuddy/mcp.json` |
+
+配置位置不同，可从对应行的「更改配置文件…」选择已有文件，之后再点击安装；选择文件本身不会写入配置。路径会记住，也可「恢复默认位置」。项目级或托管配置可能覆盖用户级同名服务器，最终是否加载以客户端为准。
+
+- 「安装 / 更新所选」使用当前服务地址和令牌，因此需要先开启 MCP 服务。修改端口或重置访问令牌后，重新更新所选 Agent，再重连或重启对应客户端；手动配置的客户端需自行同步。
+- 「从所选 Agent 卸载」仅移除所选配置文件中的 Runbar MCP 条目，不关闭 Runbar 服务，也不卸载诊断 Skill；服务关闭时仍可使用。其他客户端中的连接继续保留。
+- 每次修改已有配置前，将原文件备份到 `~/Library/Application Support/FlutterRunbar/mcp-config-backups/`。本次结果可点击「显示配置备份」在 Finder 中查看；备份可能含其他服务的凭据，应按原配置保管。
+- 只管理 Runbar 条目，保留其他设置和 MCP 服务。JSON 配置需为无注释、无尾逗号的有效 JSON；无法安全处理的 TOML 写法、符号链接、路径权限或同名冲突会显示原因并保留原文件，可修正后重试或使用手动配置。
+
+配置格式参考：[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)、[Cursor MCP](https://prod.cursor.com/help/customization/mcp)、[Qoder CLI MCP](https://docs.qoder.com/cli/mcp-reference)、[Qoder CN CLI 配置](https://docs.qoder.cn/cli/settings-reference)、[WorkBuddy MCP](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)。
 
 ## 可选：安装 Runbar 诊断 Skill
 
@@ -43,11 +65,11 @@ MCP 提供可查询的数据，`runbar-diagnostics` Skill 提供如何组合这�
 2. 勾选需要安装的 AI 工具，核对各行显示的安装目录，点击「安装 / 更新所选」。向导列出 Codex、Claude Code、Qoder、Qoder CN、WorkBuddy 和 OpenCode，默认勾选已发现配置目录且需要安装 / 更新的项目；这只是目录检测，不表示客户端正在运行。未发现配置也可手动勾选。
 3. 目录不符时点击「更改目录…」，也可用「其他 AI 工具…」添加客户端或项目专用的 Skill 根目录。选择存放各个 Skill 的上一级目录，向导会创建其中的 `runbar-diagnostics` 文件夹。已选路径会记住；移除自定义条目只移除管理项，不删除已安装文件。
 4. 安装后按 AI 客户端要求刷新 Skill、重开会话或重启客户端。默认允许根据请求自动选用，也可在支持该写法的客户端使用 `$runbar-diagnostics`；不同客户端的显式调用方式以其文档为准。
-5. Skill 安装不要求先开启 MCP。完成上面的 MCP 连接配置并保持 Runbar 运行，然后提问：
+5. Skill 安装不要求先开启 MCP，也不会自动安装 MCP 连接。通过上面的 Agent 列表安装连接或手动配置，并保持 Runbar 运行，然后提问：
 
 > 使用 $runbar-diagnostics 查看当前项目最新的错误日志和失败请求，结合请求参数与响应正文定位原因。
 
-Skill 指导 AI 选择正确来源与运行会话、按游标续查日志、区分网络失败类别、按页读取正文，并明确证据覆盖范围。它不会自动安装 MCP 或替代访问令牌；未连接时会引导连接，不会假装已经读取运行数据。
+Skill 指导 AI 选择正确来源与运行会话、按游标续查日志、区分网络失败类别、按页读取正文，并明确证据覆盖范围。它不替代访问令牌，也不自行改写 Agent 的 MCP 配置；未连接时会引导使用安装入口或手动配置，不会假装已经读取运行数据。
 
 默认用户目录如下，均可在向导中修改；项目专用安装可另外添加项目的 Skill 目录。
 
@@ -167,7 +189,7 @@ JSON / XML 格式错误会返回工具错误，可以改用 raw；XML 禁用 DTD
 
 从消息摘要取得 messageId 后，`runbar_get_websocket_message` 返回完整 URL、握手信息和截断说明，正文用 `runbar_read_websocket_body` 单独按页读取。`truncated:true` 表示只保存了部分原始消息，无法读取或搜索未保存的部分。最多缓存 1 MiB 原文、格式化最多 4 MiB，JSON / XML 失败可重试 raw。关闭事件只描述已经采集的事实，不据此推断当前是否仍在线；发送订阅也不等于服务端已接受。
 
-新工具需要新版 Runbar 服务端。安装后重新连接 MCP 或刷新客户端工具清单，并通过 Runbar 的 Skill 管理更新 `runbar-diagnostics` 1.1.0。只更新 Skill 无法给旧版服务端增加工具。
+新工具需要新版 Runbar 服务端。安装后重新连接 MCP 或刷新客户端工具清单，并通过 Runbar 的 Skill 管理更新 `runbar-diagnostics`。1.1.0 增加 WebSocket 诊断，1.1.1 更新一键接入说明。只更新 Skill 无法给旧版服务端增加工具。
 
 ## 示例提问
 
@@ -182,7 +204,7 @@ JSON / XML 格式错误会返回工具错误，可以改用 raw；XML 禁用 DTD
 ## 开关、访问控制与资源上限
 
 - 服务只绑定 `127.0.0.1`，校验 Host / Origin，要求随机生成的 256 位 bearer 令牌。令牌不放在 URL 中，也不写入运行日志或安装包；保存在应用支持目录独立的 `mcp/access-token` 文件，目录权限 0700、文件权限 0600，重启和替换 App 后继续使用。
-- 复制连接配置会把令牌写入系统剪贴板，配置文件也包含令牌。只交给信任的 AI 客户端，避免把配置提交到源码库。点击「重置访问令牌」后旧配置立即失效，需要重新复制并重连；关闭服务立即停止访问，退出 Runbar 也停止监听。
+- 复制连接配置会把令牌写入系统剪贴板；一键安装会把令牌写入所选 Agent 的配置文件，旧配置备份也可能包含令牌。只交给信任的 AI 客户端，避免把配置提交到源码库。点击「重置访问令牌」后旧配置立即失效，需要重新更新所选 Agent 或手动配置并重连；关闭服务立即停止访问，退出 Runbar 也停止监听。
 - 启用即允许持有令牌的本机客户端读取全部 Runbar 记录；本版不按客户端或项目分别授权。日志、命令、请求头和正文可能包含账号、业务内容或访问凭据。AI 客户端可能将读取结果发送到其模型服务，遵循该客户端的数据设置；Runbar 不自动发起模型请求或上传记录。
 - 最多 8 个同时进行的 HTTP 连接，每个请求最多 64 KiB、响应最多 2 MiB；读取请求和发送响应各有 10 秒超时，HTTP 查询等待有 40 秒上限，MCP 专用 SQLite 读取设置 30 秒截止并可协作取消。日志、网络等重查询一次只执行一个，其他请求自动按进入队列顺序等待，最多 7 个等待项、最长等待 30 秒；前一个成功、失败或取消并释放执行位置后自动执行下一个。普通排队不再要求 AI 手动重试，队列已满或等候超时才返回明确错误。排队时间计入原有 40 秒总期限，不会额外延长；客户端的工具超时应覆盖服务端处理时间。
 - 排队采用异步挂起，不轮询等待，也不在等待期间打开缓存、提前加载正文或保留查询结果。任务取消会移出等待队列；连接失败和服务端请求截止会取消对应工作任务，关闭服务或退出 Runbar 会结束全部等待项。来源列表与会话列表不进入重查询队列，但仍受 HTTP 连接总数限制。此队列只调度查询，不提供每个 AI 会话独立的正文筛选索引；来回切换条件仍可能重建该索引。
@@ -194,6 +216,6 @@ JSON / XML 格式错误会返回工具错误，可以改用 raw；XML 禁用 DTD
 
 实现 MCP Streamable HTTP 的无状态 JSON 请求 / 响应模式，可协商 2025-11-25、2025-06-18、2025-03-26 协议；GET 返回 405，不提供 SSE 主动推送、资源订阅或 OAuth 登录。客户端通过轮询游标读取新增输出；返回 HTTP 401 时检查令牌和配置，不能通过 MCP OAuth 登录取得这个本机令牌。
 
-回归用例覆盖协议握手、只读工具标记、请求大小、鉴权 / Host / Origin、HTTP 分帧、日志分块搜索与游标、正文分页、缓存保持及路径隔离。按当前用户要求只编译 App 与测试目标，不运行额外测试、真实业务 App 或 AI 客户端联调；编译结果不等同于已经通过 Codex / 其他客户端的运行验收。
+回归用例覆盖协议握手、只读工具标记、请求大小、鉴权 / Host / Origin、HTTP 分帧、日志分块搜索与游标、正文分页、缓存保持及路径隔离。连接管理的文件检查与真实客户端加载是不同层次的验证；配置显示「已安装」后，仍需在对应 Agent 重连并检查 Runbar 工具是否可用。
 
 参考：[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)、[MCP 工具规范](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)、[Codex MCP 配置](https://developers.openai.com/codex/mcp)。
