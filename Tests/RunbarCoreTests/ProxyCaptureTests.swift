@@ -312,6 +312,42 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertEqual(connections.total, 1)
         XCTAssertEqual(connections.urls, ["wss://example.invalid/quotes"])
     }
+    func testSameURLFlowsKeepSeparateStatusAndMessagesInCurrentAndLegacyCaches() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        let url = event(1).url
+        for (id, flow, kind) in [(1, "first", ProxyWebSocketEvent.Kind.open), (2, "second", .open),
+                                 (3, "first", .receive), (4, "second", .receive), (5, "first", .close)] {
+            var row = event(Int64(id), kind: kind, payload: Data("shared payload".utf8))
+            row.flowID = flow
+            try store.append(row)
+        }
+        store.close()
+        let reader = ProxyWebSocketReader()
+        for legacy in [false, true] {
+            if legacy {
+                var db: OpaquePointer?
+                XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("websockets.sqlite").path, &db), SQLITE_OK)
+                XCTAssertEqual(sqlite3_exec(db, "DROP TABLE connection_flows", nil, nil, nil), SQLITE_OK)
+                sqlite3_close(db)
+            }
+            let live = try await reader.flows(directory: directory, filter: "quotes", around: 0, running: true)
+            XCTAssertEqual(live.rows.map(\.id), ["second", "first"])
+            XCTAssertEqual(live.rows.map(\.state), [.connected, .closed])
+            let history = try await reader.flows(directory: directory, filter: "", around: 0, running: false)
+            XCTAssertEqual(history.rows.map(\.state), [.closed, .closed])
+
+            let messages = try await reader.messages(directory: directory, url: url, kind: "", around: .max, flowID: "first")
+            XCTAssertEqual(messages.rows.map(\.id), [3])
+            var filter = ProxyWebSocketFilter()
+            filter.search = "shared payload"
+            for (flow, id) in [("second", Int64(4)), ("first", Int64(3))] {
+                let matches = try await reader.messages(directory: directory, url: url, kind: "receive",
+                    around: .max, filter: filter, flowID: flow)
+                XCTAssertEqual(matches.sourceTotal, 1)
+                XCTAssertEqual(matches.rows.map(\.id), [id])
+            }
+        }
+    }
     func testLegacyReadOnlyCacheListsConnectionsWithoutWritingAnIndex() async throws {
         let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
         try store.append(event(1, kind: .open)); try store.append(event(2)); store.close()

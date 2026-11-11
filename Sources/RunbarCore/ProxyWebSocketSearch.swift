@@ -76,6 +76,7 @@ final class ProxyWebSocketSearchIndex {
     let directory: URL
     let url: String
     let kind: String
+    let flowID: String?
     let filter: ProxyWebSocketFilter
     let matcher: ProxyWebSocketMatcher
     private var db: OpaquePointer?
@@ -88,8 +89,8 @@ final class ProxyWebSocketSearchIndex {
     private(set) var scannedMessages = 0
     var isComplete: Bool { initialized && olderThrough == 0 && newerAfter >= target }
 
-    init(directory: URL, url: String, kind: String, filter: ProxyWebSocketFilter) throws {
-        self.directory = directory; self.url = url; self.kind = kind; self.filter = filter
+    init(directory: URL, url: String, kind: String, filter: ProxyWebSocketFilter, flowID: String? = nil) throws {
+        self.directory = directory; self.url = url; self.kind = kind; self.filter = filter; self.flowID = flowID
         matcher = try ProxyWebSocketMatcher(filter)
         try NetworkDiskSpace.requireAvailable(at: FileManager.default.temporaryDirectory,
             reserve: NetworkLimits().minimumFreeDiskBytes, additional: 1024 * 1024, operation: "创建 WebSocket 筛选索引")
@@ -117,7 +118,7 @@ final class ProxyWebSocketSearchIndex {
         return stmt
     }
     func scanSlice(_ store: ProxyWebSocketStore) throws {
-        let snapshot = try store.searchSnapshot(url: url, kind: kind)
+        let snapshot = try store.searchSnapshot(url: url, kind: kind, flowID: flowID)
         if !initialized || snapshot.latest < target || snapshot.total < sourceTotal {
             try execute("DELETE FROM matches")
             olderThrough = snapshot.latest; newerAfter = snapshot.latest; initialized = true; scannedMessages = 0
@@ -138,7 +139,7 @@ final class ProxyWebSocketSearchIndex {
             for newer in passes {
                 if newer ? newerAfter >= target : olderThrough == 0 { continue }
                 let candidates = try store.searchCandidates(url: url, kind: kind,
-                    after: newer ? newerAfter : 0, through: newer ? target : olderThrough, newestFirst: !newer)
+                    after: newer ? newerAfter : 0, through: newer ? target : olderThrough, newestFirst: !newer, flowID: flowID)
                 for candidate in candidates {
                     try Task.checkCancellation()
                     if processed > 0, bytes + candidate.storedBytes > 4 * 1024 * 1024 { return }

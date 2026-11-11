@@ -44,6 +44,15 @@ final class ProxyWebSocketStore {
                         try execute("COMMIT")
                     } catch { try? execute("ROLLBACK"); throw error }
                 }
+                if try !hasTable("connection_flows") {
+                    try execute("BEGIN IMMEDIATE")
+                    do {
+                        try execute("CREATE TABLE connection_flows (flow_id TEXT PRIMARY KEY, url TEXT NOT NULL, first_id INTEGER NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL) WITHOUT ROWID")
+                        try execute("INSERT INTO connection_flows SELECT flow_id,min(url),min(id),max(kind='open'),max(kind='close') FROM events GROUP BY flow_id")
+                        try execute("CREATE INDEX connection_flows_order ON connection_flows(first_id DESC)")
+                        try execute("COMMIT")
+                    } catch { try? execute("ROLLBACK"); throw error }
+                }
             }
         } catch { close(); throw error }
     }
@@ -67,9 +76,11 @@ final class ProxyWebSocketStore {
     private func text(_ stmt: OpaquePointer, _ column: Int32) -> String {
         sqlite3_column_text(stmt, column).map { String(cString: $0) } ?? ""
     }
-    private func hasURLIndex() throws -> Bool {
-        let stmt = try statement("SELECT 1 FROM sqlite_master WHERE type='table' AND name='connection_urls'")
+    private func hasURLIndex() throws -> Bool { try hasTable("connection_urls") }
+    private func hasTable(_ name: String) throws -> Bool {
+        let stmt = try statement("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
         defer { sqlite3_finalize(stmt) }
+        try bind(name, to: stmt, at: 1)
         let result = sqlite3_step(stmt)
         guard result == SQLITE_ROW || result == SQLITE_DONE else { throw failure() }
         return result == SQLITE_ROW
@@ -105,6 +116,13 @@ final class ProxyWebSocketStore {
         try bind(event.url, to: url, at: 1); sqlite3_bind_int64(url, 2, event.id)
         sqlite3_bind_int(url, 3, event.kind == .send ? 1 : 0); sqlite3_bind_int(url, 4, event.kind == .receive ? 1 : 0)
         guard sqlite3_step(url) == SQLITE_DONE else { throw failure() }
+        let flow = try statement("INSERT INTO connection_flows VALUES (?,?,?,?,?) ON CONFLICT(flow_id) DO UPDATE SET opened=max(opened,excluded.opened),closed=max(closed,excluded.closed)")
+        defer { sqlite3_finalize(flow) }
+        try bind(event.flowID, to: flow, at: 1); try bind(event.url, to: flow, at: 2)
+        sqlite3_bind_int64(flow, 3, event.id)
+        sqlite3_bind_int(flow, 4, event.kind == .open ? 1 : 0)
+        sqlite3_bind_int(flow, 5, event.kind == .close ? 1 : 0)
+        guard sqlite3_step(flow) == SQLITE_DONE else { throw failure() }
         try execute("COMMIT"); committed = true
     }
     func connections(filter: String, around row: Int) throws -> ProxyWebSocketURLWindow {
@@ -138,13 +156,49 @@ final class ProxyWebSocketStore {
         }
         return ProxyWebSocketURLWindow(total: total, offset: offset, urls: urls)
     }
+    func flows(filter: String, around row: Int, running: Bool, activeIDs: Set<String>?) throws -> ProxyWebSocketFlowWindow {
+        deadline = ProcessInfo.processInfo.systemUptime + 3
+        try execute("BEGIN DEFERRED")
+        defer { try? execute("ROLLBACK") }
+        // Legacy read-only caches use the same bounded result window without
+        // modifying or backfilling a historical database.
+        let source = try hasTable("connection_flows") ? "connection_flows" : "(SELECT flow_id,min(url) AS url,min(id) AS first_id,max(kind='open') AS opened,max(kind='close') AS closed FROM events GROUP BY flow_id)"
+        let predicate = " WHERE (?='' OR instr(lower(url),lower(?))>0)"
+        func prepare(_ sql: String) throws -> OpaquePointer {
+            let stmt = try statement(sql)
+            do { try bind(String(filter.prefix(1024)), to: stmt, at: 1); try bind(String(filter.prefix(1024)), to: stmt, at: 2) }
+            catch { sqlite3_finalize(stmt); throw error }
+            return stmt
+        }
+        let count = try prepare("SELECT count(*) FROM " + source + predicate)
+        guard sqlite3_step(count) == SQLITE_ROW else { sqlite3_finalize(count); throw failure() }
+        let total = Int(clamping: sqlite3_column_int64(count, 0)); sqlite3_finalize(count)
+        let capacity = ProxyWebSocketURLWindow.capacity
+        let offset = min(max(0, row - capacity / 2), max(0, total - capacity))
+        let stmt = try prepare("SELECT flow_id,url,opened,closed FROM " + source + predicate + " ORDER BY first_id DESC LIMIT \(capacity) OFFSET \(offset)")
+        defer { sqlite3_finalize(stmt) }
+        var rows: [ProxyWebSocketFlow] = []
+        while true {
+            try Task.checkCancellation()
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw failure() }
+            let id = text(stmt, 0)
+            let state: ProxyWebSocketFlow.State
+            if !running || sqlite3_column_int(stmt, 3) != 0 { state = .closed }
+            else if let activeIDs { state = activeIDs.contains(id) ? .connected : .closed }
+            else { state = sqlite3_column_int(stmt, 2) != 0 ? .connected : .unknown }
+            rows.append(.init(id: id, url: text(stmt, 1), state: state))
+        }
+        return ProxyWebSocketFlowWindow(total: total, offset: offset, rows: rows)
+    }
     func window(url: String, kind: String, around row: Int, exactURL: String? = nil,
-                messagesOnly: Bool = false, includePreview: Bool = false) throws -> ProxyWebSocketWindow {
+                messagesOnly: Bool = false, includePreview: Bool = false, flowID: String? = nil) throws -> ProxyWebSocketWindow {
         deadline = ProcessInfo.processInfo.systemUptime + 3
         try execute("BEGIN DEFERRED")
         defer { try? execute("ROLLBACK") }
         let predicate = " WHERE (?='' OR instr(lower(url),lower(?))>0 OR instr(lower(flow_id),lower(?))>0) AND (?='' OR kind=?)" +
-            (exactURL == nil ? "" : " AND url=?") + (messagesOnly ? " AND kind IN ('send','receive')" : "")
+            (exactURL == nil ? "" : " AND url=?6") + (flowID == nil ? "" : " AND flow_id=?7") + (messagesOnly ? " AND kind IN ('send','receive')" : "")
         func prepare(_ sql: String) throws -> OpaquePointer {
             let stmt = try statement(sql)
             do {
@@ -152,11 +206,12 @@ final class ProxyWebSocketStore {
                 try bind(String(url.prefix(1024)), to: stmt, at: 3)
                 try bind(kind, to: stmt, at: 4); try bind(kind, to: stmt, at: 5)
                 if let exactURL { try bind(exactURL, to: stmt, at: 6) }
+                if let flowID { try bind(flowID, to: stmt, at: 7) }
             } catch { sqlite3_finalize(stmt); throw error }
             return stmt
         }
         let count: OpaquePointer
-        if let exactURL, messagesOnly, url.isEmpty, ["", "send", "receive"].contains(kind), try hasURLIndex() {
+        if let exactURL, flowID == nil, messagesOnly, url.isEmpty, ["", "send", "receive"].contains(kind), try hasURLIndex() {
             let column = kind == "send" ? "send_count" : kind == "receive" ? "receive_count" : "send_count+receive_count"
             count = try statement("SELECT coalesce((SELECT \(column) FROM connection_urls WHERE url=?),0)")
             do { try bind(exactURL, to: count, at: 1) } catch { sqlite3_finalize(count); throw error }
@@ -209,24 +264,27 @@ final class ProxyWebSocketStore {
             requestHeaders: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : text(stmt, 10),
             responseHeaders: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : text(stmt, 11))
     }
-    func searchSnapshot(url: String, kind: String) throws -> ProxyWebSocketSearchSnapshot {
+    func searchSnapshot(url: String, kind: String, flowID: String? = nil) throws -> ProxyWebSocketSearchSnapshot {
         deadline = ProcessInfo.processInfo.systemUptime + 3
         let column = kind == "send" ? "send_count" : kind == "receive" ? "receive_count" : "send_count+receive_count"
-        let countSQL = try hasURLIndex() ?
+        let flowPredicate = flowID == nil ? "" : " AND flow_id=?3"
+        let countSQL = try flowID == nil && hasURLIndex() ?
             "coalesce((SELECT \(column) FROM connection_urls WHERE url=?1),0)" :
-            "(SELECT count(*) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2))"
-        let stmt = try statement("SELECT \(countSQL),coalesce((SELECT max(id) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2)),0)")
+            "(SELECT count(*) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2)\(flowPredicate))"
+        let stmt = try statement("SELECT \(countSQL),coalesce((SELECT max(id) FROM events WHERE url=?1 AND kind IN ('send','receive') AND (?2='' OR kind=?2)\(flowPredicate)),0)")
         defer { sqlite3_finalize(stmt) }
         try bind(url, to: stmt, at: 1); try bind(kind, to: stmt, at: 2)
+        if let flowID { try bind(flowID, to: stmt, at: 3) }
         guard sqlite3_step(stmt) == SQLITE_ROW else { throw failure() }
         return ProxyWebSocketSearchSnapshot(total: Int(clamping: sqlite3_column_int64(stmt, 0)), latest: sqlite3_column_int64(stmt, 1))
     }
     func searchCandidates(url: String, kind: String, after: Int64, through: Int64,
-                          newestFirst: Bool) throws -> [ProxyWebSocketSearchCandidate] {
-        let stmt = try statement("SELECT id,opcode,length(payload) FROM events WHERE url=? AND (?='' OR kind=?) AND kind IN ('send','receive') AND id>? AND id<=? ORDER BY id \(newestFirst ? "DESC" : "ASC") LIMIT 32")
+                          newestFirst: Bool, flowID: String? = nil) throws -> [ProxyWebSocketSearchCandidate] {
+        let stmt = try statement("SELECT id,opcode,length(payload) FROM events WHERE url=? AND (?='' OR kind=?) AND kind IN ('send','receive') AND id>? AND id<=? \(flowID == nil ? "" : "AND flow_id=?") ORDER BY id \(newestFirst ? "DESC" : "ASC") LIMIT 32")
         defer { sqlite3_finalize(stmt) }
         try bind(url, to: stmt, at: 1); try bind(kind, to: stmt, at: 2); try bind(kind, to: stmt, at: 3)
         sqlite3_bind_int64(stmt, 4, after); sqlite3_bind_int64(stmt, 5, through)
+        if let flowID { try bind(flowID, to: stmt, at: 6) }
         var rows: [ProxyWebSocketSearchCandidate] = []
         while true {
             try Task.checkCancellation()
@@ -393,6 +451,26 @@ public struct ProxyWebSocketDetail: Sendable {
     public let note: String
 }
 
+public struct ProxyWebSocketFlow: Equatable, Identifiable, Sendable {
+    public enum State: String, Sendable {
+        case connected = "已连接", closed = "已断开", unknown = "未知"
+    }
+    public let id: String
+    public let url: String
+    public let state: State
+}
+
+public struct ProxyWebSocketFlowWindow: Equatable, Sendable {
+    public let total: Int
+    public let offset: Int
+    public let rows: [ProxyWebSocketFlow]
+    public static let empty = Self(total: 0, offset: 0, rows: [])
+    public func row(at index: Int) -> ProxyWebSocketFlow? {
+        let local = index - offset
+        return rows.indices.contains(local) ? rows[local] : nil
+    }
+}
+
 public actor ProxyWebSocketReader {
     private var searchIndex: ProxyWebSocketSearchIndex?
     public init() {}
@@ -402,8 +480,15 @@ public actor ProxyWebSocketReader {
         defer { store.close() }
         return try store.connections(filter: filter, around: row)
     }
+    public func flows(directory: URL, filter: String, around row: Int, running: Bool) throws -> ProxyWebSocketFlowWindow {
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else { return .empty }
+        let store = try ProxyWebSocketStore(directory: directory, readOnly: true)
+        defer { store.close() }
+        let active = running ? (try? ProxyWebSocketSender.connections(directory: directory)).map { Set($0.map(\.id)) } : nil
+        return try store.flows(filter: filter, around: row, running: running, activeIDs: active)
+    }
     public func messages(directory: URL, url: String, kind: String, around row: Int,
-                         filter: ProxyWebSocketFilter = ProxyWebSocketFilter(), anchorID: Int64? = nil) throws -> ProxyWebSocketWindow {
+                         filter: ProxyWebSocketFilter = ProxyWebSocketFilter(), anchorID: Int64? = nil, flowID: String? = nil) throws -> ProxyWebSocketWindow {
         try filter.validate()
         guard ["", "send", "receive"].contains(kind) else { throw RunbarError.message("未知的 WebSocket 消息方向。") }
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else {
@@ -414,10 +499,10 @@ public actor ProxyWebSocketReader {
         if filter.isActive {
             let index: ProxyWebSocketSearchIndex
             if let current = searchIndex, current.directory == directory, current.url == url,
-               current.kind == kind, current.filter == filter { index = current }
+               current.kind == kind, current.filter == filter, current.flowID == flowID { index = current }
             else {
                 searchIndex = nil
-                index = try ProxyWebSocketSearchIndex(directory: directory, url: url, kind: kind, filter: filter)
+                index = try ProxyWebSocketSearchIndex(directory: directory, url: url, kind: kind, filter: filter, flowID: flowID)
                 searchIndex = index
             }
             try index.scanSlice(store)
@@ -426,7 +511,7 @@ public actor ProxyWebSocketReader {
                 sourceTotal: index.sourceTotal, isComplete: index.isComplete, anchorRow: result.anchor)
         }
         searchIndex = nil
-        return try store.window(url: "", kind: kind, around: row, exactURL: url, messagesOnly: true, includePreview: true)
+        return try store.window(url: "", kind: kind, around: row, exactURL: url, messagesOnly: true, includePreview: true, flowID: flowID)
     }
     public func cancelSearch(directory: URL) {
         if searchIndex?.directory == directory { searchIndex = nil }

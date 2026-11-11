@@ -28,8 +28,10 @@ private final class ProxyWebSocketModel: ObservableObject {
         didSet { UserDefaults.standard.set(format.rawValue, forKey: "proxyWebSocketFormat"); page = 0; loadDetail() }
     }
     @Published var metadata = false { didSet { page = 0; loadDetail() } }
-    @Published private(set) var connections = ProxyWebSocketURLWindow.empty
-    @Published private(set) var selectedURL: String?
+    @Published private(set) var connections = ProxyWebSocketFlowWindow.empty
+    @Published private(set) var selectedFlow: ProxyWebSocketFlow?
+    var selectedURL: String? { selectedFlow?.url }
+    private var running = false
     @Published private(set) var window = ProxyWebSocketWindow.empty
     @Published private(set) var selectedID: Int64?
     @Published private(set) var detail: ProxyWebSocketDetail?
@@ -56,12 +58,12 @@ private final class ProxyWebSocketModel: ObservableObject {
               (try? filter.validate()) != nil else { return ProxyWebSocketFilter() }
         return filter
     }
-    func configure(_ directory: URL) {
-        stop(); self.directory = directory; resetConnections()
+    func configure(_ directory: URL, running: Bool) {
+        stop(); self.directory = directory; self.running = running; resetConnections()
     }
     private func resetConnections() {
         connectionTask?.cancel(); connections = .empty; connectionRow = 0; connectionRevision += 1
-        selectedURL = nil; resetMessages(); refreshConnections(delay: true)
+        selectedFlow = nil; resetMessages(); refreshConnections(delay: true)
     }
     private func resetMessages(delay: Bool = false) {
         searchRefreshTask?.cancel(); searchRefreshTask = nil
@@ -72,6 +74,10 @@ private final class ProxyWebSocketModel: ObservableObject {
         searching = selectedURL != nil && filter.isActive
         refreshMessages(delay: delay)
     }
+    func updateRunning(_ running: Bool) {
+        self.running = running
+        refresh()
+    }
     func refresh(periodic: Bool = false) {
         refreshConnections(periodic: periodic); refreshMessages(periodic: periodic)
     }
@@ -79,16 +85,18 @@ private final class ProxyWebSocketModel: ObservableObject {
         if periodic, connectionTask != nil { return }
         connectionTask?.cancel()
         guard let directory else { return }
-        let filter = url, row = connectionRow
+        let filter = url, row = connectionRow, running = running
         connectionTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
-                let result = try await reader.connections(directory: directory, filter: filter, around: row)
+                let result = try await reader.flows(directory: directory, filter: filter, around: row, running: running)
                 guard !Task.isCancelled else { return }
                 if self.connections != result { self.connections = result }
-                if self.selectedURL == nil, let first = result.urls.first { self.selectURL(first) }
-                else if result.total == 0, self.selectedURL != nil { self.selectURL(nil) }
+                if let current = self.selectedFlow, let updated = result.rows.first(where: { $0.id == current.id }) {
+                    if updated != current { self.selectedFlow = updated }
+                } else if self.selectedFlow == nil, let first = result.rows.first { self.selectFlow(first) }
+                else if result.total == 0 { self.selectFlow(nil) }
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
             if !Task.isCancelled { self.connectionTask = nil }
         }
@@ -97,16 +105,16 @@ private final class ProxyWebSocketModel: ObservableObject {
         if periodic, windowTask != nil { return }
         searchRefreshTask?.cancel(); searchRefreshTask = nil
         windowTask?.cancel()
-        guard let directory, let selectedURL else { return }
+        guard let directory, let selectedFlow else { return }
         let kind = kind, filter = filter, row = follows ? Int.max : visibleRow
         let anchorID = follows ? nil : viewportAnchorID
         windowTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
-                let result = try await reader.messages(directory: directory, url: selectedURL, kind: kind,
-                    around: row, filter: filter, anchorID: anchorID)
-                guard !Task.isCancelled, self.selectedURL == selectedURL, self.kind == kind, self.filter == filter else { return }
+                let result = try await reader.messages(directory: directory, url: selectedFlow.url, kind: kind,
+                    around: row, filter: filter, anchorID: anchorID, flowID: selectedFlow.id)
+                guard !Task.isCancelled, self.selectedFlow?.id == selectedFlow.id, self.kind == kind, self.filter == filter else { return }
                 if self.window != result { self.window = result }
                 self.selectLatestMessage()
                 self.searching = !result.isComplete; self.error = nil
@@ -126,7 +134,7 @@ private final class ProxyWebSocketModel: ObservableObject {
         connectionRow = first + max(0, last - first) / 2
         guard connections.total > 0 else { return }
         let lower = max(0, first - 16), upper = min(connections.total - 1, last + 16)
-        if connections.url(at: lower) == nil || connections.url(at: upper) == nil { refreshConnections() }
+        if connections.row(at: lower) == nil || connections.row(at: upper) == nil { refreshConnections() }
     }
     func viewport(first: Int, last: Int, progress: Double) {
         let percent = Int((min(1, max(0, progress)) * 100).rounded())
@@ -142,9 +150,9 @@ private final class ProxyWebSocketModel: ObservableObject {
         scrollsToLatest = true; visibleRow = Int.max; viewportAnchorID = nil
         if !follows { follows = true } else { scrollRevision += 1; selectLatestMessage(); refreshMessages() }
     }
-    func selectURL(_ url: String?) {
-        guard selectedURL != url else { return }
-        selectedURL = url; resetMessages()
+    func selectFlow(_ flow: ProxyWebSocketFlow?) {
+        guard selectedFlow?.id != flow?.id else { return }
+        selectedFlow = flow; resetMessages()
     }
     private func selectLatestMessage() {
         guard follows else { return }
@@ -196,10 +204,10 @@ private final class ProxyWebSocketModel: ObservableObject {
 struct ProxyWebSocketView: View {
     let directory: URL
     let sessionID: UUID
-    let captureRevision: Date
+    let running: Bool
     @StateObject private var data = ProxyWebSocketModel()
     @State private var showingFilters = false
-    @State private var showingSender = false
+    @State private var sendTarget: ProxyWebSocketFlow?
     @AppStorage("proxyWebSocketWraps") private var wraps = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -235,13 +243,26 @@ struct ProxyWebSocketView: View {
                     }
                 }
             }.frame(minHeight: 290)
-            Text("同 URL 的连接合并展示 · 搜索完整缓存消息，忽略大小写 · 单条最多保留 1 MB，截断会注明")
+            Text("同 URL 的连接按连接 ID 分开显示 · 搜索完整缓存消息，忽略大小写 · 单条最多保留 1 MB，截断会注明")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help("搜索范围为所选 URL 下全部已缓存的收发消息，按当前方向筛选。JSON 搜索原文中的键或值；二进制搜索 Base64。URL 与消息列表各最多保留 256 行，预览最多 512 字节。完整内容分块检索，命中序号临时保存在磁盘，条件自动保存。")
+                .help("搜索范围为所选连接下全部已缓存的收发消息，按当前方向筛选。JSON 搜索原文中的键或值；二进制搜索 Base64。连接与消息列表各最多保留 256 行，预览最多 512 字节。完整内容分块检索，命中序号临时保存在磁盘，条件自动保存。")
         }.controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .task(id: sessionID) { data.configure(directory) }
-            .onChange(of: captureRevision) { _, _ in data.refresh(periodic: true) }
+            .task(id: sessionID) {
+                sendTarget = nil
+                data.configure(directory, running: running)
+            }
+            .task(id: running) {
+                guard running else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    data.refresh(periodic: true)
+                }
+            }
+            .onChange(of: running) { _, value in data.updateRunning(value) }
             .onDisappear { data.stop() }
+            .sheet(item: $sendTarget) { target in
+                ProxyWebSocketComposer(directory: directory, target: target)
+            }
     }
     private var urlFilter: some View {
         TextField("筛选连接 URL", text: $data.url).textFieldStyle(.roundedBorder).frame(minWidth: 160)
@@ -268,7 +289,7 @@ struct ProxyWebSocketView: View {
     }
     private var followToggle: some View {
         Toggle("跟随", isOn: $data.follows).toggleStyle(.checkbox).fixedSize()
-            .help("自动选中所选 URL 下符合当前条件的最新消息并更新右侧详情；向上滚动或选择历史消息暂停跟随")
+            .help("自动选中所选连接下符合当前条件的最新消息并更新右侧详情；向上滚动或选择历史消息暂停跟随")
     }
     private var filterButton: some View {
         Button(data.filter.conditionCount == 0 ? "筛选" : "筛选 \(data.filter.conditionCount)",
@@ -305,13 +326,13 @@ struct ProxyWebSocketView: View {
     private var connections: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("连接 URL").fontWeight(.semibold)
+                Text("WebSocket 连接").fontWeight(.semibold)
                 Spacer(minLength: 0)
                 Text("\(data.connections.total)").monospacedDigit().foregroundStyle(.secondary)
             }.font(.caption).lineLimit(1).frame(height: 22)
-            ProxySocketTable(rows: .connections(data.connections), selection: data.selectedURL.map(ProxySocketSelection.url),
+            ProxySocketTable(rows: .connections(data.connections), selection: data.selectedFlow.map { .flow($0.id) },
                 follows: false, revision: data.connectionRevision, latest: false,
-                onSelect: { selection in if case .url(let url) = selection { data.selectURL(url) } else if selection == nil { data.selectURL(nil) } },
+                onSelect: { selection in if case .flow(let id) = selection { data.selectFlow(data.connections.rows.first { $0.id == id }) } else if selection == nil { data.selectFlow(nil) } },
                 onViewport: data.connectionViewport, onPause: {})
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
@@ -325,14 +346,11 @@ struct ProxyWebSocketView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Text("收发消息").fontWeight(.semibold).fixedSize()
-                Text(data.selectedURL ?? "请选择连接 URL").foregroundStyle(.secondary)
+                Text(data.selectedURL ?? "请选择连接").foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle).help(data.selectedURL ?? "")
                 Spacer(minLength: 0)
-                Button("发送消息", systemImage: "paperplane") { showingSender = true }
-                    .disabled(data.selectedURL == nil)
-                    .sheet(isPresented: $showingSender) {
-                        ProxyWebSocketComposer(directory: directory, url: data.selectedURL ?? "")
-                    }
+                Button("发送消息", systemImage: "paperplane") { sendTarget = data.selectedFlow }
+                    .disabled(!running || data.selectedFlow?.state != .connected)
             }.font(.caption).frame(height: 22)
             ProxySocketTable(rows: .messages(data.window), selection: data.selectedID.map(ProxySocketSelection.message),
                 follows: data.follows, revision: data.scrollRevision, latest: data.scrollsToLatest,
@@ -427,27 +445,27 @@ struct ProxyWebSocketView: View {
     }
 }
 
-private enum ProxySocketSelection: Equatable { case url(String), message(Int64) }
+private enum ProxySocketSelection: Equatable { case flow(String), message(Int64) }
 private enum ProxySocketRows: Equatable {
-    case connections(ProxyWebSocketURLWindow), messages(ProxyWebSocketWindow)
+    case connections(ProxyWebSocketFlowWindow), messages(ProxyWebSocketWindow)
     var total: Int { switch self { case .connections(let value): value.total; case .messages(let value): value.total } }
     var isConnections: Bool { if case .connections = self { true } else { false } }
     func selection(at row: Int) -> ProxySocketSelection? {
         switch self {
-        case .connections(let value): return value.url(at: row).map(ProxySocketSelection.url)
+        case .connections(let value): return value.row(at: row).map { .flow($0.id) }
         case .messages(let value): return value.row(at: row).map { .message($0.id) }
         }
     }
     func index(of selection: ProxySocketSelection?) -> Int? {
         switch (self, selection) {
-        case (.connections(let value), .url(let url)): return value.urls.firstIndex(of: url).map { value.offset + $0 }
+        case (.connections(let value), .flow(let id)): return value.rows.firstIndex(where: { $0.id == id }).map { value.offset + $0 }
         case (.messages(let value), .message(let id)): return value.rows.firstIndex(where: { $0.id == id }).map { value.offset + $0 }
         default: return nil
         }
     }
 }
 
-/// Both tables own the full scroll range while retaining at most 256 URLs or
+/// Both tables own the full scroll range while retaining at most 256 connections or
 /// message summaries. Full payloads are never assigned to table cells.
 private struct ProxySocketTable: NSViewRepresentable {
     let rows: ProxySocketRows
@@ -477,7 +495,7 @@ private struct ProxySocketTable: NSViewRepresentable {
         table.usesAlternatingRowBackgroundColors = true; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.setAccessibilityLabel(rows.isConnections ? "WebSocket 连接 URL" : "WebSocket 收发消息（从旧到新，单行预览）")
-        let columns: [(String, String, Double)] = rows.isConnections ? [("url", "URL", 240)] :
+        let columns: [(String, String, Double)] = rows.isConnections ? [("state", "状态", 60), ("id", "连接 ID", 80), ("url", "URL", 240)] :
             [("kind", "方向", 55), ("time", "时间", 105), ("preview", "消息", 360)]
         for (identifier, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
@@ -577,7 +595,19 @@ private struct ProxySocketTable: NSViewRepresentable {
             field.textColor = .labelColor
             switch parent.rows {
             case .connections(let window):
-                field.stringValue = window.url(at: row) ?? "正在读取…"; cell.toolTip = window.url(at: row)
+                if let flow = window.row(at: row) {
+                    switch column.identifier.rawValue {
+                    case "state":
+                        field.stringValue = flow.state.rawValue
+                        field.textColor = flow.state == .connected ? .systemGreen : .secondaryLabelColor
+                    case "id": field.stringValue = String(flow.id.prefix(8))
+                    default: field.stringValue = flow.url
+                    }
+                    cell.toolTip = "\(flow.state.rawValue) · \(flow.id)\n\(flow.url)"
+                } else {
+                    field.stringValue = column.identifier.rawValue == "url" ? "正在读取…" : ""
+                    cell.toolTip = nil
+                }
             case .messages(let window):
                 if let event = window.row(at: row) {
                     switch column.identifier.rawValue {
@@ -638,10 +668,8 @@ private final class ProxySocketScroller: NSScroller {
 
 private struct ProxyWebSocketComposer: View {
     let directory: URL
-    let url: String
+    let target: ProxyWebSocketFlow
     @Environment(\.dismiss) private var dismiss
-    @State private var targets: [ProxyWebSocketTarget] = []
-    @State private var target = ""
     @State private var text = ""
     @State private var sending = false
     @State private var result = ""
@@ -649,14 +677,8 @@ private struct ProxyWebSocketComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("发送 WebSocket 消息").font(.headline)
-            Text(url).font(.caption).textSelection(.enabled).lineLimit(2)
-            HStack {
-                Picker("连接", selection: $target) {
-                    Text("请选择活动连接").tag("")
-                    ForEach(targets) { item in Text(item.id).tag(item.id) }
-                }
-                Button("刷新") { refresh() }.disabled(sending)
-            }.disabled(sending)
+            Text(target.url).font(.caption).textSelection(.enabled).lineLimit(2)
+            Text("连接 ID \(target.id)").font(.caption).textSelection(.enabled)
             Text("通过所选连接向服务器发送 UTF-8 文本 / JSON，最大 1 MB。")
                 .font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $text).font(.system(.body, design: .monospaced))
@@ -671,21 +693,14 @@ private struct ProxyWebSocketComposer: View {
                     sending = true; result = ""
                     Task { @MainActor in
                         do {
-                            try await ProxyWebSocketSender.send(directory: directory, flowID: target, text: text)
+                            try await ProxyWebSocketSender.send(directory: directory, flowID: target.id, text: text)
                             result = "已提交发送，请在收发消息列表查看消息及服务器响应。"
                         } catch { result = error.localizedDescription }
                         sending = false
                     }
                 }.keyboardShortcut(.return, modifiers: .command)
-                    .disabled(sending || target.isEmpty || text.isEmpty || text.utf8.count > 1024 * 1024)
+                    .disabled(sending || text.isEmpty || text.utf8.count > 1024 * 1024)
             }
-        }.padding(20).frame(width: 560).onAppear { refresh() }
-    }
-    private func refresh() {
-        do {
-            targets = try ProxyWebSocketSender.connections(directory: directory).filter { $0.url == url }
-            if !targets.contains(where: { $0.id == target }) { target = targets.count == 1 ? targets[0].id : "" }
-            result = targets.isEmpty ? "没有活动连接。请启动抓包任务并建立 WebSocket 连接；旧任务需重启后使用。" : ""
-        } catch { targets = []; target = ""; result = "无法读取活动连接，请重启抓包任务后重试。" }
+        }.padding(20).frame(width: 560)
     }
 }

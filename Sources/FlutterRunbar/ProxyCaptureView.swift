@@ -141,7 +141,8 @@ struct NetworkWorkspaceView: View {
             } else if session.proxyCapture != nil, let directory {
                 if source == .proxyHTTP {
                     NetworkPanel(model: model, monitor: monitor, session: session, proxyMode: true, captureRevision: status?.updatedAt ?? .distantPast)
-                } else { ProxyWebSocketView(directory: directory, sessionID: session.id, captureRevision: status?.updatedAt ?? .distantPast) }
+                } else { ProxyWebSocketView(directory: directory, sessionID: session.id,
+                    running: session.status == .running && status?.running != false) }
             } else {
                 ContentUnavailableView {
                     Label("本次运行未开启代理抓包", systemImage: "network")
