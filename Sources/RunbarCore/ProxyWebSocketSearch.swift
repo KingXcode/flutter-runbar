@@ -66,7 +66,7 @@ struct ProxyWebSocketMatcher {
 }
 
 struct ProxyWebSocketSearchSnapshot { let total: Int; let latest: Int64 }
-struct ProxyWebSocketSearchCandidate { let id: Int64; let opcode: Int; let storedBytes: Int }
+struct ProxyWebSocketSearchCandidate { let id: Int64; let opcode: Int; let storedBytes: Int; let isLifecycle: Bool }
 
 /// One ephemeral, disk-backed index per reader. Only matching IDs are retained.
 /// Historical messages are scanned newest first, then only appended messages
@@ -77,6 +77,7 @@ final class ProxyWebSocketSearchIndex {
     let url: String
     let kind: String
     let flowID: String?
+    let includeLifecycle: Bool
     let filter: ProxyWebSocketFilter
     let matcher: ProxyWebSocketMatcher
     private var db: OpaquePointer?
@@ -89,8 +90,8 @@ final class ProxyWebSocketSearchIndex {
     private(set) var scannedMessages = 0
     var isComplete: Bool { initialized && olderThrough == 0 && newerAfter >= target }
 
-    init(directory: URL, url: String, kind: String, filter: ProxyWebSocketFilter, flowID: String? = nil) throws {
-        self.directory = directory; self.url = url; self.kind = kind; self.filter = filter; self.flowID = flowID
+    init(directory: URL, url: String, kind: String, filter: ProxyWebSocketFilter, flowID: String? = nil, includeLifecycle: Bool = false) throws {
+        self.directory = directory; self.url = url; self.kind = kind; self.filter = filter; self.flowID = flowID; self.includeLifecycle = includeLifecycle
         matcher = try ProxyWebSocketMatcher(filter)
         try NetworkDiskSpace.requireAvailable(at: FileManager.default.temporaryDirectory,
             reserve: NetworkLimits().minimumFreeDiskBytes, additional: 1024 * 1024, operation: "创建 WebSocket 筛选索引")
@@ -118,7 +119,7 @@ final class ProxyWebSocketSearchIndex {
         return stmt
     }
     func scanSlice(_ store: ProxyWebSocketStore) throws {
-        let snapshot = try store.searchSnapshot(url: url, kind: kind, flowID: flowID)
+        let snapshot = try store.searchSnapshot(url: url, kind: kind, flowID: flowID, includeLifecycle: includeLifecycle)
         if !initialized || snapshot.latest < target || snapshot.total < sourceTotal {
             try execute("DELETE FROM matches")
             olderThrough = snapshot.latest; newerAfter = snapshot.latest; initialized = true; scannedMessages = 0
@@ -139,11 +140,11 @@ final class ProxyWebSocketSearchIndex {
             for newer in passes {
                 if newer ? newerAfter >= target : olderThrough == 0 { continue }
                 let candidates = try store.searchCandidates(url: url, kind: kind,
-                    after: newer ? newerAfter : 0, through: newer ? target : olderThrough, newestFirst: !newer, flowID: flowID)
+                    after: newer ? newerAfter : 0, through: newer ? target : olderThrough, newestFirst: !newer, flowID: flowID, includeLifecycle: includeLifecycle)
                 for candidate in candidates {
                     try Task.checkCancellation()
                     if processed > 0, bytes + candidate.storedBytes > 4 * 1024 * 1024 { return }
-                    let matches = try autoreleasepool { try store.matches(candidate, matcher: matcher) }
+                    let matches = try candidate.isLifecycle || autoreleasepool { try store.matches(candidate, matcher: matcher) }
                     if matches {
                         sqlite3_reset(insert); sqlite3_clear_bindings(insert)
                         sqlite3_bind_int64(insert, 1, candidate.id)

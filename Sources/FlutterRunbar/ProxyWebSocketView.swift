@@ -28,6 +28,13 @@ private final class ProxyWebSocketModel: ObservableObject {
         didSet { UserDefaults.standard.set(format.rawValue, forKey: "proxyWebSocketFormat"); page = 0; loadDetail() }
     }
     @Published var metadata = false { didSet { page = 0; loadDetail() } }
+    @Published var grouped = UserDefaults.standard.bool(forKey: "proxyWebSocketGroupByURL") {
+        didSet {
+            guard grouped != oldValue else { return }
+            UserDefaults.standard.set(grouped, forKey: "proxyWebSocketGroupByURL")
+            resetConnections()
+        }
+    }
     @Published private(set) var connections = ProxyWebSocketFlowWindow.empty
     @Published private(set) var selectedFlow: ProxyWebSocketFlow?
     var selectedURL: String? { selectedFlow?.url }
@@ -85,12 +92,12 @@ private final class ProxyWebSocketModel: ObservableObject {
         if periodic, connectionTask != nil { return }
         connectionTask?.cancel()
         guard let directory else { return }
-        let filter = url, row = connectionRow, running = running
+        let filter = url, row = connectionRow, running = running, grouped = grouped
         connectionTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
-                let result = try await reader.flows(directory: directory, filter: filter, around: row, running: running)
+                let result = try await reader.flows(directory: directory, filter: filter, around: row, running: running, grouped: grouped)
                 guard !Task.isCancelled else { return }
                 if self.connections != result { self.connections = result }
                 if let current = self.selectedFlow, let updated = result.rows.first(where: { $0.id == current.id }) {
@@ -113,7 +120,8 @@ private final class ProxyWebSocketModel: ObservableObject {
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
                 let result = try await reader.messages(directory: directory, url: selectedFlow.url, kind: kind,
-                    around: row, filter: filter, anchorID: anchorID, flowID: selectedFlow.id)
+                    around: row, filter: filter, anchorID: anchorID, flowID: selectedFlow.isGroup ? nil : selectedFlow.id,
+                    includeLifecycle: selectedFlow.isGroup)
                 guard !Task.isCancelled, self.selectedFlow?.id == selectedFlow.id, self.kind == kind, self.filter == filter else { return }
                 if self.window != result { self.window = result }
                 self.selectLatestMessage()
@@ -212,9 +220,9 @@ struct ProxyWebSocketView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { urlFilter; messageSearch; filterButton; direction; followToggle }
+                HStack(spacing: 8) { groupingToggle; urlFilter; messageSearch; filterButton; direction; followToggle }
                 VStack(spacing: 5) {
-                    HStack(spacing: 8) { urlFilter; direction; followToggle }
+                    HStack(spacing: 8) { groupingToggle; urlFilter; direction; followToggle }
                     HStack(spacing: 8) { messageSearch; filterButton }
                 }
             }.fixedSize(horizontal: false, vertical: true)
@@ -243,9 +251,9 @@ struct ProxyWebSocketView: View {
                     }
                 }
             }.frame(minHeight: 290)
-            Text("同 URL 的连接按连接 ID 分开显示 · 搜索完整缓存消息，忽略大小写 · 单条最多保留 1 MB，截断会注明")
+            Text(data.grouped ? "按 URL 合并 · 建立和断开事件始终显示" : "按连接 ID 分开显示 · 单条消息最多保留 1 MB")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help("搜索范围为所选连接下全部已缓存的收发消息，按当前方向筛选。JSON 搜索原文中的键或值；二进制搜索 Base64。连接与消息列表各最多保留 256 行，预览最多 512 字节。完整内容分块检索，命中序号临时保存在磁盘，条件自动保存。")
+                .help("搜索范围为所选连接或 URL 下全部已缓存的收发消息，按当前方向筛选。JSON 搜索原文中的键或值；二进制搜索 Base64。连接与消息列表各最多保留 256 行，预览最多 512 字节。完整内容分块检索，命中序号临时保存在磁盘，条件自动保存。")
         }.controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: sessionID) {
                 sendTarget = nil
@@ -263,6 +271,11 @@ struct ProxyWebSocketView: View {
             .sheet(item: $sendTarget) { target in
                 ProxyWebSocketComposer(directory: directory, target: target)
             }
+    }
+    private var groupingToggle: some View {
+        Toggle("按 URL 合并", isOn: $data.grouped)
+            .toggleStyle(.checkbox).fixedSize()
+            .help("合并同一 URL 的连接，在收发列表中保留建立和断开事件")
     }
     private var urlFilter: some View {
         TextField("筛选连接 URL", text: $data.url).textFieldStyle(.roundedBorder).frame(minWidth: 160)
@@ -326,20 +339,26 @@ struct ProxyWebSocketView: View {
     private var connections: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("WebSocket 连接").fontWeight(.semibold)
+                Text(data.grouped ? "连接 URL" : "WebSocket 连接").fontWeight(.semibold)
                 Spacer(minLength: 0)
                 Text("\(data.connections.total)").monospacedDigit().foregroundStyle(.secondary)
             }.font(.caption).lineLimit(1).frame(height: 22)
-            ProxySocketTable(rows: .connections(data.connections), selection: data.selectedFlow.map { .flow($0.id) },
+            ProxySocketTable(rows: .connections(data.connections), grouped: data.grouped, selection: data.selectedFlow.map { .flow($0.id) },
                 follows: false, revision: data.connectionRevision, latest: false,
                 onSelect: { selection in if case .flow(let id) = selection { data.selectFlow(data.connections.rows.first { $0.id == id }) } else if selection == nil { data.selectFlow(nil) } },
                 onViewport: data.connectionViewport, onPause: {})
+                .id(data.grouped)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     if data.connections.total == 0 {
                         empty("暂无 WebSocket 连接", hint: "WSS 需开启解密并信任证书")
                     }
                 }.overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+            if let flow = data.selectedFlow, !flow.isGroup {
+                Text(connectionTiming(flow))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .help(connectionTiming(flow))
+            }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var messages: some View {
@@ -469,6 +488,7 @@ private enum ProxySocketRows: Equatable {
 /// message summaries. Full payloads are never assigned to table cells.
 private struct ProxySocketTable: NSViewRepresentable {
     let rows: ProxySocketRows
+    var grouped = false
     let selection: ProxySocketSelection?
     let follows: Bool
     let revision: Int
@@ -495,8 +515,13 @@ private struct ProxySocketTable: NSViewRepresentable {
         table.usesAlternatingRowBackgroundColors = true; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.setAccessibilityLabel(rows.isConnections ? "WebSocket 连接 URL" : "WebSocket 收发消息（从旧到新，单行预览）")
-        let columns: [(String, String, Double)] = rows.isConnections ? [("state", "状态", 60), ("id", "连接 ID", 80), ("url", "URL", 240)] :
-            [("kind", "方向", 55), ("time", "时间", 105), ("preview", "消息", 360)]
+        let columns: [(String, String, Double)]
+        if rows.isConnections {
+            columns = grouped ? [("state", "状态", 60), ("url", "URL", 240)] :
+                [("state", "状态", 60), ("opened", "建立时间", 116), ("id", "连接 ID", 80), ("url", "URL", 240)]
+        } else {
+            columns = [("kind", "方向", 55), ("time", "时间", 105), ("preview", "消息", 360)]
+        }
         for (identifier, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
             column.title = title; column.width = width
@@ -600,10 +625,13 @@ private struct ProxySocketTable: NSViewRepresentable {
                     case "state":
                         field.stringValue = flow.state.rawValue
                         field.textColor = flow.state == .connected ? .systemGreen : .secondaryLabelColor
+                    case "opened":
+                        field.stringValue = flow.openedAt?.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute().second()) ?? "—"
                     case "id": field.stringValue = String(flow.id.prefix(8))
                     default: field.stringValue = flow.url
                     }
-                    cell.toolTip = "\(flow.state.rawValue) · \(flow.id)\n\(flow.url)"
+                    cell.toolTip = flow.isGroup ? flow.url :
+                        "\(flow.state.rawValue) · \(flow.id)\n\(flow.url)\n\(connectionTiming(flow))"
                 } else {
                     field.stringValue = column.identifier.rawValue == "url" ? "正在读取…" : ""
                     cell.toolTip = nil
@@ -612,12 +640,24 @@ private struct ProxySocketTable: NSViewRepresentable {
                 if let event = window.row(at: row) {
                     switch column.identifier.rawValue {
                     case "kind":
-                        field.stringValue = event.kind.title
-                        field.textColor = event.kind == .send ? .systemBlue : .systemGreen
+                        switch event.kind {
+                        case .open: field.stringValue = "建立"; field.textColor = .systemTeal
+                        case .close: field.stringValue = "断开"; field.textColor = .systemOrange
+                        case .send: field.stringValue = "发送"; field.textColor = .systemBlue
+                        case .receive: field.stringValue = "接收"; field.textColor = .systemGreen
+                        }
                     case "time": field.stringValue = time.string(from: event.date)
-                    default: field.stringValue = event.preview.isEmpty ? "（空消息）" : event.preview
+                    default:
+                        switch event.kind {
+                        case .open: field.stringValue = "连接 \(event.flowID.prefix(8)) 已建立"
+                        case .close:
+                            field.stringValue = "连接 \(event.flowID.prefix(8)) 已断开" +
+                                (event.note.isEmpty ? "" : " · " + event.note)
+                        case .send, .receive:
+                            field.stringValue = event.preview.isEmpty ? "（空消息）" : event.preview
+                        }
                     }
-                    cell.toolTip = "\(event.kind.title) · \(event.bytes) 字节 · 连接 \(event.flowID)\n\(event.note)"
+                    cell.toolTip = "\(event.date.formatted()) · \(event.kind.title) · \(event.bytes) 字节 · 连接 \(event.flowID)\n\(event.note)"
                 } else { field.stringValue = column.identifier.rawValue == "preview" ? "正在读取…" : ""; cell.toolTip = nil }
             }
             return cell
@@ -666,10 +706,26 @@ private final class ProxySocketScroller: NSScroller {
 }
 
 
+private func connectionTiming(_ flow: ProxyWebSocketFlow) -> String {
+    var fields = ["建立 " + (flow.openedAt?.formatted() ?? "未记录")]
+    if flow.state == .closed {
+        fields.append("断开 " + (flow.closedAt?.formatted() ?? "未记录"))
+    }
+    if let opened = flow.openedAt, let closed = flow.closedAt, closed >= opened {
+        let seconds = closed.timeIntervalSince(opened)
+        fields.append("持续 " + seconds.formatted(.number.precision(.fractionLength(0...2))) + " 秒")
+    }
+    if let code = flow.closeCode { fields.append("关闭码 \(code)") }
+    if !flow.closeReason.isEmpty { fields.append(flow.closeReason) }
+    return fields.joined(separator: " · ")
+}
+
 private struct ProxyWebSocketComposer: View {
     let directory: URL
     let target: ProxyWebSocketFlow
     @Environment(\.dismiss) private var dismiss
+    @State private var activeTargets: [ProxyWebSocketTarget] = []
+    @State private var selectedID = ""
     @State private var text = ""
     @State private var sending = false
     @State private var result = ""
@@ -678,7 +734,17 @@ private struct ProxyWebSocketComposer: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("发送 WebSocket 消息").font(.headline)
             Text(target.url).font(.caption).textSelection(.enabled).lineLimit(2)
-            Text("连接 ID \(target.id)").font(.caption).textSelection(.enabled)
+            if target.isGroup {
+                HStack {
+                    Picker("连接 ID", selection: $selectedID) {
+                        Text("请选择活动连接").tag("")
+                        ForEach(activeTargets) { item in Text(item.id).tag(item.id) }
+                    }
+                    Button("刷新") { refreshTargets() }
+                }.disabled(sending)
+            } else {
+                Text("连接 ID \(target.id)").font(.caption).textSelection(.enabled)
+            }
             Text("通过所选连接向服务器发送 UTF-8 文本 / JSON，最大 1 MB。")
                 .font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $text).font(.system(.body, design: .monospaced))
@@ -693,14 +759,27 @@ private struct ProxyWebSocketComposer: View {
                     sending = true; result = ""
                     Task { @MainActor in
                         do {
-                            try await ProxyWebSocketSender.send(directory: directory, flowID: target.id, text: text)
+                            try await ProxyWebSocketSender.send(directory: directory, flowID: target.isGroup ? selectedID : target.id, text: text)
                             result = "已提交发送，请在收发消息列表查看消息及服务器响应。"
                         } catch { result = error.localizedDescription }
                         sending = false
                     }
                 }.keyboardShortcut(.return, modifiers: .command)
-                    .disabled(sending || text.isEmpty || text.utf8.count > 1024 * 1024)
+                    .disabled(sending || (target.isGroup && selectedID.isEmpty) || text.isEmpty || text.utf8.count > 1024 * 1024)
             }
         }.padding(20).frame(width: 560)
+            .onAppear { if target.isGroup { refreshTargets() } }
+    }
+
+    private func refreshTargets() {
+        do {
+            activeTargets = try ProxyWebSocketSender.connections(directory: directory).filter { $0.url == target.url }
+            if !activeTargets.contains(where: { $0.id == selectedID }) {
+                selectedID = activeTargets.count == 1 ? activeTargets[0].id : ""
+            }
+            result = activeTargets.isEmpty ? "该 URL 暂无活动连接" : ""
+        } catch {
+            activeTargets = []; selectedID = ""; result = error.localizedDescription
+        }
     }
 }

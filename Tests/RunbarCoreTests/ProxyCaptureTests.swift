@@ -348,6 +348,40 @@ final class ProxyCaptureTests: XCTestCase {
             }
         }
     }
+    func testGroupedTimelineKeepsLifecycleEventsDuringMessageFiltering() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        let url = event(1).url
+        for (id, flow, kind) in [(1, "first", ProxyWebSocketEvent.Kind.open), (2, "first", .send),
+                                 (3, "first", .close), (4, "second", .open), (5, "second", .receive)] {
+            var row = event(Int64(id), kind: kind, payload: Data("message".utf8))
+            row.flowID = flow
+            if kind == .close { row.closeCode = 1000; row.note = "normal closure" }
+            try store.append(row)
+        }
+        store.close()
+        let reader = ProxyWebSocketReader()
+        let flows = try await reader.flows(directory: directory, filter: "", around: 0, running: false)
+        let first = try XCTUnwrap(flows.rows.first { $0.id == "first" })
+        XCTAssertEqual(first.openedAt, event(1).date)
+        XCTAssertEqual(first.closedAt, event(3).date)
+        XCTAssertEqual(first.closeCode, 1000)
+        XCTAssertEqual(first.closeReason, "normal closure")
+
+        let groups = try await reader.flows(directory: directory, filter: "", around: 0, running: false, grouped: true)
+        XCTAssertEqual(groups.total, 1)
+        XCTAssertEqual(groups.rows.map(\.url), [url])
+        let timeline = try await reader.messages(directory: directory, url: url, kind: "receive",
+            around: .max, includeLifecycle: true)
+        XCTAssertEqual(timeline.rows.map(\.id), [1, 3, 4, 5])
+        var filter = ProxyWebSocketFilter()
+        filter.search = "unmatched"
+        let filtered = try await reader.messages(directory: directory, url: url, kind: "receive",
+            around: .max, filter: filter, includeLifecycle: true)
+        XCTAssertEqual(filtered.rows.map(\.id), [1, 3, 4])
+        let individual = try await reader.messages(directory: directory, url: url, kind: "receive",
+            around: .max, filter: filter, flowID: "second")
+        XCTAssertTrue(individual.rows.isEmpty)
+    }
     func testLegacyReadOnlyCacheListsConnectionsWithoutWritingAnIndex() async throws {
         let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
         try store.append(event(1, kind: .open)); try store.append(event(2)); store.close()
