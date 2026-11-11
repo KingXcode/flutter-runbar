@@ -47,9 +47,24 @@ final class ProxyWebSocketStore {
                 if try !hasTable("connection_flows") {
                     try execute("BEGIN IMMEDIATE")
                     do {
-                        try execute("CREATE TABLE connection_flows (flow_id TEXT PRIMARY KEY, url TEXT NOT NULL, first_id INTEGER NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL) WITHOUT ROWID")
-                        try execute("INSERT INTO connection_flows SELECT flow_id,min(url),min(id),max(kind='open'),max(kind='close') FROM events GROUP BY flow_id")
+                        try execute("CREATE TABLE connection_flows (flow_id TEXT PRIMARY KEY, url TEXT NOT NULL, first_id INTEGER NOT NULL, opened INTEGER NOT NULL, closed INTEGER NOT NULL, send_count INTEGER NOT NULL, receive_count INTEGER NOT NULL) WITHOUT ROWID")
+                        try execute("INSERT INTO connection_flows SELECT flow_id,min(url),min(id),max(kind='open'),max(kind='close'),sum(kind='send'),sum(kind='receive') FROM events GROUP BY flow_id")
                         try execute("CREATE INDEX connection_flows_order ON connection_flows(first_id DESC)")
+                        try execute("COMMIT")
+                    } catch { try? execute("ROLLBACK"); throw error }
+                }
+                if try !hasFlowCounts() {
+                    try execute("BEGIN IMMEDIATE")
+                    do {
+                        try execute("ALTER TABLE connection_flows ADD COLUMN send_count INTEGER NOT NULL DEFAULT 0")
+                        try execute("ALTER TABLE connection_flows ADD COLUMN receive_count INTEGER NOT NULL DEFAULT 0")
+                        try execute("""
+                            WITH counts AS MATERIALIZED (
+                                SELECT flow_id,sum(kind='send') AS sent,sum(kind='receive') AS received FROM events GROUP BY flow_id
+                            )
+                            UPDATE connection_flows SET send_count=counts.sent,receive_count=counts.received
+                            FROM counts WHERE connection_flows.flow_id=counts.flow_id
+                            """)
                         try execute("COMMIT")
                     } catch { try? execute("ROLLBACK"); throw error }
                 }
@@ -85,6 +100,13 @@ final class ProxyWebSocketStore {
         guard result == SQLITE_ROW || result == SQLITE_DONE else { throw failure() }
         return result == SQLITE_ROW
     }
+    private func hasFlowCounts() throws -> Bool {
+        let stmt = try statement("SELECT 1 FROM pragma_table_info('connection_flows') WHERE name='send_count'")
+        defer { sqlite3_finalize(stmt) }
+        let result = sqlite3_step(stmt)
+        guard result == SQLITE_ROW || result == SQLITE_DONE else { throw failure() }
+        return result == SQLITE_ROW
+    }
     func append(_ event: ProxyWebSocketEvent) throws {
         guard !readOnly, event.id > 0, event.payload.count <= 1024 * 1024,
               event.url.utf8.count <= 16_384, event.flowID.utf8.count <= 1024,
@@ -116,12 +138,14 @@ final class ProxyWebSocketStore {
         try bind(event.url, to: url, at: 1); sqlite3_bind_int64(url, 2, event.id)
         sqlite3_bind_int(url, 3, event.kind == .send ? 1 : 0); sqlite3_bind_int(url, 4, event.kind == .receive ? 1 : 0)
         guard sqlite3_step(url) == SQLITE_DONE else { throw failure() }
-        let flow = try statement("INSERT INTO connection_flows VALUES (?,?,?,?,?) ON CONFLICT(flow_id) DO UPDATE SET opened=max(opened,excluded.opened),closed=max(closed,excluded.closed)")
+        let flow = try statement("INSERT INTO connection_flows (flow_id,url,first_id,opened,closed,send_count,receive_count) VALUES (?,?,?,?,?,?,?) ON CONFLICT(flow_id) DO UPDATE SET opened=max(opened,excluded.opened),closed=max(closed,excluded.closed),send_count=send_count+excluded.send_count,receive_count=receive_count+excluded.receive_count")
         defer { sqlite3_finalize(flow) }
         try bind(event.flowID, to: flow, at: 1); try bind(event.url, to: flow, at: 2)
         sqlite3_bind_int64(flow, 3, event.id)
         sqlite3_bind_int(flow, 4, event.kind == .open ? 1 : 0)
         sqlite3_bind_int(flow, 5, event.kind == .close ? 1 : 0)
+        sqlite3_bind_int(flow, 6, event.kind == .send ? 1 : 0)
+        sqlite3_bind_int(flow, 7, event.kind == .receive ? 1 : 0)
         guard sqlite3_step(flow) == SQLITE_DONE else { throw failure() }
         try execute("COMMIT"); committed = true
     }
@@ -156,18 +180,39 @@ final class ProxyWebSocketStore {
         }
         return ProxyWebSocketURLWindow(total: total, offset: offset, urls: urls)
     }
-    func flows(filter: String, around row: Int, running: Bool, activeIDs: Set<String>?) throws -> ProxyWebSocketFlowWindow {
+    func flows(filter: String, around row: Int, running: Bool, activeKeys: Set<String>?,
+               grouped: Bool, counts: ProxyWebSocketCountFilter) throws -> ProxyWebSocketFlowWindow {
         deadline = ProcessInfo.processInfo.systemUptime + 3
         try execute("BEGIN DEFERRED")
         defer { try? execute("ROLLBACK") }
         // Legacy read-only caches use the same bounded result window without
         // modifying or backfilling a historical database.
-        let source = try hasTable("connection_flows") ? "connection_flows" : "(SELECT flow_id,min(url) AS url,min(id) AS first_id,max(kind='open') AS opened,max(kind='close') AS closed FROM events GROUP BY flow_id)"
-        let predicate = " WHERE (?='' OR instr(lower(url),lower(?))>0)"
+        let source: String
+        if grouped {
+            let urls = try hasURLIndex() ? "connection_urls" :
+                "(SELECT url,min(id) AS first_id,sum(kind='send') AS send_count,sum(kind='receive') AS receive_count FROM events GROUP BY url)"
+            source = "(SELECT url AS flow_id,url,first_id,0 AS opened,0 AS closed,send_count,receive_count FROM \(urls))"
+        } else if try hasFlowCounts() {
+            source = "connection_flows"
+        } else {
+            source = """
+                (SELECT flow_id,min(url) AS url,min(id) AS first_id,max(kind='open') AS opened,max(kind='close') AS closed,
+                    sum(kind='send') AS send_count,sum(kind='receive') AS receive_count FROM events GROUP BY flow_id)
+                """
+        }
+        let bounds = [counts.sentAbove, counts.sentBelow, counts.receivedAbove, counts.receivedBelow]
+        let comparisons = ["send_count>", "send_count<", "receive_count>", "receive_count<"]
+        var predicate = " WHERE (?1='' OR instr(lower(url),lower(?1))>0)"
+        for (index, value) in bounds.enumerated() where value != nil {
+            predicate += " AND \(comparisons[index])?\(index + 2)"
+        }
         func prepare(_ sql: String) throws -> OpaquePointer {
             let stmt = try statement(sql)
-            do { try bind(String(filter.prefix(1024)), to: stmt, at: 1); try bind(String(filter.prefix(1024)), to: stmt, at: 2) }
+            do { try bind(String(filter.prefix(1024)), to: stmt, at: 1) }
             catch { sqlite3_finalize(stmt); throw error }
+            for (index, value) in bounds.enumerated() {
+                if let value { sqlite3_bind_int64(stmt, Int32(index + 2), value) }
+            }
             return stmt
         }
         let count = try prepare("SELECT count(*) FROM " + source + predicate)
@@ -180,9 +225,9 @@ final class ProxyWebSocketStore {
                 CASE WHEN page.opened THEN
                     (SELECT timestamp FROM events WHERE flow_id=page.flow_id AND kind='open' ORDER BY id LIMIT 1)
                 END,
-                closing.timestamp,closing.close_code,closing.note
+                closing.timestamp,closing.close_code,closing.note,page.send_count,page.receive_count
             FROM (
-                SELECT flow_id,url,opened,closed,first_id FROM \(source)\(predicate)
+                SELECT flow_id,url,opened,closed,first_id,send_count,receive_count FROM \(source)\(predicate)
                 ORDER BY first_id DESC LIMIT \(capacity) OFFSET \(offset)
             ) page
             LEFT JOIN events closing ON closing.id=CASE WHEN page.closed THEN
@@ -200,7 +245,7 @@ final class ProxyWebSocketStore {
             let id = text(stmt, 0)
             let state: ProxyWebSocketFlow.State
             if !running || sqlite3_column_int(stmt, 3) != 0 { state = .closed }
-            else if let activeIDs { state = activeIDs.contains(id) ? .connected : .closed }
+            else if let activeKeys { state = activeKeys.contains(id) ? .connected : .closed }
             else { state = sqlite3_column_int(stmt, 2) != 0 ? .connected : .unknown }
             func date(at column: Int32) -> Date? {
                 guard sqlite3_column_type(stmt, column) != SQLITE_NULL else { return nil }
@@ -208,7 +253,8 @@ final class ProxyWebSocketStore {
             }
             rows.append(.init(id: id, url: text(stmt, 1), state: state, openedAt: date(at: 4), closedAt: date(at: 5),
                 closeCode: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 6)),
-                closeReason: text(stmt, 7)))
+                closeReason: text(stmt, 7), isGroup: grouped,
+                sendCount: sqlite3_column_int64(stmt, 8), receiveCount: sqlite3_column_int64(stmt, 9)))
         }
         return ProxyWebSocketFlowWindow(total: total, offset: offset, rows: rows)
     }
@@ -478,6 +524,23 @@ public struct ProxyWebSocketDetail: Sendable {
     public let note: String
 }
 
+public struct ProxyWebSocketCountFilter: Equatable, Sendable {
+    public let sentAbove: Int64?
+    public let sentBelow: Int64?
+    public let receivedAbove: Int64?
+    public let receivedBelow: Int64?
+
+    public init(sentAbove: Int64? = nil, sentBelow: Int64? = nil,
+                receivedAbove: Int64? = nil, receivedBelow: Int64? = nil) {
+        self.sentAbove = sentAbove; self.sentBelow = sentBelow
+        self.receivedAbove = receivedAbove; self.receivedBelow = receivedBelow
+    }
+
+    public var isActive: Bool {
+        [sentAbove, sentBelow, receivedAbove, receivedBelow].contains { $0 != nil }
+    }
+}
+
 public struct ProxyWebSocketFlow: Equatable, Identifiable, Sendable {
     public enum State: String, Sendable {
         case connected = "已连接", closed = "已断开", unknown = "未知"
@@ -490,12 +553,15 @@ public struct ProxyWebSocketFlow: Equatable, Identifiable, Sendable {
     public let closeCode: Int?
     public let closeReason: String
     public let isGroup: Bool
+    public let sendCount: Int64
+    public let receiveCount: Int64
 
     init(id: String, url: String, state: State, openedAt: Date? = nil, closedAt: Date? = nil,
-         closeCode: Int? = nil, closeReason: String = "", isGroup: Bool = false) {
+         closeCode: Int? = nil, closeReason: String = "", isGroup: Bool = false, sendCount: Int64, receiveCount: Int64) {
         self.id = id; self.url = url; self.state = state
         self.openedAt = openedAt; self.closedAt = closedAt
         self.closeCode = closeCode; self.closeReason = closeReason; self.isGroup = isGroup
+        self.sendCount = sendCount; self.receiveCount = receiveCount
     }
 }
 
@@ -519,23 +585,14 @@ public actor ProxyWebSocketReader {
         defer { store.close() }
         return try store.connections(filter: filter, around: row)
     }
-    public func flows(directory: URL, filter: String, around row: Int, running: Bool, grouped: Bool = false) throws -> ProxyWebSocketFlowWindow {
+    public func flows(directory: URL, filter: String, around row: Int, running: Bool, grouped: Bool = false,
+                      counts: ProxyWebSocketCountFilter = .init()) throws -> ProxyWebSocketFlowWindow {
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("websockets.sqlite").path) else { return .empty }
         let store = try ProxyWebSocketStore(directory: directory, readOnly: true)
         defer { store.close() }
         let active = running ? try? ProxyWebSocketSender.connections(directory: directory) : nil
-        if grouped {
-            let window = try store.connections(filter: filter, around: row)
-            let activeURLs = active.map { Set($0.map(\.url)) }
-            let groups = window.urls.map { url in
-                let state: ProxyWebSocketFlow.State = running
-                    ? (activeURLs.map { $0.contains(url) ? .connected : .closed } ?? .unknown)
-                    : .closed
-                return ProxyWebSocketFlow(id: url, url: url, state: state, isGroup: true)
-            }
-            return .init(total: window.total, offset: window.offset, rows: groups)
-        }
-        return try store.flows(filter: filter, around: row, running: running, activeIDs: active.map { Set($0.map(\.id)) })
+        let keys = active.map { Set($0.map { grouped ? $0.url : $0.id }) }
+        return try store.flows(filter: filter, around: row, running: running, activeKeys: keys, grouped: grouped, counts: counts)
     }
     public func messages(directory: URL, url: String, kind: String, around row: Int,
                          filter: ProxyWebSocketFilter = ProxyWebSocketFilter(), anchorID: Int64? = nil, flowID: String? = nil, includeLifecycle: Bool = false) throws -> ProxyWebSocketWindow {

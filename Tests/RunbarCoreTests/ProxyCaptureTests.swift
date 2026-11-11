@@ -348,6 +348,55 @@ final class ProxyCaptureTests: XCTestCase {
             }
         }
     }
+    func testConnectionCountsAndStrictFiltersAcrossCacheVersions() async throws {
+        let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
+        for (index, pair) in [("a", ProxyWebSocketEvent.Kind.open), ("a", .send), ("a", .receive),
+                              ("a", .receive), ("a", .close), ("b", .open), ("b", .receive)].enumerated() {
+            var row = event(Int64(index + 1), kind: pair.1)
+            row.flowID = pair.0
+            try store.append(row)
+        }
+        store.close()
+        let reader = ProxyWebSocketReader()
+        for legacy in [false, true] {
+            if legacy {
+                var db: OpaquePointer?
+                XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("websockets.sqlite").path, &db), SQLITE_OK)
+                XCTAssertEqual(sqlite3_exec(db, """
+                    ALTER TABLE connection_flows DROP COLUMN send_count;
+                    ALTER TABLE connection_flows DROP COLUMN receive_count;
+                    DROP TABLE connection_urls;
+                    """, nil, nil, nil), SQLITE_OK)
+                sqlite3_close(db)
+            }
+            let individual = try await reader.flows(directory: directory, filter: "", around: 0, running: false,
+                counts: .init(sentAbove: 0, receivedAbove: 1, receivedBelow: 3))
+            XCTAssertEqual(individual.total, 1)
+            XCTAssertEqual(individual.rows.map(\.id), ["a"])
+            XCTAssertEqual(individual.rows.map(\.sendCount), [1])
+            XCTAssertEqual(individual.rows.map(\.receiveCount), [2])
+
+            let zeroSent = try await reader.flows(directory: directory, filter: "", around: 0, running: false,
+                counts: .init(sentBelow: 1))
+            XCTAssertEqual(zeroSent.rows.map(\.id), ["b"])
+            XCTAssertEqual(zeroSent.rows.map(\.sendCount), [0])
+
+            let merged = try await reader.flows(directory: directory, filter: "quotes", around: 0, running: false,
+                grouped: true, counts: .init(receivedAbove: 2))
+            XCTAssertEqual(merged.total, 1)
+            XCTAssertEqual(merged.rows.map(\.sendCount), [1])
+            XCTAssertEqual(merged.rows.map(\.receiveCount), [3])
+        }
+        let reopened = try ProxyWebSocketStore(directory: directory)
+        var next = event(8, kind: .send)
+        next.flowID = "a"
+        try reopened.append(next)
+        reopened.close()
+        let updated = try await reader.flows(directory: directory, filter: "", around: 0, running: false,
+            counts: .init(sentAbove: 1))
+        XCTAssertEqual(updated.rows.map(\.sendCount), [2])
+        XCTAssertEqual(updated.rows.map(\.receiveCount), [2])
+    }
     func testGroupedTimelineKeepsLifecycleEventsDuringMessageFiltering() async throws {
         let directory = try temporary(), store = try ProxyWebSocketStore(directory: directory)
         let url = event(1).url

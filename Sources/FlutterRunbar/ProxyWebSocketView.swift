@@ -28,6 +28,9 @@ private final class ProxyWebSocketModel: ObservableObject {
         didSet { UserDefaults.standard.set(format.rawValue, forKey: "proxyWebSocketFormat"); page = 0; loadDetail() }
     }
     @Published var metadata = false { didSet { page = 0; loadDetail() } }
+    @Published var countFilter = ProxyWebSocketCountFilter() {
+        didSet { if countFilter != oldValue { resetConnections() } }
+    }
     @Published var grouped = UserDefaults.standard.bool(forKey: "proxyWebSocketGroupByURL") {
         didSet {
             guard grouped != oldValue else { return }
@@ -92,12 +95,12 @@ private final class ProxyWebSocketModel: ObservableObject {
         if periodic, connectionTask != nil { return }
         connectionTask?.cancel()
         guard let directory else { return }
-        let filter = url, row = connectionRow, running = running, grouped = grouped
+        let filter = url, row = connectionRow, running = running, grouped = grouped, counts = countFilter
         connectionTask = Task { [weak self] in
             guard let self else { return }
             do {
                 if delay { try await Task.sleep(for: .milliseconds(180)) }
-                let result = try await reader.flows(directory: directory, filter: filter, around: row, running: running, grouped: grouped)
+                let result = try await reader.flows(directory: directory, filter: filter, around: row, running: running, grouped: grouped, counts: counts)
                 guard !Task.isCancelled else { return }
                 if self.connections != result { self.connections = result }
                 if let current = self.selectedFlow, let updated = result.rows.first(where: { $0.id == current.id }) {
@@ -215,14 +218,15 @@ struct ProxyWebSocketView: View {
     let running: Bool
     @StateObject private var data = ProxyWebSocketModel()
     @State private var showingFilters = false
+    @State private var showingCountFilter = false
     @State private var sendTarget: ProxyWebSocketFlow?
     @AppStorage("proxyWebSocketWraps") private var wraps = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { groupingToggle; urlFilter; messageSearch; filterButton; direction; followToggle }
+                HStack(spacing: 8) { groupingToggle; urlFilter; countFilterButton; messageSearch; filterButton; direction; followToggle }
                 VStack(spacing: 5) {
-                    HStack(spacing: 8) { groupingToggle; urlFilter; direction; followToggle }
+                    HStack(spacing: 8) { groupingToggle; urlFilter; countFilterButton; direction; followToggle }
                     HStack(spacing: 8) { messageSearch; filterButton }
                 }
             }.fixedSize(horizontal: false, vertical: true)
@@ -280,6 +284,17 @@ struct ProxyWebSocketView: View {
     private var urlFilter: some View {
         TextField("筛选连接 URL", text: $data.url).textFieldStyle(.roundedBorder).frame(minWidth: 160)
             .accessibilityLabel("筛选 WebSocket 连接 URL")
+    }
+    private var countFilterButton: some View {
+        Button(data.countFilter.isActive ? "数量筛选已启用" : "数量筛选", systemImage: "line.3.horizontal.decrease") {
+            showingCountFilter.toggle()
+        }.fixedSize()
+            .popover(isPresented: $showingCountFilter, arrowEdge: .bottom) {
+                ProxyWebSocketCountFilterEditor(initial: data.countFilter) { filter in
+                    data.countFilter = filter
+                    showingCountFilter = false
+                }
+            }
     }
     private var messageSearch: some View {
         HStack(spacing: 4) {
@@ -351,7 +366,11 @@ struct ProxyWebSocketView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     if data.connections.total == 0 {
-                        empty("暂无 WebSocket 连接", hint: "WSS 需开启解密并信任证书")
+                        if data.countFilter.isActive {
+                            empty("没有符合数量条件的连接", hint: "可在「数量筛选」中调整或清空条件")
+                        } else {
+                            empty("暂无 WebSocket 连接", hint: "WSS 需开启解密并信任证书")
+                        }
                     }
                 }.overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
             if let flow = data.selectedFlow, !flow.isGroup {
@@ -517,8 +536,9 @@ private struct ProxySocketTable: NSViewRepresentable {
         table.setAccessibilityLabel(rows.isConnections ? "WebSocket 连接 URL" : "WebSocket 收发消息（从旧到新，单行预览）")
         let columns: [(String, String, Double)]
         if rows.isConnections {
-            columns = grouped ? [("state", "状态", 60), ("url", "URL", 240)] :
-                [("state", "状态", 60), ("opened", "建立时间", 116), ("id", "连接 ID", 80), ("url", "URL", 240)]
+            let counts: [(String, String, Double)] = [("sent", "发送数量", 80), ("received", "接收数量", 80)]
+            let individual: [(String, String, Double)] = [("opened", "建立时间", 116), ("id", "连接 ID", 80)]
+            columns = [("state", "状态", 60)] + counts + (grouped ? [] : individual) + [("url", "URL", 240)]
         } else {
             columns = [("kind", "方向", 55), ("time", "时间", 105), ("preview", "消息", 360)]
         }
@@ -625,6 +645,8 @@ private struct ProxySocketTable: NSViewRepresentable {
                     case "state":
                         field.stringValue = flow.state.rawValue
                         field.textColor = flow.state == .connected ? .systemGreen : .secondaryLabelColor
+                    case "sent": field.stringValue = flow.sendCount.formatted()
+                    case "received": field.stringValue = flow.receiveCount.formatted()
                     case "opened":
                         field.stringValue = flow.openedAt?.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute().second()) ?? "—"
                     case "id": field.stringValue = String(flow.id.prefix(8))
@@ -705,6 +727,61 @@ private final class ProxySocketScroller: NSScroller {
     override func accessibilityPerformIncrement() -> Bool { onUserScroll?(); return super.accessibilityPerformIncrement() }
 }
 
+
+private struct ProxyWebSocketCountFilterEditor: View {
+    let apply: (ProxyWebSocketCountFilter) -> Void
+    @State private var sentAbove: String
+    @State private var sentBelow: String
+    @State private var receivedAbove: String
+    @State private var receivedBelow: String
+
+    init(initial: ProxyWebSocketCountFilter, apply: @escaping (ProxyWebSocketCountFilter) -> Void) {
+        self.apply = apply
+        _sentAbove = State(initialValue: initial.sentAbove.map(String.init) ?? "")
+        _sentBelow = State(initialValue: initial.sentBelow.map(String.init) ?? "")
+        _receivedAbove = State(initialValue: initial.receivedAbove.map(String.init) ?? "")
+        _receivedBelow = State(initialValue: initial.receivedBelow.map(String.init) ?? "")
+    }
+
+    private var valid: Bool {
+        [sentAbove, sentBelow, receivedAbove, receivedBelow].allSatisfy { input in
+            input.isEmpty || Int64(input).map { $0 >= 0 } == true
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("消息数量筛选").font(.headline)
+            Grid(alignment: .leading) {
+                GridRow {
+                    Text("方向")
+                    Text("大于")
+                    Text("小于")
+                }.foregroundStyle(.secondary)
+                GridRow {
+                    Text("发送")
+                    TextField("不限", text: $sentAbove).accessibilityLabel("发送数量大于")
+                    TextField("不限", text: $sentBelow).accessibilityLabel("发送数量小于")
+                }
+                GridRow {
+                    Text("接收")
+                    TextField("不限", text: $receivedAbove).accessibilityLabel("接收数量大于")
+                    TextField("不限", text: $receivedBelow).accessibilityLabel("接收数量小于")
+                }
+            }.textFieldStyle(.roundedBorder)
+            Text(valid ? "留空表示不限。已填写的条件需同时满足。" : "请输入非负整数。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("清空筛选") { apply(.init()) }
+                Spacer()
+                Button("应用") {
+                    apply(.init(sentAbove: Int64(sentAbove), sentBelow: Int64(sentBelow),
+                        receivedAbove: Int64(receivedAbove), receivedBelow: Int64(receivedBelow)))
+                }.keyboardShortcut(.defaultAction).disabled(!valid)
+            }
+        }.padding(14).frame(width: 300)
+    }
+}
 
 private func connectionTiming(_ flow: ProxyWebSocketFlow) -> String {
     var fields = ["建立 " + (flow.openedAt?.formatted() ?? "未记录")]
