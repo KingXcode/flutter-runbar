@@ -49,6 +49,7 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
             "--set", "flow_detail=0", "--set", "ssl_insecure=false", "--scripts", configuration.addon.path]
         var environment = ProcessInfo.processInfo.environment
         environment["RUNBAR_PROXY_DECRYPT_TLS"] = configuration.decryptTLS ? "1" : "0"
+        environment["RUNBAR_PROXY_CONTROL"] = directory.appendingPathComponent("control").path
         environment["PYTHONUNBUFFERED"] = "1"
         process.environment = environment
         let output = Pipe(), errors = Pipe()

@@ -1,6 +1,6 @@
-"""Runbar's read-only mitmdump addon (mitmproxy >= 10).
+"""Runbar's mitmdump addon (mitmproxy >= 10).
 
-Never change a request, response, or WebSocket message. HTTP bodies are streamed
+Captured traffic is unchanged; explicit user commands can inject WebSocket messages. HTTP bodies are streamed
 unchanged; only a bounded copy is retained for the local capture pipe. mitmdump
 does not keep a historical view, and completed WebSocket messages are released.
 """
@@ -12,6 +12,7 @@ import os
 import threading
 import time
 import zlib
+from pathlib import Path
 
 from mitmproxy import ctx
 
@@ -48,6 +49,8 @@ def headers(value):
 
 class Capture:
     def __init__(self):
+        self.flows = {}
+        self.control = Path(os.environ["RUNBAR_PROXY_CONTROL"]) if os.environ.get("RUNBAR_PROXY_CONTROL") else None
         self.decrypt_tls = os.environ.get("RUNBAR_PROXY_DECRYPT_TLS") == "1"
         self.parent = os.getppid()
         self.preview_bytes = 0
@@ -108,6 +111,49 @@ class Capture:
             raise RuntimeError("Runbar 代理未在本机 IPv4 地址监听")
         self.emit({"type": "ready", "port": ports[0]})
         self.watchdog = asyncio.create_task(self.watch_parent())
+        if self.control:
+            self.control.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.publish_connections()
+            self.commands = asyncio.create_task(self.watch_commands())
+
+    def publish_connections(self):
+        if self.control:
+            path = self.control / "connections.json"
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps([{"id": f.id, "url": self.socket_url(f)} for f in self.flows.values()]))
+            temporary.replace(path)
+
+    async def watch_commands(self):
+        while True:
+            await asyncio.sleep(0.1)
+            for path in list(self.control.glob("*.request"))[:16]:
+                response = {"error": "发送失败"}
+                try:
+                    if path.stat().st_size > BODY_LIMIT * 6 + 4096:
+                        raise ValueError("消息超过 1 MB")
+                    command = json.loads(path.read_text())
+                    if time.time() > command["expires"]:
+                        raise ValueError("发送请求已过期")
+                    flow = self.flows.get(command["flowID"])
+                    if not flow or not flow.live:
+                        raise ValueError("连接已断开，请重新选择")
+                    content = command["text"].encode("utf-8")
+                    if not content or len(content) > BODY_LIMIT:
+                        raise ValueError("请输入不超过 1 MB 的消息")
+                    ctx.master.commands.call("inject.websocket", flow, False, content, True)
+                    response = {"error": None}
+                except Exception as error:
+                    response = {"error": str(error)}
+                finally:
+                    path.unlink(missing_ok=True)
+                result = path.with_suffix(".response")
+                temporary = result.with_suffix(".tmp")
+                temporary.write_text(json.dumps(response))
+                temporary.replace(result)
+            # Remove abandoned replies after a client closes its editor.
+            for path in self.control.glob("*.response"):
+                if time.time() - path.stat().st_mtime > 30:
+                    path.unlink(missing_ok=True)
 
     async def watch_parent(self):
         while True:
@@ -119,6 +165,10 @@ class Capture:
     def done(self):
         if hasattr(self, "watchdog"):
             self.watchdog.cancel()
+        if hasattr(self, "commands"):
+            self.commands.cancel()
+        self.flows.clear()
+        self.publish_connections()
         with self.condition:
             self.stopping = True
             self.condition.notify()
@@ -228,6 +278,8 @@ class Capture:
             "note": "TLS 透传，仅记录 CONNECT 隧道；状态不是源站 HTTP 响应，无法查看 HTTPS 正文或 WSS 消息。"}})
 
     def websocket_start(self, flow):
+        self.flows[flow.id] = flow
+        self.publish_connections()
         self.socket_event(flow, "open")
 
     def websocket_message(self, flow):
@@ -238,8 +290,19 @@ class Capture:
         flow.websocket.messages.clear()
 
     def websocket_end(self, flow):
+        self.flows.pop(flow.id, None)
+        self.publish_connections()
         self.socket_event(flow, "close")
         flow.websocket.messages.clear()
+
+    @staticmethod
+    def socket_url(flow):
+        url = flow.request.pretty_url
+        if url.startswith("https://"):
+            url = "wss://" + url[8:]
+        elif url.startswith("http://"):
+            url = "ws://" + url[7:]
+        return url
 
     def socket_event(self, flow, kind, message=None):
         self.sequence += 1
@@ -247,11 +310,7 @@ class Capture:
         note = "消息超过 1 MB，仅保留前缀" if len(data) > BODY_LIMIT else ""
         if kind == "close":
             note = limited_text(flow.websocket.close_reason or "", 2048)
-        url = flow.request.pretty_url
-        if url.startswith("https://"):
-            url = "wss://" + url[8:]
-        elif url.startswith("http://"):
-            url = "ws://" + url[7:]
+        url = self.socket_url(flow)
         self.emit({"type": "websocket", "socket": {
             "id": self.sequence, "flowID": flow.id, "url": limited_text(url, 16_384),
             "timestamp": micros(message.timestamp) if message else micros(), "kind": kind,

@@ -199,6 +199,7 @@ struct ProxyWebSocketView: View {
     let captureRevision: Date
     @StateObject private var data = ProxyWebSocketModel()
     @State private var showingFilters = false
+    @State private var showingSender = false
     @AppStorage("proxyWebSocketWraps") private var wraps = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -327,6 +328,11 @@ struct ProxyWebSocketView: View {
                 Text(data.selectedURL ?? "请选择连接 URL").foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle).help(data.selectedURL ?? "")
                 Spacer(minLength: 0)
+                Button("发送消息", systemImage: "paperplane") { showingSender = true }
+                    .disabled(data.selectedURL == nil)
+                    .sheet(isPresented: $showingSender) {
+                        ProxyWebSocketComposer(directory: directory, url: data.selectedURL ?? "")
+                    }
             }.font(.caption).frame(height: 22)
             ProxySocketTable(rows: .messages(data.window), selection: data.selectedID.map(ProxySocketSelection.message),
                 follows: data.follows, revision: data.scrollRevision, latest: data.scrollsToLatest,
@@ -627,4 +633,59 @@ private final class ProxySocketScroller: NSScroller {
     override func mouseDown(with event: NSEvent) { onUserScroll?(); super.mouseDown(with: event) }
     override func accessibilityPerformDecrement() -> Bool { onUserScroll?(); return super.accessibilityPerformDecrement() }
     override func accessibilityPerformIncrement() -> Bool { onUserScroll?(); return super.accessibilityPerformIncrement() }
+}
+
+
+private struct ProxyWebSocketComposer: View {
+    let directory: URL
+    let url: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var targets: [ProxyWebSocketTarget] = []
+    @State private var target = ""
+    @State private var text = ""
+    @State private var sending = false
+    @State private var result = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("发送 WebSocket 消息").font(.headline)
+            Text(url).font(.caption).textSelection(.enabled).lineLimit(2)
+            HStack {
+                Picker("连接", selection: $target) {
+                    Text("请选择活动连接").tag("")
+                    ForEach(targets) { item in Text(item.id).tag(item.id) }
+                }
+                Button("刷新") { refresh() }.disabled(sending)
+            }.disabled(sending)
+            Text("通过所选连接向服务器发送 UTF-8 文本 / JSON，最大 1 MB。")
+                .font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.system(.body, design: .monospaced))
+                .border(Color(nsColor: .separatorColor)).frame(minHeight: 220).disabled(sending)
+                .accessibilityLabel("待发送的 WebSocket 消息")
+            Text(result).font(.caption).textSelection(.enabled)
+            HStack {
+                Text("\(text.utf8.count) 字节").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("关闭") { dismiss() }.disabled(sending)
+                Button(sending ? "发送中…" : "发送") {
+                    sending = true; result = ""
+                    Task { @MainActor in
+                        do {
+                            try await ProxyWebSocketSender.send(directory: directory, flowID: target, text: text)
+                            result = "已提交发送，请在收发消息列表查看消息及服务器响应。"
+                        } catch { result = error.localizedDescription }
+                        sending = false
+                    }
+                }.keyboardShortcut(.return, modifiers: .command)
+                    .disabled(sending || target.isEmpty || text.isEmpty || text.utf8.count > 1024 * 1024)
+            }
+        }.padding(20).frame(width: 560).onAppear { refresh() }
+    }
+    private func refresh() {
+        do {
+            targets = try ProxyWebSocketSender.connections(directory: directory).filter { $0.url == url }
+            if !targets.contains(where: { $0.id == target }) { target = targets.count == 1 ? targets[0].id : "" }
+            result = targets.isEmpty ? "没有活动连接。请启动抓包任务并建立 WebSocket 连接；旧任务需重启后使用。" : ""
+        } catch { targets = []; target = ""; result = "无法读取活动连接，请重启抓包任务后重试。" }
+    }
 }
