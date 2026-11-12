@@ -22,7 +22,7 @@ WebSocket 页先选连接 URL，再搜索其全部已缓存收发消息。搜索
 
 可选安装配套的 [runbar-diagnostics Skill](skills/runbar-diagnostics/SKILL.md)，指导 AI 选择会话、分页取证和分析日志 / 网络问题。首次打开会显示安装向导，勾选 Codex、Claude Code、Qoder、Qoder CN、WorkBuddy、OpenCode 后直接安装，也支持更改目录或添加其他工具。之后可从设置、菜单栏或 MCP 窗口「安装 / 检查更新…」管理；新版 Runbar 内置 Skill 变化时会检查已安装副本，并提示更新，同一次更新选「稍后」后不反复弹窗。替换前保留旧版备份，有手动修改的内容需明确勾选后才替换。Skill 和 MCP 连接分别管理；单独安装 Skill 不会创建 MCP 连接，仍需在 MCP 窗口选择 Agent 安装连接或使用手动配置。安装后按客户端要求刷新或重开会话。
 
-开发时可运行 `python3 scripts/package-mcp-skill.py` 生成 `dist/skills/runbar-diagnostics.zip` 及带版本 / 文件指纹清单的展开资源；正常 Xcode / App / DMG 构建自动包含。MCP 窗口保留「导出 ZIP…」供手动安装到其他环境，完整目录和更新规则见 [Skill 安装与更新说明](docs/mcp-service.md#可选安装-runbar-诊断-skill)。
+开发时可运行 `python3 macos/scripts/package-mcp-skill.py` 生成 `macos/dist/skills/runbar-diagnostics.zip` 及带版本 / 文件指纹清单的展开资源；正常 Xcode / App / DMG 构建自动包含。MCP 窗口保留「导出 ZIP…」供手动安装到其他环境，完整目录和更新规则见 [Skill 安装与更新说明](docs/mcp-service.md#可选安装-runbar-诊断-skill)。
 
 ## 关联正在运行的 Flutter App
 
@@ -67,22 +67,22 @@ DevTools 网络请求采集的接口与独立原型验证见 [可行性分析](d
 
 ## 构建
 
-用 Xcode 打开 `FlutterRunbar.xcodeproj`，选择 **FlutterRunbar** Scheme 和 **My Mac**：
+用 Xcode 打开 `macos/FlutterRunbar.xcodeproj`，选择 **FlutterRunbar** Scheme 和 **My Mac**：
 
 - `⌘R`：编译并运行应用，入口在系统菜单栏。
 - `⌘U`：运行 `RunbarCoreTests` 单元测试。
 - `Product > Archive`：使用 Release 配置归档，在 Organizer 查看归档和导出选项。
-- 产品版本号在 `project.yml` 修改并重新生成工程；打包脚本的构建号取 Git 提交计数。证书与开发团队在 Signing & Capabilities 中配置。
+- 产品版本号在 `macos/project.yml` 修改并重新生成工程；打包脚本的构建号取 Git 提交计数。证书与开发团队在 Signing & Capabilities 中配置。
 
 工程默认使用本机 ad hoc 签名，无需开发者账号。DMG 分发默认使用可用的 Developer ID 签名，不进行 Apple 公证。应用需要执行用户命令和访问项目目录，因此未启用 App Sandbox。
 
-命令行测试、打包：
+以下命令均从仓库根目录执行，原生工程位于 `macos/`：
 
 ```sh
-swift test
-bash scripts/test-process.sh
-bash scripts/build-app.sh --no-publish
-open 'dist/Runbar.app'
+swift test --package-path macos
+bash macos/scripts/test-process.sh
+bash macos/scripts/build-app.sh --no-publish
+open 'macos/dist/Runbar.app'
 ```
 
 ### 一键打包到桌面
@@ -93,15 +93,15 @@ open 'dist/Runbar.app'
 ./build_macos_app.sh
 ```
 
-脚本执行通用 Release 构建和签名校验，发布 GitHub Release 的 ZIP / SHA-256 附件，并生成 `dist/Runbar.app` 与 `~/Desktop/Runbar.app`。发布前先写清 `CHANGELOG.md` 的「下一版本」、提交推送 main 并保持工作区干净，且 `gh` 已登录。只打本地包可加 `--no-publish`；可从任何目录用脚本绝对路径运行。
+脚本执行通用 Release 构建和签名校验，发布 GitHub Release 的 ZIP / SHA-256 附件，并生成 `macos/dist/Runbar.app` 与 `~/Desktop/Runbar.app`。发布前先写清 `CHANGELOG.md` 的「下一版本」、提交推送 main 并保持工作区干净，且 `gh` 已登录。只打本地包可加 `--no-publish`；可从任何目录用脚本绝对路径运行。
 
 首次改名安装会同时备份并移走桌面旧名 `Flutter Runbar.app`，桌面只保留新版 `Runbar.app`。应用标识和数据目录保持不变，原有配置、命令与运行记录继续使用。
 
-替换桌面应用前，安装器先请求正在运行的 Runbar 正常退出，确认退出后整体备份旧包并替换，不合并旧文件，也不自动启动新版。若还有项目任务，会显示应用原有的「停止并退出 / 取消」确认；取消或 120 秒内未退出就停止安装，保留桌面旧包，不强制杀进程。旧包备份到 `.build/package-backups/<时间>/`，确认不再需要后可自行删除。
+替换桌面应用前，安装器先请求正在运行的 Runbar 正常退出，确认退出后整体备份旧包并替换，不合并旧文件，也不自动启动新版。若还有项目任务，会显示应用原有的「停止并退出 / 取消」确认；取消或 120 秒内未退出就停止安装，保留桌面旧包，不强制杀进程。旧包备份到 `macos/.build/package-backups/<时间>/`，确认不再需要后可自行删除。
 
-从 Runbar 自身执行打包时，会把桌面替换交给独立安装器，避免退出旧版时连同安装器一起停止。此时脚本会明确提示安装仍在进行，最终结果查看 `.build/logs/install-*.log` 中的「桌面安装完成」。构建日志位于 `.build/logs/package-*.log`；从终端执行时会等待桌面替换完成，失败返回非零退出码。
+从 Runbar 自身执行打包时，会把桌面替换交给独立安装器，避免退出旧版时连同安装器一起停止。此时脚本会明确提示安装仍在进行，最终结果查看 `macos/.build/logs/install-*.log` 中的「桌面安装完成」。构建日志位于 `macos/.build/logs/package-*.log`；从终端执行时会等待桌面替换完成，失败返回非零退出码。
 
-CI 使用 `bash scripts/build-app.sh --no-publish`，只输出到 `dist/`，不发布 Release；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
+CI 在 `macos/` 目录运行 `bash scripts/build-app.sh --no-publish`，只输出到 `macos/dist/`，不发布 Release；加 `--desktop` 可同时复制到桌面。`--help` 可查看参数。截图预览构建使用独立的 Derived Data，避免混入正式构建。
 
 默认 App 构建使用 ad hoc 签名，同时包含 arm64 与 x86_64。跨电脑分发优先使用下面的签名通用 DMG 入口。
 
@@ -113,11 +113,11 @@ CI 使用 `bash scripts/build-app.sh --no-publish`，只输出到 `dist/`，不�
 
 脚本生成 Apple 芯片与 Intel 双架构（`arm64 + x86_64`）的 Release 应用，制作带有 Applications 拖入入口和安装说明的 DMG。自动读取应用版本、构建号和最低系统要求；当前最低要求为 macOS 26。先校验 App / DMG 签名、两种架构及磁盘映像校验和，再输出到：
 
-- `dist/Runbar-<版本>-<构建号>-macOS<最低版本>-universal-signed.dmg`
+- `macos/dist/Runbar-<版本>-<构建号>-macOS<最低版本>-universal-signed.dmg`
 - `~/Desktop/Runbar-<版本>-<构建号>-macOS<最低版本>-universal-signed.dmg`
-- `dist/` 中同时保留 DMG 的 `.sha256` 校验文件。
+- `macos/dist/` 中同时保留 DMG 的 `.sha256` 校验文件。
 
-同名旧 DMG 先备份到 `.build/package-backups/<时间>/`，新文件完整复制后才替换，替换失败会恢复旧文件。制作 DMG 不退出正在运行的 Runbar，也不替换桌面的 `.app`。
+同名旧 DMG 先备份到 `macos/.build/package-backups/<时间>/`，新文件完整复制后才替换，替换失败会恢复旧文件。制作 DMG 不退出正在运行的 Runbar，也不替换桌面的 `.app`。
 
 DMG 默认选择本机唯一有效的 **Developer ID Application** 证书，同时给 App 和 DMG 签名；不会硬编码某台电脑的证书指纹或团队。证书缺失或有多个候选时，会在构建前明确报错，可指定完整证书名或指纹：
 
@@ -134,9 +134,9 @@ DMG 默认选择本机唯一有效的 **Developer ID Application** 证书，同�
 
 DMG 流程**不公证、不向 Apple 上传 App / DMG**，不需要 Apple 公证账号或凭据；默认将 DMG 和 SHA-256 发布到 GitHub Release，可用 `--no-publish` 跳过 GitHub 上传。Developer ID 签名会请求签名时间戳。由于没有公证，在其他电脑首次安装时，系统仍可能拦截；确认包的来源后，按 [Apple 的说明](https://support.apple.com/guide/mac-help/mh40617/mac) 在「系统设置 > 隐私与安全性」中选择「仍要打开」，不要关闭系统安全功能。
 
-底层命令 `bash scripts/build-app.sh --dmg` 只输出到 `dist/`；追加 `--desktop` 才复制到桌面。`./build_macos_app.sh --dmg` 与 DMG 桌面入口等效。App / DMG 入口默认发布，CI 和预览构建显式使用 `--no-publish`；预览构建不能制作分发 DMG。
+底层命令 `bash macos/scripts/build-app.sh --dmg` 只输出到 `macos/dist/`；追加 `--desktop` 才复制到桌面。`./build_macos_app.sh --dmg` 与 DMG 桌面入口等效。App / DMG 入口默认发布，CI 和预览构建显式使用 `--no-publish`；预览构建不能制作分发 DMG。
 
-`FlutterRunbar.xcodeproj`、共享 Scheme 和 `Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 执行 `xcodegen generate`。如果直接在 Xcode 修改工程设置，应同步修改 `project.yml`，避免重新生成时覆盖设置。
+`macos/FlutterRunbar.xcodeproj`、共享 Scheme 和 `macos/Resources/Info.plist` 已保存在仓库中，正常使用 Xcode 不需要安装额外工具。`macos/Package.swift` 管理共享的 `RunbarCore` / `RunbarProcess` 模块，应用 Target 和测试 Target 使用同一份源码。`macos/project.yml` 是 XcodeGen 工程生成配置；需要重新生成时使用 XcodeGen 2.46+ 从仓库根目录执行 `xcodegen generate --spec macos/project.yml`。如果直接在 Xcode 修改工程设置，应同步修改 `macos/project.yml`，避免重新生成时覆盖设置。
 
 ### 应用内更新与完整发布说明
 
@@ -216,13 +216,22 @@ Flutter 项目以 Debug 模式运行且调试服务就绪后，可点击右上�
 
 ## 工程结构
 
-- `FlutterRunbar.xcodeproj`：标准 macOS App Target、XCTest Target 和共享 Scheme。
-- `Resources/Info.plist`：应用名称、版本变量和菜单栏应用配置。
-- `project.yml`：可重新生成 Xcode 工程的 XcodeGen 配置。
+macOS 原生工程集中在 `macos/`；仓库根目录保留项目文档、共享扩展和 Skill。
+
+- `macos/Sources/`、`macos/Tests/`、`macos/Resources/`：原生源码、测试和应用资源。
+- `macos/Package.swift`：共享模块与 Swift Package 测试配置。
+- `macos/scripts/`：构建、资源打包、测试和截图脚本。
+- `macos/.build/`、`macos/dist/`、`macos/screenshots/`：本地构建缓存、安装包和截图产物，不纳入版本控制。
+- `extensions/runbar-vscode/`（含 `tests/`）、`skills/`：配套扩展及诊断 Skill。
+- `docs/`、`README.md`、`CHANGELOG.md`：使用、开发与发布文档。
+- 根目录的 `build_macos_app.sh`、`build_macos_dmg.sh`：保留的一键打包入口，转发到原生构建脚本。
+- `macos/FlutterRunbar.xcodeproj`：标准 macOS App Target、XCTest Target 和共享 Scheme。
+- `macos/Resources/Info.plist`：应用名称、版本变量和菜单栏应用配置。
+- `macos/project.yml`：可重新生成 Xcode 工程的 XcodeGen 配置。
 - `RunbarCore`：配置/运行模型、原始日志、增量解析、运行生命周期，以及每项目独立的 `ProjectRunCoordinator` 状态机，可由 XCTest 单独测试。
 - `RunbarProcess`：`posix_spawn`、独立进程组、信号、waitpid；避免在多线程 GUI 中使用 fork 后复杂逻辑。
 - `FlutterRunbar`：SwiftUI MenuBarExtra / NavigationSplitView，AppKit 目录选择、退出确认、原生文本视图。
-- `scripts/test-process.sh`：C 层过程集成测试，验证含空格目录、stdout/stderr、退出码、启动失败、大输出、进程组升级、无关进程保护，以及 24 路并行启动时独立日志与 EOF。
+- `macos/scripts/test-process.sh`：C 层过程集成测试，验证含空格目录、stdout/stderr、退出码、启动失败、大输出、进程组升级、无关进程保护，以及 24 路并行启动时独立日志与 EOF。
 
 ## CI 与验证边界
 

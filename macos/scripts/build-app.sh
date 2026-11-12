@@ -9,10 +9,10 @@ SIGNING_IDENTITY="${RUNBAR_SIGNING_IDENTITY:-}"
 SIGNING_TEAM=""
 usage() {
   cat <<'TEXT'
-用法：bash scripts/build-app.sh [--desktop] [--dmg] [--no-publish] [--signing-identity 身份] [--help]
+用法（仓库根目录）：bash macos/scripts/build-app.sh [--desktop] [--dmg] [--no-publish] [--signing-identity 身份] [--help]
 App 桌面入口：./build_macos_app.sh
 DMG 桌面入口：./build_macos_dmg.sh
-  默认                 Release 通用构建，输出 dist/Runbar.app，并发布 GitHub Release
+  默认                 Release 通用构建，输出 macos/dist/Runbar.app，并发布 GitHub Release
   --desktop            同时将当前类型的产物放到桌面
   --dmg                生成 arm64 + x86_64 通用 DMG，不安装或退出 App
   --no-publish         只在本地打包，不上传 GitHub（开发 / CI 使用）
@@ -22,7 +22,7 @@ DMG 默认自动选择唯一可用的 Developer ID Application 证书；也可�
 App 默认使用 ad hoc 签名。DMG 无分发证书时会明确报错，可显式指定 - 生成 ad hoc 包。
 同名旧产物先备份。替换桌面 App 前请求旧版正常退出；生成 DMG 不退出 App。
 发布要求：main 干净且已推送，CHANGELOG.md 写清本次更新，gh 已登录。
-构建会按锁定版本下载并校验两个架构的内置抓包引擎，缓存在 .build/；最终用户无需另装抓包工具。
+构建会按锁定版本下载并校验两个架构的内置抓包引擎，缓存在 macos/.build/；最终用户无需另装抓包工具。
 只上传安装包和校验文件到 GitHub；不进行 Apple 公证，不上传到 Apple。Developer ID 签名会请求签名时间戳。
 TEXT
 }

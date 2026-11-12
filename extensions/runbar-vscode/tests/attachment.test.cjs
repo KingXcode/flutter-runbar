@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
-const { validateContext, verifyVM } = require("../../extensions/runbar-vscode/bridge");
+const { validateContext, verifyVM } = require("../bridge");
 
 async function fixture(t, pid, extensions) {
     const calls = [];

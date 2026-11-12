@@ -96,7 +96,7 @@ Qoder CN 与 WorkBuddy 的默认目录依据本机安装及客户端资源核对
 
 需要手动安装到其他环境时，MCP 窗口保留「导出 ZIP…」。解压后将整个 `runbar-diagnostics` 放到目标 Skill 目录，不要多套一层同名文件夹。ZIP 仅包含公开说明和元数据，不含令牌、用户配置、日志或网络记录。
 
-Skill 源码位于 `skills/runbar-diagnostics/`，修改时应同步提升 `SKILL.md` 中的 `metadata.version`。`scripts/package-mcp-skill.py` 按白名单只打包 `SKILL.md`、`agents/openai.yaml` 和 `references/setup.md`，同时生成带版本 / 文件指纹清单的展开资源供向导安装。Xcode 构建将 ZIP 和展开资源放入 App 的 `Contents/Resources/Skills/`；签名 App / DMG 包含同一份资源。本地单独运行脚本输出到 `dist/skills/`，不从用户的技能目录收集文件。
+Skill 源码位于 `skills/runbar-diagnostics/`，修改时应同步提升 `SKILL.md` 中的 `metadata.version`。`macos/scripts/package-mcp-skill.py` 按白名单只打包 `SKILL.md`、`agents/openai.yaml` 和 `references/setup.md`，同时生成带版本 / 文件指纹清单的展开资源供向导安装。Xcode 构建将 ZIP 和展开资源放入 App 的 `Contents/Resources/Skills/`；签名 App / DMG 包含同一份资源。本地单独运行脚本输出到 `macos/dist/skills/`，不从用户的技能目录收集文件。
 
 目录与调用方式参考：[Codex](https://learn.chatgpt.com/docs/build-skills)、[Claude Code](https://code.claude.com/docs/en/skills)、[Qoder](https://docs.qoder.com/cli/Skills)、[OpenCode](https://opencode.ai/docs/skills/)、[WorkBuddy](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Skills-Market)。
 

@@ -2,18 +2,20 @@
 
 ## 日常一键发布
 
+以下命令均从仓库根目录执行。
+
 1. 完成代码改动后，改写 `CHANGELOG.md` 的「下一版本」：分别写清新增 / 修复、用户如何使用、影响范围和已知限制。首次公开发布的已有能力要与本次新增区分。不要只贴提交标题或写「优化体验」。
-2. 在 `project.yml` 设置 `MARKETING_VERSION`（三个数字，例如 `0.10.0`），需要改工程时执行 `xcodegen generate`。提交并推送到 `origin/main`，保证工作区干净。打包构建号自动取当前 Git 提交计数，不需要每次手动递增工程中的默认构建号；发布后不重写 main 历史。
+2. 在 `macos/project.yml` 设置 `MARKETING_VERSION`（三个数字，例如 `0.10.0`），需要改工程时从仓库根目录执行 `xcodegen generate --spec macos/project.yml`。提交并推送到 `origin/main`，保证工作区干净。打包构建号自动取当前 Git 提交计数，不需要每次手动递增工程中的默认构建号；发布后不重写 main 历史。
 3. 确保已安装并登录 `gh`，账号有本仓库 Release 写权限。运行以下一个入口：
 
 ```sh
-./build_macos_app.sh      # dist + 桌面 App，Release 附件为 ZIP + SHA-256
-./build_macos_dmg.sh      # dist + 桌面 DMG，Release 附件为 DMG + SHA-256
+./build_macos_app.sh      # macos/dist + 桌面 App，Release 附件为 ZIP + SHA-256
+./build_macos_dmg.sh      # macos/dist + 桌面 DMG，Release 附件为 DMG + SHA-256
 ```
 
-两个入口都编译 Apple Silicon / Intel 通用应用。底层 `bash scripts/build-app.sh` 也默认发布，但不复制到桌面。公开发布库固定为 `KingXcode/flutter-runbar`，不自动修改仓库可见性或创建凭据。构建时记录版本、构建号及源码 SHA；标签如 `v0.10.0+47`，同一提交的 App / DMG 加入同一条 Release。
+两个入口都编译 Apple Silicon / Intel 通用应用。底层 `bash macos/scripts/build-app.sh` 也默认发布，但不复制到桌面。公开发布库固定为 `KingXcode/flutter-runbar`，不自动修改仓库可见性或创建凭据。构建时记录版本、构建号及源码 SHA；标签如 `v0.10.0+47`，同一提交的 App / DMG 加入同一条 Release。
 
-App / DMG 已包含两个架构的完整抓包引擎，用户不需要安装 Homebrew、Python 或 mitmproxy。Xcode 的嵌入步骤从官方地址下载锁定版本到 `.build/proxy-engine-cache/`，检查 SHA-256、Mach-O 架构及原发布者签名后复制到 App 的 `Contents/Helpers`，保留原引擎签名和依赖许可证；外层 Runbar 签名后递归验签。首次构建需要联网下载约 107 MB，后续可复用已验证缓存。使用与预备缓存命令见 [代理抓包说明](proxy-capture.md)。
+App / DMG 已包含两个架构的完整抓包引擎，用户不需要安装 Homebrew、Python 或 mitmproxy。Xcode 的嵌入步骤从官方地址下载锁定版本到 `macos/.build/proxy-engine-cache/`，检查 SHA-256、Mach-O 架构及原发布者签名后复制到 App 的 `Contents/Helpers`，保留原引擎签名和依赖许可证；外层 Runbar 签名后递归验签。首次构建需要联网下载约 107 MB，后续可复用已验证缓存。使用与预备缓存命令见 [代理抓包说明](proxy-capture.md)。
 
 DMG 默认要求唯一可用的 Developer ID Application 证书，可用 `--signing-identity` 指定。没有分发证书时显式传 `--signing-identity -` 生成 ad hoc DMG。App 默认 ad hoc 签名。签名时间戳可能访问 Apple 签名服务；**不调用 notarytool、不公证、不向 Apple 上传安装包**。
 
@@ -22,7 +24,7 @@ DMG 默认要求唯一可用的 Developer ID Application 证书，可用 `--sign
 ```sh
 ./build_macos_app.sh --no-publish
 ./build_macos_dmg.sh --no-publish
-bash scripts/build-app.sh --no-publish
+bash macos/scripts/build-app.sh --no-publish
 ```
 
 源码 ZIP 没有 Git 历史时仅支持 `--no-publish`，使用工程默认构建号。Xcode 的普通 Run / Archive 不会触发 GitHub 发布。CI / 截图工作流明确使用 `--no-publish`，不会发布；本地发布只运行构建与签名 / 映像校验，不自动运行测试或启动业务项目。
@@ -32,17 +34,17 @@ bash scripts/build-app.sh --no-publish
 - 发布脚本提取 `CHANGELOG.md` 的「下一版本」，同一份内容写入 GitHub Release，Runbar 更新窗口读取 Release 正文。发布后历史说明留在对应 Release，不被下一次编辑覆盖。
 - 说明至少要有分节与多个条目；与上次发布摘要完全相同的新版本会被拒绝。脚本检查结构和变化，说明的准确性仍需作者逐项核对。
 - 发布前核对 main、干净工作区、origin、远端 main SHA、公开仓库以及已有版本。拒绝覆盖不同提交的同名标签或将较低版本设为最新。
-- 仅上传 `dist/` 中明确指定的 ZIP / DMG 与对应 `.sha256`；不打包用户配置目录、业务项目或本机记录。首次创建草稿并指定精确源码 SHA，上传完毕且 GitHub 返回的 SHA-256 匹配后才公开。
+- 仅上传 `macos/dist/` 中明确指定的 ZIP / DMG 与对应 `.sha256`；不打包用户配置目录、业务项目或本机记录。首次创建草稿并指定精确源码 SHA，上传完毕且 GitHub 返回的 SHA-256 匹配后才公开。
 - 同一提交的同名附件不会覆盖；签名时间戳可能使重复构建的二进制字节不同，但线上原包保持不变。中途上传失败可重试；已有同名文件内容冲突时需检查草稿，脚本不擅自删除它。
-- Release 发布发生在桌面 App 安装器退出旧版之前。发布失败返回非零，保留 `dist/` 产物与 `.build/logs/package-*.log`，不继续替换桌面 App。
+- Release 发布发生在桌面 App 安装器退出旧版之前。发布失败返回非零，保留 `macos/dist/` 产物与 `macos/.build/logs/package-*.log`，不继续替换桌面 App。
 - DMG 不退出 Runbar、不替换桌面 App。App 入口沿用正常退出 / 备份 / 整体替换机制；不自动启动新版。
 
 需要仅重试已构建产物的发布时：
 
 ```sh
-python3 scripts/github-release.py publish \
-  --artifact 'dist/Runbar-0.10.0-47-macOS26.0-universal-signed.dmg' \
-  --app '.build/xcode-universal/Build/Products/Release/Runbar.app'
+python3 macos/scripts/github-release.py publish \
+  --artifact 'macos/dist/Runbar-0.10.0-47-macOS26.0-universal-signed.dmg' \
+  --app 'macos/.build/xcode-universal/Build/Products/Release/Runbar.app'
 ```
 
 路径中的版本与构建号以实际产物为准，必须对应当前已推送提交。默认不会删除本机旧版本或历史 Release。

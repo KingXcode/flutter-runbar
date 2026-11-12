@@ -12,6 +12,9 @@ jobs:
   verify:
     runs-on: macos-26
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: macos
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MACOSX_DEPLOYMENT_TARGET: '26.0'
@@ -35,5 +38,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Runbar-macOS26-universal
-          path: dist/Runbar-macOS26-universal.zip
+          path: macos/dist/Runbar-macOS26-universal.zip
           retention-days: 3

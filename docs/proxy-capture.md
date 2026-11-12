@@ -25,14 +25,14 @@ no_proxy=<原有值>,localhost,127.0.0.1,::1
 
 ## 内置引擎与构建
 
-- 固定 mitmproxy 12.3.1，下载地址、两个架构的 SHA-256 和原发布者 Team ID 记录在 `scripts/proxy-engine.lock.json`。版本随 Runbar 更新，不在用户机器上独立联网升级引擎。
-- Xcode 普通构建、Archive 和现有 App / DMG 打包入口都会执行 `scripts/package-proxy-engine.py`。首次构建下载约 107 MB 的官方独立包到项目 `.build/proxy-engine-cache/`，后续复用已验证缓存；不会写入系统应用目录或安装全局 Python 包。
+- 固定 mitmproxy 12.3.1，下载地址、两个架构的 SHA-256 和原发布者 Team ID 记录在 `macos/scripts/proxy-engine.lock.json`。版本随 Runbar 更新，不在用户机器上独立联网升级引擎。
+- Xcode 普通构建、Archive 和现有 App / DMG 打包入口都会执行 `macos/scripts/package-proxy-engine.py`。首次构建下载约 107 MB 的官方独立包到项目 `macos/.build/proxy-engine-cache/`，后续复用已验证缓存；不会写入系统应用目录或安装全局 Python 包。
 - 官方完整签名包保留在 `Contents/Helpers/RunbarProxy-arm64.app` / `RunbarProxy-x86_64.app`，包括 Python、OpenSSL、动态库和依赖许可证，不拆分、不更改原引擎签名。单架构开发构建只嵌入相应架构；Release 通用包包含两套，展开合计约 180 MB。外层 Runbar 按原流程签名并递归验证，仍不做 Apple 公证或上传 Apple。
 - 内置引擎及许可证清单随 App 分发，设置中有「开源许可…」入口。引擎缺失、下载校验失败、架构或签名不符会阻止构建，避免交付需要用户补装依赖的包。
 - 在已验证缓存上可离线构建。需要预先准备缓存时，在源码根目录运行：
 
 ```sh
-python3 scripts/package-proxy-engine.py --prepare-only --architectures 'arm64 x86_64'
+python3 macos/scripts/package-proxy-engine.py --prepare-only --architectures 'arm64 x86_64'
 ```
 
 预备和打包只读取架构及签名，不执行引擎、不生成抓包证书。自定义外部引擎不被复制进 Runbar。默认未发现内置包时仍可兼容检测本机已有的 mitmdump；正式打包会要求内置包完整。
@@ -105,4 +105,4 @@ WebSocket 没有标准的「订阅」事件，订阅、取消订阅、心跳和�
 
 历史连接不能发送。更新前已启动的抓包任务需要停止并重新运行。发送窗口保留输入内容便于修改，连接断开会提示错误，超时不会自动重发；超时时请先检查消息列表再决定是否重试。控制通道仅位于该抓包会话的私有目录中，不新增网络监听端口。MCP 查询工具仍保持只读。
 
-可用 `python3 scripts/test-websocket-send.py` 验证实际代理注入、回包、缓存事件、过期请求及断开清理；自定义测试引擎可通过 `RUNBAR_TEST_MITMDUMP` 指定。
+可用 `python3 macos/scripts/test-websocket-send.py` 验证实际代理注入、回包、缓存事件、过期请求及断开清理；自定义测试引擎可通过 `RUNBAR_TEST_MITMDUMP` 指定。

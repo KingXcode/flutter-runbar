@@ -10,6 +10,9 @@ jobs:
   capture:
     runs-on: macos-26
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: macos
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MACOSX_DEPLOYMENT_TARGET: '26.0'
@@ -28,6 +31,6 @@ jobs:
         with:
           name: Runbar-actual-menu-popup
           path: |
-            screenshots/actual-menu-*.png
-            screenshots/actual-menu-*.txt
+            macos/screenshots/actual-menu-*.png
+            macos/screenshots/actual-menu-*.txt
           retention-days: 3

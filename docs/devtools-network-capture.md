@@ -25,7 +25,7 @@ DevTools Network 使用 Dart VM Service。可以从当前运行输出中的 DevT
 
 ## 独立原型验证（2026-10-27）
 
-`scripts/probe-devtools-network.dart` 只启动自建 loopback HTTP 服务与测试进程，不连接用户的业务 App。VM Service 保留认证，其地址不会写入原型缓存或输出。
+`macos/scripts/probe-devtools-network.dart` 只启动自建 loopback HTTP 服务与测试进程，不连接用户的业务 App。VM Service 保留认证，其地址不会写入原型缓存或输出。
 
 在本机 Flutter 3.47.5 的 Dart 3.13.4 `dartvm` 中验证：
 
@@ -37,10 +37,10 @@ DevTools Network 使用 Dart VM Service。可以从当前运行输出中的 DevT
 输出摘要：`requestBodyVerified=true`、`responseBodyVerified=true`、`incrementalReadVerified=true`、`cachedRecords=2`。运行方式：
 
 ```sh
-/path/to/dart-sdk/bin/dartvm scripts/probe-devtools-network.dart
+/path/to/dart-sdk/bin/dartvm macos/scripts/probe-devtools-network.dart macos/.build/devtools-network-probe
 ```
 
-缓存默认位于 `.build/devtools-network-probe/`。本机旧版定制 Dart 3.6.2 的命令行 VM 未提供可启动的 VM Service，因此该二进制未能完成原型；这不等于使用同版 Flutter 引擎的调试 App 不支持采集，实际接入时仍须按运行进程检测能力。
+上述命令将缓存写入 `macos/.build/devtools-network-probe/`。本机旧版定制 Dart 3.6.2 的命令行 VM 未提供可启动的 VM Service，因此该二进制未能完成原型；这不等于使用同版 Flutter 引擎的调试 App 不支持采集，实际接入时仍须按运行进程检测能力。
 
 ## 已接入的使用方式
 

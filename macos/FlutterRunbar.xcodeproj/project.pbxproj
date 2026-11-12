@@ -68,32 +68,31 @@
 		08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogResponsivenessProbe.swift; sourceTree = "<group>"; };
 		0C6F66E99688501B309B2459 /* capture-real-menu.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-real-menu.sh"; sourceTree = "<group>"; };
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
-		129869889879D609F44240FE /* extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = extension.js; sourceTree = "<group>"; };
 		1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPanel.swift; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		1E30B83948A472ACDB7F7876 /* SkillInstallationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationTests.swift; sourceTree = "<group>"; };
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateView.swift; sourceTree = "<group>"; };
-		34A808A71127B818971B8764 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		38F8A876CE0A012C6614758C /* VSCodeConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeConnectionView.swift; sourceTree = "<group>"; };
-		3C4BA1882F0B204ADE474147 /* setup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = setup.md; sourceTree = "<group>"; };
 		3FB19094451B4BCCDD1DF2B8 /* NetworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTests.swift; sourceTree = "<group>"; };
-		3FE25BD6D3CB404D874DA7C2 /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
 		4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCaptureView.swift; sourceTree = "<group>"; };
+		4817D2557EDF4C9C56F7942B /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCaptureTests.swift; sourceTree = "<group>"; };
 		4A35042DEC95719D687CE711 /* ApplicationAttachmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentView.swift; sourceTree = "<group>"; };
 		58E6091811E17D6C163ED7CB /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
+		5E138A091944AF9D6E5A067C /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
 		614DCCB6984BD1AC7398C219 /* CommandEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandEditorView.swift; sourceTree = "<group>"; };
 		69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyCertificateView.swift; sourceTree = "<group>"; };
-		6A2C0A687E0FDEB00B0A2C3B /* openai.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = openai.yaml; sourceTree = "<group>"; };
 		6B63F723C232B41F9FA8FE34 /* LogTimelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTimelineTests.swift; sourceTree = "<group>"; };
 		7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationModel.swift; sourceTree = "<group>"; };
 		72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationView.swift; sourceTree = "<group>"; };
 		75CB9B8540936580652BC9EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7C1649AE856415A1FDD835AE /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		7C403F001B892EF0AC7AD6F5 /* package-mcp-skill.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-mcp-skill.py"; sourceTree = "<group>"; };
 		7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetPermissionAlert.swift; sourceTree = "<group>"; };
 		84EF4C574DCE54515DB406A3 /* test-websocket-send.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "test-websocket-send.py"; sourceTree = "<group>"; };
+		857823E6D9B2D5CC6A3209DB /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRuntimeSnapshot.swift; sourceTree = "<group>"; };
@@ -106,33 +105,35 @@
 		A31907D75CF3EDDDDD941ADD /* github-release.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "github-release.py"; sourceTree = "<group>"; };
 		A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
+		A7944CEBCFACEF9059AFE77F /* openai.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = openai.yaml; sourceTree = "<group>"; };
 		A82ED9E8049F41FA3FC23F7B /* ProxyCapture */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ProxyCapture; path = Resources/ProxyCapture; sourceTree = SOURCE_ROOT; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPLocalServer.swift; sourceTree = "<group>"; };
-		AA265515B8A948781CDF2C41 /* package.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = package.json; sourceTree = "<group>"; };
+		ABBDAF9C85E27FA1E53DDCFA /* setup.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = setup.md; sourceTree = "<group>"; };
 		ADB0EFD74313532934ED48FB /* LogQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogQueryTests.swift; sourceTree = "<group>"; };
 		ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationAttachmentTests.swift; sourceTree = "<group>"; };
 		AEF95A87D2186443FE029E19 /* ManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagerView.swift; sourceTree = "<group>"; };
 		B4176923BDDEAA2C43B750A0 /* proxy-engine.lock.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "proxy-engine.lock.json"; sourceTree = "<group>"; };
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
+		B8530FA177E150F0B69BC5F6 /* attachment.test.cjs */ = {isa = PBXFileReference; path = attachment.test.cjs; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
 		BCEA8961B1D72C5604F4C21A /* MCPClientInstallationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientInstallationView.swift; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
+		C01778662BF30B5CB9166230 /* extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = extension.js; sourceTree = "<group>"; };
 		CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServiceController.swift; sourceTree = "<group>"; };
-		CE552C978360C0B9FEED0C40 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		D0AE10E194C87F99DDCB1683 /* Runbar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runbar.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2BD235544BC4D93D198B57A /* flutter-runbar */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "flutter-runbar"; path = .; sourceTree = SOURCE_ROOT; };
+		D392BA63412F6F864EB8A152 /* macos */ = {isa = PBXFileReference; lastKnownFileType = folder; name = macos; path = .; sourceTree = SOURCE_ROOT; };
 		D4011FF1EB9696A279A87523 /* VSCodeBridgeServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeBridgeServer.swift; sourceTree = "<group>"; };
 		D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPTests.swift; sourceTree = "<group>"; };
 		DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
 		E7BFEB43B6014220053D5928 /* package-proxy-engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-proxy-engine.py"; sourceTree = "<group>"; };
-		E843F7341E5B0A609C6A0B71 /* SKILL.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SKILL.md; sourceTree = "<group>"; };
 		E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-vscode-extension.py"; sourceTree = "<group>"; };
 		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
 		EA7195B8CEAB9DC327EB46D4 /* SandboxResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxResetTests.swift; sourceTree = "<group>"; };
 		F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPQueueTests.swift; sourceTree = "<group>"; };
+		F659F388EBF474412B0499A6 /* SKILL.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SKILL.md; sourceTree = "<group>"; };
 		F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyWebSocketView.swift; sourceTree = "<group>"; };
 		F6B1B0E8148C4E912DE4D250 /* MCPClientInstallationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientInstallationModel.swift; sourceTree = "<group>"; };
 		F8254135888F0FA991DFF1BA /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
@@ -161,14 +162,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		1C5433C67555F7539EFFB44F /* references */ = {
-			isa = PBXGroup;
-			children = (
-				3C4BA1882F0B204ADE474147 /* setup.md */,
-			);
-			path = references;
-			sourceTree = "<group>";
-		};
 		250C094D8AC86FF7E0A7DB1B /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -176,25 +169,6 @@
 				A82ED9E8049F41FA3FC23F7B /* ProxyCapture */,
 			);
 			path = Resources;
-			sourceTree = "<group>";
-		};
-		2698E51FC4382C2E27F5EDA6 /* runbar-vscode */ = {
-			isa = PBXGroup;
-			children = (
-				3FE25BD6D3CB404D874DA7C2 /* bridge.js */,
-				129869889879D609F44240FE /* extension.js */,
-				AA265515B8A948781CDF2C41 /* package.json */,
-				34A808A71127B818971B8764 /* README.md */,
-			);
-			path = "runbar-vscode";
-			sourceTree = "<group>";
-		};
-		31CA906D6E71070FDCC4B28D /* extensions */ = {
-			isa = PBXGroup;
-			children = (
-				2698E51FC4382C2E27F5EDA6 /* runbar-vscode */,
-			);
-			path = extensions;
 			sourceTree = "<group>";
 		};
 		369D90997ED35F1E55ADC0B5 /* RunbarCoreTests */ = {
@@ -229,17 +203,41 @@
 		3D807E313C430C635BCA2CF1 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				D2BD235544BC4D93D198B57A /* flutter-runbar */,
+				D392BA63412F6F864EB8A152 /* macos */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
 		};
-		659ABE429192965375E65FE4 /* agents */ = {
+		480AEC4C9D68AE6CEAF07CA9 /* agents */ = {
 			isa = PBXGroup;
 			children = (
-				6A2C0A687E0FDEB00B0A2C3B /* openai.yaml */,
+				A7944CEBCFACEF9059AFE77F /* openai.yaml */,
 			);
 			path = agents;
+			sourceTree = "<group>";
+		};
+		4AFEF8D999C40A4678A34DA0 /* skills */ = {
+			isa = PBXGroup;
+			children = (
+				FC35A814B2751155007F2E69 /* runbar-diagnostics */,
+			);
+			path = skills;
+			sourceTree = "<group>";
+		};
+		5EB2089870AF5659FE07BA52 /* extensions */ = {
+			isa = PBXGroup;
+			children = (
+				74BAD0CAD02F9F00055733A5 /* runbar-vscode */,
+			);
+			path = extensions;
+			sourceTree = "<group>";
+		};
+		68DAC506A8E1836D0DBA8F3A /* tests */ = {
+			isa = PBXGroup;
+			children = (
+				B8530FA177E150F0B69BC5F6 /* attachment.test.cjs */,
+			);
+			path = tests;
 			sourceTree = "<group>";
 		};
 		6E46135F8D7D378CB421F75C /* Sources */ = {
@@ -250,22 +248,27 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		7AE339EF6DAD3806F5706498 /* skills */ = {
+		74BAD0CAD02F9F00055733A5 /* runbar-vscode */ = {
 			isa = PBXGroup;
 			children = (
-				7C304D7351DDBB6A1B36197F /* runbar-diagnostics */,
+				857823E6D9B2D5CC6A3209DB /* bridge.js */,
+				C01778662BF30B5CB9166230 /* extension.js */,
+				5E138A091944AF9D6E5A067C /* package.json */,
+				7C1649AE856415A1FDD835AE /* README.md */,
+				68DAC506A8E1836D0DBA8F3A /* tests */,
 			);
-			path = skills;
+			path = "runbar-vscode";
 			sourceTree = "<group>";
 		};
-		7C304D7351DDBB6A1B36197F /* runbar-diagnostics */ = {
+		82C28E51A6B09AF15A5EAFE0 /* flutter-runbar */ = {
 			isa = PBXGroup;
 			children = (
-				E843F7341E5B0A609C6A0B71 /* SKILL.md */,
-				659ABE429192965375E65FE4 /* agents */,
-				1C5433C67555F7539EFFB44F /* references */,
+				4817D2557EDF4C9C56F7942B /* README.md */,
+				5EB2089870AF5659FE07BA52 /* extensions */,
+				4AFEF8D999C40A4678A34DA0 /* skills */,
 			);
-			path = "runbar-diagnostics";
+			name = "flutter-runbar";
+			path = ..;
 			sourceTree = "<group>";
 		};
 		87BF212ED71F5E022BBD09EB /* scripts */ = {
@@ -340,20 +343,36 @@
 			path = FlutterRunbar;
 			sourceTree = "<group>";
 		};
+		AFCD3EE6124D921DE610B4BE /* references */ = {
+			isa = PBXGroup;
+			children = (
+				ABBDAF9C85E27FA1E53DDCFA /* setup.md */,
+			);
+			path = references;
+			sourceTree = "<group>";
+		};
 		E75D9717D2FB3E952923DB50 = {
 			isa = PBXGroup;
 			children = (
 				1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */,
-				CE552C978360C0B9FEED0C40 /* README.md */,
-				31CA906D6E71070FDCC4B28D /* extensions */,
+				82C28E51A6B09AF15A5EAFE0 /* flutter-runbar */,
 				3D807E313C430C635BCA2CF1 /* Packages */,
 				250C094D8AC86FF7E0A7DB1B /* Resources */,
 				87BF212ED71F5E022BBD09EB /* scripts */,
-				7AE339EF6DAD3806F5706498 /* skills */,
 				6E46135F8D7D378CB421F75C /* Sources */,
 				9C78DA381C463E93DF22D6F5 /* Tests */,
 				AACE5E493712C470DE29553A /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		FC35A814B2751155007F2E69 /* runbar-diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				F659F388EBF474412B0499A6 /* SKILL.md */,
+				480AEC4C9D68AE6CEAF07CA9 /* agents */,
+				AFCD3EE6124D921DE610B4BE /* references */,
+			);
+			path = "runbar-diagnostics";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

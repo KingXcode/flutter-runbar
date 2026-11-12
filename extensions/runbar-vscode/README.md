@@ -21,10 +21,11 @@ Runbar 使用官方 Dart 调试器直接附加已有 VM，由原来的 Flutter C
 在仓库根目录执行：
 
 ```bash
-python3 scripts/package-vscode-extension.py
+node --test extensions/runbar-vscode/tests/attachment.test.cjs
+python3 macos/scripts/package-vscode-extension.py
 ```
 
-产物：`dist/vscode-bridge/runbar-bridge.vsix` 与版本元数据。标准 Xcode 构建会自动执行同一脚本，将它们嵌入 App，原有 App / DMG 打包入口也会自动携带扩展。不上传源码，不发布到 Marketplace。
+产物：`macos/dist/vscode-bridge/runbar-bridge.vsix` 与版本元数据。标准 Xcode 构建会自动执行同一脚本，将它们嵌入 App，原有 App / DMG 打包入口也会自动携带扩展。不上传源码，不发布到 Marketplace。
 
 如需单独调试扩展，可使用 VS Code 的 Extension Development Host 打开此目录。真实附加调试请使用自己的 Flutter Debug 项目；不要对正在使用的业务 App 做自动断点测试。
 

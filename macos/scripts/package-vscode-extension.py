@@ -14,7 +14,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "extensions" / "runbar-vscode"
+REPOSITORY_ROOT = ROOT.parent
+SOURCE = REPOSITORY_ROOT / "extensions" / "runbar-vscode"
 FILES = ("package.json", "extension.js", "bridge.js", "README.md")
 VSIX_NS = "http://schemas.microsoft.com/developer/vsx-schema/2011"
 CONTENT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"

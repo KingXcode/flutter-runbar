@@ -12,11 +12,12 @@ from pathlib import Path
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY_ROOT = ROOT.parent
 REPO = 'KingXcode/flutter-runbar'
 
 
 def run(*args, optional=False):
-    result = subprocess.run(args, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+    result = subprocess.run(args, cwd=REPOSITORY_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
     if result.returncode and not optional:
         raise RuntimeError(result.stderr.strip()[:1600] or f'{args[0]} 操作失败')
     return result
@@ -47,7 +48,7 @@ def context():
 
 
 def notes():
-    text = (ROOT / 'CHANGELOG.md').read_text()
+    text = (REPOSITORY_ROOT / 'CHANGELOG.md').read_text()
     match = re.search(r'^## 下一版本\s*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
     value = match.group(1).strip() if match else ''
     if len(value) < 80 or len(value.encode()) > 100_000 or '### ' not in value or len(re.findall(r'^- ', value, re.M)) < 2:

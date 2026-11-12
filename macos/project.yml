@@ -1,10 +1,10 @@
 name: FlutterRunbar
 fileGroups:
-  - README.md
+  - ../README.md
   - project.yml
   - scripts
-  - skills
-  - extensions/runbar-vscode
+  - ../skills
+  - ../extensions/runbar-vscode
 options:
   minimumXcodeGenVersion: 2.46.0
   xcodeVersion: "26.0"

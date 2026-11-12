@@ -11,8 +11,9 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY_ROOT = ROOT.parent
 NAME = "runbar-diagnostics"
-SOURCE = ROOT / "skills" / NAME
+SOURCE = REPOSITORY_ROOT / "skills" / NAME
 FILES = ("SKILL.md", "agents/openai.yaml", "references/setup.md")
 
 

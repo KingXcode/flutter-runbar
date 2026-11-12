@@ -10,6 +10,9 @@ jobs:
   capture:
     runs-on: macos-26
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: macos
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       MACOSX_DEPLOYMENT_TARGET: '26.0'
@@ -30,6 +33,6 @@ jobs:
         with:
           name: Runbar-UI-preview
           path: |
-            screenshots/*.png
-            screenshots/provenance.txt
+            macos/screenshots/*.png
+            macos/screenshots/provenance.txt
           retention-days: 3
