@@ -10,6 +10,7 @@ public final class NetworkStore {
     private let readOnly: Bool
     private let readDeadline: TimeInterval?
     private var hasSummaryTiming = false
+    private var hasRewriteSummary = false
     private let diskSpace: NetworkDiskSpaceProvider
     private let access: NetworkCacheAccess
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -61,6 +62,13 @@ public final class NetworkStore {
                     // retain a bounded, read-only timing fallback when viewed.
                     try execute("ALTER TABLE requests ADD COLUMN timing_version INTEGER")
                 }
+                if try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name='rewrite_state'") == 0 {
+                    try execute("ALTER TABLE requests ADD COLUMN rewrite_state TEXT")
+                }
+                if try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name='rewrite_count'") == 0 {
+                    try execute("ALTER TABLE requests ADD COLUMN rewrite_count INTEGER NOT NULL DEFAULT 0")
+                }
+                try execute("CREATE INDEX IF NOT EXISTS requests_rewrite ON requests(rewrite_state,started DESC,id)")
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
                 // Recover an interrupted body save. No partial file is labelled saved.
                 try execute("UPDATE requests SET body_state='unavailable',body_note='上次采集已断开，正文未缓存' WHERE body_state='pending'")
@@ -74,6 +82,7 @@ public final class NetworkStore {
                 try execute("UPDATE cache_info SET value=\(bytes) WHERE key='body_bytes'")
             }
             hasSummaryTiming = try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name='timing_version'") == 1
+            hasRewriteSummary = try number("SELECT count(*) FROM pragma_table_info('requests') WHERE name IN ('rewrite_state','rewrite_count')") == 2
         } catch { close(); throw error }
     }
     public func close() {
@@ -180,10 +189,11 @@ public final class NetworkStore {
                 let metadata = try encoder.encode(record)
                 guard metadata.count <= 96 * 1024 else { throw RunbarError.message("单条网络摘要过大，已暂停接收。") }
                 let stmt = try statement("""
-                    INSERT INTO requests(id,epoch,isolate,request_id,started,ended,method,url,status,failed,metadata,timing_version)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                    INSERT INTO requests(id,epoch,isolate,request_id,started,ended,method,url,status,failed,metadata,timing_version,rewrite_state,rewrite_count)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                     started=excluded.started,method=excluded.method,url=excluded.url,
-                    ended=excluded.ended,status=excluded.status,failed=excluded.failed,metadata=excluded.metadata,timing_version=excluded.timing_version
+                    ended=excluded.ended,status=excluded.status,failed=excluded.failed,metadata=excluded.metadata,timing_version=excluded.timing_version,
+                    rewrite_state=excluded.rewrite_state,rewrite_count=excluded.rewrite_count
                     """)
                 defer { sqlite3_finalize(stmt) }
                 for (index, value) in [record.id, record.epoch, record.isolateID, record.requestID].enumerated() {
@@ -196,6 +206,8 @@ public final class NetworkStore {
                 sqlite3_bind_int(stmt, 10, record.failure == nil ? 0 : 1)
                 _ = metadata.withUnsafeBytes { sqlite3_bind_blob(stmt, 11, $0.baseAddress, Int32(metadata.count), transient) }
                 sqlite3_bind_int(stmt, 12, Int32(clamping: record.timingVersion ?? 0))
+                if let rewrite = record.rewrite { sqlite3_bind_text(stmt, 13, rewrite.state.rawValue, -1, transient) }
+                sqlite3_bind_int(stmt, 14, Int32(clamping: record.rewrite?.count ?? 0))
                 guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
                 if limits.requests != nil && !exists { count += 1 }
             }
@@ -230,6 +242,7 @@ public final class NetworkStore {
             }
         }
         if !query.method.isEmpty { clauses.append("method=?"); values.append(query.method) }
+        if query.onlyRewritten { clauses.append(hasRewriteSummary ? "rewrite_state='changed'" : "0=1") }
         switch query.status {
         case .all: break
         case .pending: clauses.append("ended IS NULL AND failed=0")
@@ -261,7 +274,7 @@ public final class NetworkStore {
         let (predicate, values) = try predicate(for: query)
         try Task.checkCancellation()
         let total = try number("SELECT count(*) FROM requests")
-        let matching = values.isEmpty && query.status == .all ? total : try number("SELECT count(*) FROM requests WHERE " + predicate, values)
+        let matching = values.isEmpty && query.status == .all && !query.onlyRewritten ? total : try number("SELECT count(*) FROM requests WHERE " + predicate, values)
         return NetworkListCounts(total: total, matching: matching)
     }
     public func listWindow(query: NetworkQuery = NetworkQuery(), around row: Int, counts: NetworkListCounts? = nil) throws -> NetworkListWindow {
@@ -279,7 +292,7 @@ public final class NetworkStore {
         // old database index also supports chronological virtual access. Equal
         // timestamps use a stable ID order across windows and point selection.
         let stmt = try statement("""
-            SELECT id,method,url,started,ended,status,failed,\(summaryTiming)
+            SELECT id,method,url,started,ended,status,failed,\(summaryTiming),\(summaryRewrite)
             FROM requests WHERE \(predicate) ORDER BY \(order) LIMIT \(limit) OFFSET \(reversed ? reverseOffset : offset)
             """, values)
         defer { sqlite3_finalize(stmt) }
@@ -292,7 +305,8 @@ public final class NetworkStore {
                 ? Double(max(0, sqlite3_column_int64(stmt, 4) - start)) / 1000 : nil
             rows.append(NetworkRequestSummary(id: text(stmt, 0), method: text(stmt, 1), url: text(stmt, 2), startMicros: start,
                 status: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 5)),
-                failed: sqlite3_column_int(stmt, 6) != 0, durationMS: duration))
+                failed: sqlite3_column_int(stmt, 6) != 0, durationMS: duration,
+                rewriteState: ResponseRewriteSummary.State(rawValue: text(stmt, 8)), rewriteCount: Int(sqlite3_column_int(stmt, 9))))
             step = sqlite3_step(stmt)
         }
         guard step == SQLITE_DONE else { throw storageError() }
@@ -399,7 +413,28 @@ public final class NetworkStore {
     private func bodyURL(_ id: String, response: Bool) -> URL {
         directory.appendingPathComponent("bodies/\(id).\(response ? "response" : "request")")
     }
-    public func bodyPage(_ record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw) throws -> NetworkBodyPage {
+    public func bodyPage(_ record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw,
+                         version: ResponseRewriteBodyVersion = .client) throws -> NetworkBodyPage {
+        if response, record.rewrite?.state == .changed {
+            let artifact: ResponseRewriteArtifact?
+            var note: String?
+            do { artifact = try ResponseRewritePresentation.artifact(directory: directory, summary: record.rewrite) }
+            catch {
+                guard version == .client else { throw error }
+                artifact = nil; note = error.localizedDescription
+            }
+            let data = try bodyData(record, response: true, version: version, artifact: artifact)
+            var result: NetworkBodyPage
+            do { result = try ResponseRewritePresentation.page(data: data, artifact: artifact, version: version, format: format, page: page) }
+            catch {
+                guard version == .client, artifact != nil else { throw error }
+                note = "改写高亮信息不可用：" + error.localizedDescription
+                result = try ResponseRewritePresentation.page(data: data, artifact: nil, version: version, format: format, page: page)
+            }
+            result.rewriteNote = note
+            return result
+        }
+        if response, version == .changes { return NetworkBodyPage(text: "没有实际改变的值。", page: 0, pages: 1, bytes: 0) }
         guard record.bodyState == .saved, record.id.count == 64, record.id.allSatisfy({ $0.isHexDigit }) else {
             let pending = record.isComplete ? "正文正在排队缓存，选中后会优先加载。" : "响应尚未接收完成，完成后将缓存正文。"
             return NetworkBodyPage(text: record.bodyNote.isEmpty ? (record.bodyState == .pending ? pending : record.bodyState.title) : record.bodyNote, page: 0, pages: 1, bytes: 0)
@@ -407,6 +442,19 @@ public final class NetworkStore {
         let handle = try FileHandle(forReadingFrom: bodyURL(record.id, response: response)); defer { try? handle.close() }
         let bytes = Int(try handle.seekToEnd()), chunk = 128 * 1024
         if bytes == 0 { return NetworkBodyPage(text: "", page: 0, pages: 1, bytes: 0) }
+        if response, format != .xml, bytes <= NetworkBodyFormatter.inputLimit {
+            try handle.seek(toOffset: 0)
+            let raw = try handle.read(upToCount: NetworkBodyFormatter.inputLimit + 1) ?? Data()
+            // Preserve the existing raw/binary pagination for non-JSON bodies.
+            // Only a complete JSON document needs field-location metadata.
+            if format == .json || (try? RewriteJSONDocument(raw)) != nil {
+                var result = try ResponseRewritePresentation.page(data: raw, artifact: nil, version: version, format: format, page: page)
+                if record.bodyNote.split(separator: ";").contains(where: { note in
+                    note.contains("response") && ["部分", "前缀", "超限", "不完整", "未完整"].contains(where: note.contains)
+                }) { result.rewriteTargets = [] }
+                return result
+            }
+        }
         if format != .raw {
             guard bytes <= NetworkBodyFormatter.inputLimit else { throw RunbarError.message("正文超过 1 MB，无法格式化。") }
             try handle.seek(toOffset: 0)
@@ -429,6 +477,28 @@ public final class NetworkStore {
         return NetworkBodyPage(text: text, page: page, pages: pages, bytes: bytes)
     }
 
+    public func bodyData(_ record: NetworkRecord, response: Bool, version: ResponseRewriteBodyVersion = .client) throws -> Data {
+        let artifact = response && version == .original && record.rewrite?.state == .changed
+            ? try ResponseRewritePresentation.artifact(directory: directory, summary: record.rewrite) : nil
+        return try bodyData(record, response: response, version: version, artifact: artifact)
+    }
+    private func bodyData(_ record: NetworkRecord, response: Bool, version: ResponseRewriteBodyVersion,
+                          artifact: ResponseRewriteArtifact?) throws -> Data {
+        if response && version == .original, let artifact { return artifact.originalBody }
+        guard record.bodyState == .saved, record.id.count == 64, record.id.allSatisfy(\.isHexDigit) else {
+            throw RunbarError.message("正文未完整缓存，无法读取完整样本。")
+        }
+        let url = bodyURL(record.id, response: response)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? .max) <= NetworkBodyFormatter.inputLimit else {
+            throw RunbarError.message("正文超过 1 MB 或缓存文件异常。")
+        }
+        let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
+        let data = try handle.read(upToCount: NetworkBodyFormatter.inputLimit + 1) ?? Data()
+        guard data.count <= NetworkBodyFormatter.inputLimit else { throw RunbarError.message("正文超过 1 MB。") }
+        return data
+    }
+
     func searchSnapshot() throws -> NetworkSearchSnapshot {
         try acquireAccess(); defer { access.release() }
         let versioned = try hasSearchRevision()
@@ -446,7 +516,7 @@ public final class NetworkStore {
         // metadata conditions, so their old match can be removed from the index.
         // Text conditions are evaluated outside this lock too: a rare header
         // match must not turn one batch into a full JSON scan under the gate.
-        var base = NetworkQuery(); base.method = query.method; base.status = query.status
+        var base = NetworkQuery(); base.method = query.method; base.status = query.status; base.onlyRewritten = query.onlyRewritten
         var (predicate, values) = afterRevision == nil ? try predicate(for: base) : ("1=1", [])
         let revision = try hasSearchRevision() ? "search_revision" : "0"
         var range = afterRevision.map { "search_revision>\($0) AND search_revision<=\(throughRevision)" } ?? "rowid>\(afterRow) AND rowid<=\(throughRow)"
@@ -477,7 +547,7 @@ public final class NetworkStore {
         guard !ids.isEmpty else { return [] }
         guard ids.count <= NetworkListWindow.capacity else { throw RunbarError.message("网络摘要窗口过大。") }
         let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
-        let stmt = try statement("SELECT id,method,url,started,ended,status,failed,\(summaryTiming) FROM requests WHERE id IN (\(placeholders))", ids)
+        let stmt = try statement("SELECT id,method,url,started,ended,status,failed,\(summaryTiming),\(summaryRewrite) FROM requests WHERE id IN (\(placeholders))", ids)
         defer { sqlite3_finalize(stmt) }
         var result: [String: NetworkRequestSummary] = [:]
         var step = sqlite3_step(stmt)
@@ -487,7 +557,8 @@ public final class NetworkStore {
             let duration = sqlite3_column_int(stmt, 7) == 2 && sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Double(max(0, sqlite3_column_int64(stmt, 4) - start)) / 1000 : nil
             let item = NetworkRequestSummary(id: text(stmt, 0), method: text(stmt, 1), url: text(stmt, 2), startMicros: start,
                                              status: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 5)),
-                                             failed: sqlite3_column_int(stmt, 6) != 0, durationMS: duration)
+                                             failed: sqlite3_column_int(stmt, 6) != 0, durationMS: duration,
+                                             rewriteState: ResponseRewriteSummary.State(rawValue: text(stmt, 8)), rewriteCount: Int(sqlite3_column_int(stmt, 9)))
             result[item.id] = item; step = sqlite3_step(stmt)
         }
         guard step == SQLITE_DONE else { throw storageError() }
@@ -497,6 +568,7 @@ public final class NetworkStore {
         let legacy = "json_extract(CAST(metadata AS TEXT),'$.timingVersion')"
         return hasSummaryTiming ? "coalesce(timing_version,\(legacy))" : legacy
     }
+    private var summaryRewrite: String { hasRewriteSummary ? "rewrite_state,rewrite_count" : "NULL,0" }
 }
 
 public actor NetworkCacheReader {
@@ -570,8 +642,15 @@ public actor NetworkCacheReader {
     public func request(directory: URL, id: String) async throws -> NetworkRecord? {
         try await read(directory: directory) { try $0.request(id) }
     }
-    public func body(directory: URL, record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw) async throws -> NetworkBodyPage {
-        try await read(directory: directory) { try $0.bodyPage(record, response: response, page: page, format: format) }
+    public func body(directory: URL, record: NetworkRecord, response: Bool, page: Int, format: NetworkBodyFormat = .raw,
+                     version: ResponseRewriteBodyVersion = .client) async throws -> NetworkBodyPage {
+        try await read(directory: directory) { try $0.bodyPage(record, response: response, page: page, format: format, version: version) }
+    }
+    public func bodyData(directory: URL, record: NetworkRecord, response: Bool, version: ResponseRewriteBodyVersion = .client) async throws -> Data {
+        try await read(directory: directory) { try $0.bodyData(record, response: response, version: version) }
+    }
+    public func rewriteArtifact(directory: URL, record: NetworkRecord) throws -> ResponseRewriteArtifact? {
+        try ResponseRewritePresentation.artifact(directory: directory, summary: record.rewrite)
     }
     public func metadata(record: NetworkRecord, section: NetworkDetailSection, format: NetworkBodyFormat, page: Int) throws -> NetworkBodyPage {
         try NetworkDetailPresentation.page(record: record, section: section, format: format, page: page)

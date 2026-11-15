@@ -8,7 +8,7 @@ extension NetworkQuery: Codable {
         let includes: [String]
         let excludes: [String]
     }
-    private enum CodingKeys: String, CodingKey { case groups, keywordMode, jsonConditions, method, status }
+    private enum CodingKeys: String, CodingKey { case groups, keywordMode, jsonConditions, method, status, onlyRewritten }
     public init(from decoder: Decoder) throws {
         self.init()
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -28,6 +28,7 @@ extension NetworkQuery: Codable {
         jsonConditions = try values.decodeIfPresent([NetworkJSONCondition].self, forKey: .jsonConditions) ?? []
         method = try values.decodeIfPresent(String.self, forKey: .method) ?? ""
         status = try values.decodeIfPresent(Status.self, forKey: .status) ?? .all
+        onlyRewritten = try values.decodeIfPresent(Bool.self, forKey: .onlyRewritten) ?? false
         self = try savedSnapshot()
     }
     public func encode(to encoder: Encoder) throws {
@@ -41,9 +42,10 @@ extension NetworkQuery: Codable {
         try values.encode(query.jsonConditions, forKey: .jsonConditions)
         try values.encode(query.method, forKey: .method)
         try values.encode(query.status, forKey: .status)
+        try values.encode(query.onlyRewritten, forKey: .onlyRewritten)
     }
     public var isEmpty: Bool {
-        method.isEmpty && status == .all && jsonConditions.isEmpty && NetworkKeywordScope.allCases.allSatisfy {
+        !onlyRewritten && method.isEmpty && status == .all && jsonConditions.isEmpty && NetworkKeywordScope.allCases.allSatisfy {
             effectiveKeywords(in: $0).isEmpty && effectiveKeywords(in: $0, excluding: true).isEmpty
         }
     }

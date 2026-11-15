@@ -8,7 +8,7 @@ private final class NetworkPanelModel: ObservableObject {
     @Published var query = NetworkQuery() { didSet {
         guard !query.hasSameConditions(as: oldValue) else { return }
         scheduleFilterSave()
-        clearSelection(); window = .empty; visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; countsDirty = true
+        clearSelection(); window = .empty; visibleRow = Int.max; firstVisibleRow = nil; viewportAnchorID = nil; scrollsToLatest = true; countsDirty = true
         scrollRevision += 1; refresh(delay: true)
     } }
     @Published private(set) var window = NetworkListWindow.empty
@@ -22,7 +22,7 @@ private final class NetworkPanelModel: ObservableObject {
         didSet {
             guard followsOutput != oldValue else { return }
             UserDefaults.standard.set(followsOutput, forKey: "networkFollowsOutput")
-            if followsOutput { scrollsToLatest = true; viewportAnchorID = nil; scrollRevision += 1; loadWindow() }
+            if followsOutput { scrollsToLatest = true; firstVisibleRow = nil; viewportAnchorID = nil; scrollRevision += 1; loadWindow() }
         }
     }
     @Published var detail = Detail.overview { didSet { bodyIndex = 0; loadDetail() } }
@@ -33,6 +33,13 @@ private final class NetworkPanelModel: ObservableObject {
         selected.flatMap { URLComponents(string: $0.url)?.queryItems }?.isEmpty == false }
     @Published private(set) var formatError: String?
     @Published private(set) var bodyText = "选择一条请求查看详情"
+    @Published private(set) var bodyAnnotations: [ResponseRewriteAnnotation] = []
+    @Published var responseVersion = ResponseRewriteBodyVersion.client { didSet { bodyIndex = 0; loadDetail() } }
+    @Published var tableMode = false { didSet { bodyIndex = 0; loadDetail() } }
+    @Published private(set) var rewriteTargets: [ResponseRewriteTarget] = []
+    @Published private(set) var responseTables: [ResponseRewriteTable] = []
+    @Published private(set) var tableChanges: [String: [ResponseRewriteChange]] = [:]
+    @Published var selectedTablePath = ""
     @Published private(set) var bodyIndex = 0
     @Published private(set) var bodyPages = 1
     @Published private(set) var bodyBytes = 0
@@ -48,6 +55,7 @@ private final class NetworkPanelModel: ObservableObject {
     private var directory: URL?
     private var sessionID: UUID?
     private var visibleRow = Int.max
+    private(set) var firstVisibleRow: Int?
     private var viewportAnchorID: String?
     private var countsDirty = true
     private var requestedRow: Int?
@@ -106,7 +114,7 @@ private final class NetworkPanelModel: ObservableObject {
     }
     func configure(directory: URL?, sessionID: UUID) {
         if self.sessionID != sessionID {
-            stop(); clearSelection(); window = .empty; visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true; requestedRow = nil
+            stop(); clearSelection(); window = .empty; visibleRow = Int.max; firstVisibleRow = nil; viewportAnchorID = nil; scrollsToLatest = true; requestedRow = nil
             countsDirty = true; scrollRevision += 1
         }
         self.directory = directory; self.sessionID = sessionID; refresh()
@@ -148,6 +156,7 @@ private final class NetworkPanelModel: ObservableObject {
         }
     }
     func viewportChanged(first: Int, last: Int, progress: Double) {
+        firstVisibleRow = window.matching > 0 ? min(max(0, first), window.matching - 1) : nil
         let percent = Int((min(1, max(0, progress)) * 100).rounded())
         if positionPercent != percent { positionPercent = percent }
         visibleRow = first + max(0, last - first) / 2
@@ -163,9 +172,9 @@ private final class NetworkPanelModel: ObservableObject {
         if let requestedRow, abs(requestedRow - visibleRow) < 32 { return }
         loadWindow(scrolling: true)
     }
-    func earliest() { followsOutput = false; visibleRow = 0; viewportAnchorID = nil; scrollsToLatest = false; scrollRevision += 1; loadWindow() }
+    func earliest() { followsOutput = false; visibleRow = 0; firstVisibleRow = 0; viewportAnchorID = nil; scrollsToLatest = false; scrollRevision += 1; loadWindow() }
     func latest() {
-        visibleRow = Int.max; viewportAnchorID = nil; scrollsToLatest = true
+        visibleRow = Int.max; firstVisibleRow = nil; viewportAnchorID = nil; scrollsToLatest = true
         if !followsOutput { followsOutput = true }
         else { scrollRevision += 1; loadWindow() }
     }
@@ -202,20 +211,45 @@ private final class NetworkPanelModel: ObservableObject {
     }
     private func loadDetail() {
         detailTask?.cancel(); loading = false; error = nil; formatError = nil
+        bodyAnnotations = []; responseTables = []; tableChanges = [:]; rewriteTargets = []
         guard let record = selected else { bodyText = "选择一条请求查看详情"; bodyPages = 1; bodyBytes = 0; return }
         bodyPages = 1; bodyBytes = 0
         guard let directory else { return }
         loading = true; bodyText = "正在读取内容…"
         let section = detail, index = bodyIndex, format = bodyFormat, parameters = showsURLParameters
+        let version = responseVersion, wantsTable = tableMode && section == .response && version != .changes
         detailTask = Task { [weak self] in
             guard let self else { return }
             func read(_ format: NetworkBodyFormat) async throws -> NetworkBodyPage {
                 if section == .overview || section == .headers || parameters {
                     return try await reader.metadata(record: record, section: section, format: format, page: index)
                 }
-                return try await reader.body(directory: directory, record: record, response: section == .response, page: index, format: format)
+                return try await reader.body(directory: directory, record: record, response: section == .response, page: index,
+                                             format: format, version: section == .response ? version : .client)
             }
             do {
+                if wantsTable {
+                    let bytes = try await reader.bodyData(directory: directory, record: record, response: true, version: version)
+                    let tables = try await Task.detached(priority: .utility) { try ResponseRewritePresentation.tables(in: bytes) }.value
+                    var changesByCell: [String: [ResponseRewriteChange]] = [:]
+                    do {
+                        if version == .client, let artifact = try await reader.rewriteArtifact(directory: directory, record: record) {
+                            changesByCell = try await Task.detached(priority: .utility) {
+                                try ResponseRewritePresentation.tableChanges(in: bytes, artifact: artifact)
+                            }.value
+                        }
+                    }
+                    catch {
+                        guard !Task.isCancelled else { return }
+                        guard version == .client else { throw error }
+                        self.formatError = "改写记录未完整缓存：\(error.localizedDescription)"
+                    }
+                    guard !Task.isCancelled else { return }
+                    self.responseTables = tables; self.tableChanges = changesByCell
+                    if !tables.contains(where: { $0.path == self.selectedTablePath }) { self.selectedTablePath = tables.first?.path ?? "" }
+                    self.bodyBytes = bytes.count; self.bodyText = tables.isEmpty ? "未识别到表头数组，请切换 JSON 查看。" : ""
+                    self.loading = false; return
+                }
                 let page: NetworkBodyPage
                 do { page = try await read(format) }
                 catch {
@@ -228,10 +262,33 @@ private final class NetworkPanelModel: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
                 self.bodyText = page.text; self.bodyIndex = page.page; self.bodyPages = page.pages; self.bodyBytes = page.bytes; self.loading = false
+                self.bodyAnnotations = page.annotations
+                self.rewriteTargets = section == .response ? page.rewriteTargets : []
+                if let note = page.rewriteNote { self.formatError = [self.formatError, note].compactMap { $0 }.joined(separator: " ") }
             } catch {
                 guard !Task.isCancelled else { return }
                 self.bodyText = error.localizedDescription; self.loading = false
             }
+        }
+    }
+    func rewriteSample(recordID: String, showError: Bool = true) async -> ResponseRewriteSample? {
+        guard let directory else { return nil }
+        let expectedSession = sessionID
+        do {
+            // A context menu belongs to the clicked request, even if the live
+            // list or selection changes while its sample is being read.
+            guard let record = try await reader.request(directory: directory, id: recordID) else {
+                throw RunbarError.message("该请求已不存在。")
+            }
+            let request = try await reader.bodyData(directory: directory, record: record, response: false, version: .client)
+            let response = try await reader.bodyData(directory: directory, record: record, response: true,
+                                                     version: record.rewrite?.state == .changed ? .original : .client)
+            guard !Task.isCancelled, sessionID == expectedSession, self.directory == directory else { return nil }
+            return ResponseRewriteSample(method: record.method, url: record.url, requestBody: request, responseBody: response)
+        } catch {
+            guard !Task.isCancelled, sessionID == expectedSession, self.directory == directory else { return nil }
+            if showError { self.error = "无法读取规则样本：\(error.localizedDescription)" }
+            return nil
         }
     }
     func stop() {
@@ -240,6 +297,18 @@ private final class NetworkPanelModel: ObservableObject {
         let directory = directory
         Task { await reader.cancelContentSearch(directory: directory) }
     }
+}
+
+private enum NetworkPanelLayout: String {
+    case horizontal, vertical
+}
+
+private struct NetworkRewriteEditorRequest: Identifiable {
+    let id = UUID()
+    let projectID: UUID
+    let sample: ResponseRewriteSample?
+    let action: ResponseRewriteAction?
+    let ruleID: UUID?
 }
 
 struct NetworkPanel: View {
@@ -253,6 +322,7 @@ struct NetworkPanel: View {
         return proxyMode ? original?.deletingLastPathComponent().appendingPathComponent("proxy", isDirectory: true) : original
     }
     @StateObject private var data = NetworkPanelModel()
+    @AppStorage("networkPanelLayout") private var panelLayout = NetworkPanelLayout.horizontal
     @State private var confirmingClear = false
     @State private var showingFieldFilters = false
     @State private var showingFilterPresets = false
@@ -263,6 +333,10 @@ struct NetworkPanel: View {
     @State private var jsonValue = ""
     @State private var jsonError: String?
     @State private var jsonExclusion = false
+    @State private var rewriteEditor: NetworkRewriteEditorRequest?
+    @State private var rewriteTask: Task<Void, Never>?
+    @State private var loadingRewriteSample = false
+    private var rewriteProjectID: UUID? { model.config.projects.first { $0.path == session.projectPath }?.id }
     private var enabled: Bool { model.networkCaptureEnabled(for: session) }
     private var sourceExists: Bool {
         if let id = session.attachment?.application.id { return model.applications.contains { $0.id == id } }
@@ -274,6 +348,7 @@ struct NetworkPanel: View {
             HStack(spacing: 7) {
                 if proxyMode {
                     Text("代理 HTTP / HTTPS").font(.caption).foregroundStyle(.secondary)
+                    Toggle("只看已改写", isOn: $data.query.onlyRewritten).toggleStyle(.checkbox).fixedSize()
                 } else {
                 Toggle("网络采集", isOn: Binding(get: { enabled }, set: { value in
                     model.setNetworkCaptureEnabled(value, session: session)
@@ -283,6 +358,12 @@ struct NetworkPanel: View {
                     .lineLimit(1).help(state?.text ?? "已缓存的请求可在进程退出后查看")
                 }
                 Spacer(minLength: 0)
+                Picker("布局", selection: $panelLayout) {
+                    Text("左右布局").tag(NetworkPanelLayout.horizontal)
+                    Text("上下布局").tag(NetworkPanelLayout.vertical)
+                }.labelsHidden().frame(width: 100)
+                    .accessibilityLabel("请求与详情布局")
+                    .help("设置请求列表与详情的排列方式，自动记住选择；拖动分隔条调整比例，窄窗口建议使用上下布局")
                 Toggle("跟随", isOn: $data.followsOutput).toggleStyle(.checkbox).fixedSize()
                     .help("跟随最新请求并滚动到底部；向上查看会暂停跟随")
                     .accessibilityLabel("跟随网络请求")
@@ -308,9 +389,12 @@ struct NetworkPanel: View {
             if let error = data.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             if let error = data.filterSaveError { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
             GeometryReader { geometry in
-                if geometry.size.width >= 800 {
+                if panelLayout == .horizontal {
                     HSplitView {
-                        requests.frame(minWidth: 380, idealWidth: geometry.size.width * 0.55,
+                        // Let the list scroll horizontally in a narrow window while
+                        // keeping enough room for the detail controls.
+                        requests.frame(minWidth: min(200, max(0, geometry.size.width - 301)),
+                                       idealWidth: geometry.size.width * 0.55,
                                        maxWidth: .infinity, maxHeight: .infinity)
                         details.frame(minWidth: 300, idealWidth: geometry.size.width * 0.45,
                                       maxWidth: .infinity, maxHeight: .infinity)
@@ -339,6 +423,7 @@ struct NetworkPanel: View {
                 .help(proxyMode ? "只读取经过本次代理的请求。列表最多保留 256 条摘要；选中后读取详情，每个正文最多保留 1 MB，截断和压缩编码说明见概览。TLS 透传只记录 CONNECT；开启解密并信任证书后才能读取 HTTPS 内容。" : "请求摘要和正文按需保存在磁盘。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。DevTools 支持 Dart VM 的 HTTP / HTTPS；WebSocket 请使用独立代理抓包模式。")
         }.controlSize(.small)
             .task(id: session.id) {
+                if !proxyMode { data.query.onlyRewritten = false }
                 data.configure(directory: captureDirectory, sessionID: session.id)
             }
             .onChange(of: monitor.revision) { _, _ in if !proxyMode { data.refresh() } }
@@ -346,13 +431,69 @@ struct NetworkPanel: View {
             .onChange(of: data.selectedID) { _, id in
                 if !proxyMode, let id { monitor.prioritizeBody(id, sessionID: session.id) }
             }
-            .onDisappear { data.stop() }
+            .onDisappear { rewriteTask?.cancel(); loadingRewriteSample = false; data.stop() }
+            .sheet(item: $rewriteEditor) { request in
+                ResponseRewriteRulesView(model: model, projectID: request.projectID, sample: request.sample,
+                                         initialAction: request.action, editingRuleID: request.ruleID)
+            }
             .confirmationDialog("清理目标采集缓冲？", isPresented: $confirmingClear) {
                 Button("清理目标缓冲", role: .destructive) { monitor.clearTargetBuffer(session.id) }
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("这会同时清理 DevTools 中的网络记录，并使正在进行的请求停止记录。Runbar 的本地历史缓存会保留。")
             }
+    }
+    private func openRewrite(recordID: String, action: ResponseRewriteAction? = nil, ruleID: UUID? = nil) {
+        guard let projectID = rewriteProjectID else { return }
+        rewriteTask?.cancel(); loadingRewriteSample = true
+        rewriteTask = Task {
+            let sample = await data.rewriteSample(recordID: recordID, showError: ruleID == nil)
+            guard !Task.isCancelled else { return }
+            loadingRewriteSample = false
+            if sample != nil || ruleID != nil {
+                rewriteEditor = NetworkRewriteEditorRequest(projectID: projectID, sample: sample, action: action, ruleID: ruleID)
+            }
+        }
+    }
+    private func rewriteMenu(recordID: String, method: String, url: String, target: ResponseRewriteTarget? = nil) -> NSMenu? {
+        guard proxyMode, let projectID = rewriteProjectID else { return nil }
+        let menu = NSMenu(); menu.autoenablesItems = false
+        if let target {
+            let title = target.action.kind == .table ? "整列：\(target.action.column)" : "字段：\(target.path)"
+            let label = NSMenuItem(title: String(title.prefix(100)), action: nil, keyEquivalent: "")
+            label.isEnabled = false; label.toolTip = title; menu.addItem(label)
+        }
+        let title = target.map { $0.action.kind == .table ? "新建整列改写规则…" : "新建字段改写规则…" } ?? "响应改写…"
+        menu.addItem(NetworkRewriteMenuItem(title: title) { openRewrite(recordID: recordID, action: target?.action) })
+        let rules = model.config.projects.first { $0.id == projectID }?.responseRewrite?.rules.filter { rule in
+            guard rule.method.isEmpty || rule.method.uppercased() == method.uppercased() else { return false }
+            let pattern = rule.urlPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch rule.urlMode {
+            case .full: return url == pattern
+            case .contains: return !pattern.isEmpty && url.contains(pattern)
+            case .path:
+                let path = URLComponents(string: url)?.percentEncodedPath ?? ""
+                return (path.isEmpty ? "/" : path) == pattern
+            }
+        } ?? []
+        if !rules.isEmpty {
+            let item = NSMenuItem(title: target == nil ? "编辑此接口的规则" : "编辑或添加到已有规则", action: nil, keyEquivalent: "")
+            let submenu = NSMenu(); submenu.autoenablesItems = false
+            for rule in rules {
+                let option = NetworkRewriteMenuItem(title: rule.name) {
+                    openRewrite(recordID: recordID, action: target?.action, ruleID: rule.id)
+                }
+                option.toolTip = "保留此规则的请求条件和备注；保存后应用到后续请求。"
+                submenu.addItem(option)
+            }
+            item.submenu = submenu; menu.addItem(item)
+        }
+        return menu
+    }
+    private var responseRewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)? {
+        guard proxyMode, rewriteProjectID != nil, data.detail == .response,
+              data.responseVersion != .changes, !data.loading, let record = data.selected else { return nil }
+        return { target in rewriteMenu(recordID: record.id, method: record.method, url: record.url, target: target) }
     }
     private var contentSearch: some View {
         NetworkKeywordEditor(query: $data.query, scope: .everywhere, placeholder: "搜索全部内容，回车添加关键词")
@@ -520,8 +661,10 @@ struct NetworkPanel: View {
         } catch { jsonError = error.localizedDescription }
     }
     private var requests: some View {
-        NetworkRequestsTable(window: data.window, selection: data.selectedRow,
+        NetworkRequestsTable(window: data.window, selection: data.selectedRow, showsRewrite: proxyMode,
                              following: data.followsOutput, scrollRevision: data.scrollRevision, scrollsToLatest: data.scrollsToLatest,
+                             firstVisibleRow: data.firstVisibleRow,
+                             rewriteMenu: { record in rewriteMenu(recordID: record.id, method: record.method, url: record.url) },
                              onSelection: data.select, onViewport: data.viewportChanged) {
             data.followsOutput = false
         }
@@ -537,33 +680,78 @@ struct NetworkPanel: View {
             }
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
     }
-    @ViewBuilder private var details: some View {
-        if data.selected == nil {
-            VStack(spacing: 8) {
-                Image(systemName: "network").font(.title2)
-                Text("选择一条请求查看详情")
-                Text("概览、请求头和正文在选中后读取").font(.caption)
-            }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else { selectedDetails }
+    private var details: some View {
+        // Keep one split-pane root when selection changes. A conditional root
+        // makes NSSplitView replace the pane and recalculate its divider.
+        ZStack {
+            if data.selected == nil {
+                VStack(spacing: 8) {
+                    Image(systemName: "network").font(.title2)
+                    Text("选择一条请求查看详情")
+                    Text("概览、请求头和正文在选中后读取").font(.caption)
+                }.foregroundStyle(.secondary)
+            } else { selectedDetails }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var selectedDetails: some View {
         VStack(spacing: 5) {
+            if proxyMode {
+                HStack(spacing: 6) {
+                    if let rewrite = data.selected?.rewrite {
+                        Label(rewrite.title, systemImage: rewrite.state == .changed ? "pencil.circle.fill" : "info.circle")
+                            .foregroundStyle(rewrite.state == .changed ? Color.orange : Color.secondary).help(rewrite.detail)
+                    }
+                    Spacer(minLength: 0)
+                    Button("以此请求新建规则") {
+                        if let record = data.selected { openRewrite(recordID: record.id) }
+                    }.disabled(rewriteProjectID == nil || data.selected?.bodyState != .saved || loadingRewriteSample)
+                }.font(.caption)
+            }
             Picker("请求详情", selection: $data.detail) {
                 ForEach(NetworkPanelModel.Detail.allCases, id: \.self) { Text($0.title).tag($0) }
             }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("网络请求详情")
+            if proxyMode, data.detail == .response {
+                HStack(spacing: 6) {
+                    Picker("响应版本", selection: $data.responseVersion) {
+                        ForEach(ResponseRewriteBodyVersion.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden()
+                    Toggle("表格", isOn: $data.tableMode).toggleStyle(.checkbox).fixedSize()
+                        .disabled(data.responseVersion == .changes).help("将首行表头的二维数组显示为表格")
+                }
+                if let rewrite = data.selected?.rewrite, let reason = rewrite.reason, !reason.isEmpty {
+                    Text(reason).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             HStack(spacing: 6) {
                 Picker("显示格式", selection: Binding(get: { data.bodyFormat }, set: data.formatBody)) {
                     ForEach([NetworkBodyFormat.json, .xml, .raw], id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 160).disabled(data.selected == nil)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
+                    .disabled(data.selected == nil || (data.detail == .response && (data.tableMode || data.responseVersion == .changes)))
                     .accessibilityLabel("网络正文显示格式")
                     .help("默认 JSON；按当前详情标签记住选择，内容不符合格式时显示原始内容")
                 Spacer(minLength: 0)
                 Toggle("自动换行", isOn: Binding(get: { data.preferences.wrapsLines }, set: data.setWrapsLines))
                     .toggleStyle(.checkbox).fixedSize().help("记住换行设置；关闭时可横向滚动长行")
+                    .disabled(data.detail == .response && data.tableMode && data.responseVersion != .changes)
             }
             if let error = data.formatError { Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(error) }
-            NetworkTextView(text: data.bodyText, wrapsLines: data.preferences.wrapsLines).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if proxyMode, data.detail == .response, data.tableMode, data.responseVersion != .changes,
+               let table = data.responseTables.first(where: { $0.path == data.selectedTablePath }) {
+                if data.responseTables.count > 1 {
+                    Picker("表格位置", selection: $data.selectedTablePath) {
+                        ForEach(data.responseTables, id: \.path) { Text($0.path).tag($0.path) }
+                    }.font(.caption)
+                }
+                ResponseRewriteTableView(table: table,
+                    changesByCell: data.responseVersion == .client ? data.tableChanges : [:],
+                    ruleName: data.selected?.rewrite?.ruleName ?? "", rewriteMenu: responseRewriteMenu)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+            NetworkTextView(text: data.bodyText, wrapsLines: data.preferences.wrapsLines, annotations: data.bodyAnnotations,
+                            rewriteTargets: data.rewriteTargets, rewriteMenu: responseRewriteMenu)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+            }
             if let selected = data.selected, data.detail == .request || data.detail == .response || data.bodyPages > 1 {
                 HStack(spacing: 6) {
                     if data.loading { ProgressView().controlSize(.mini) }
@@ -596,9 +784,12 @@ struct NetworkPanel: View {
 private struct NetworkRequestsTable: NSViewRepresentable {
     let window: NetworkListWindow
     let selection: Int?
+    let showsRewrite: Bool
     let following: Bool
     let scrollRevision: Int
     let scrollsToLatest: Bool
+    let firstVisibleRow: Int?
+    var rewriteMenu: ((NetworkRequestSummary) -> NSMenu?)? = nil
     let onSelection: (Int?) -> Void
     let onViewport: (Int, Int, Double) -> Void
     let onScrollAway: () -> Void
@@ -618,8 +809,10 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         table.rowHeight = 23; table.usesAlternatingRowBackgroundColors = true
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        for (key, title, width) in [("time", "时间", 100.0), ("method", "方法", 60.0), ("url", "地址", 260.0),
-                                     ("status", "状态", 60.0), ("duration", "耗时", 70.0)] {
+        var columns = [("time", "时间", 100.0), ("method", "方法", 60.0), ("url", "地址", 260.0),
+                       ("status", "状态", 60.0), ("duration", "耗时", 70.0)]
+        if showsRewrite { columns.append(("rewrite", "改写", 115.0)) }
+        for (key, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(key)); column.title = title
             column.width = width; column.minWidth = key == "url" ? 100 : width
             column.resizingMask = key == "url" ? [.autoresizingMask, .userResizingMask] : .userResizingMask
@@ -630,6 +823,10 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         scroll.onScrollAway = { [weak coordinator = context.coordinator] in coordinator?.pauseFollowing() }
         verticalScroller.onInteraction = scroll.onScrollAway
         table.onScrollAway = scroll.onScrollAway
+        table.rewriteMenu = { [weak coordinator = context.coordinator] row in
+            guard let coordinator, let record = coordinator.parent.window.row(at: row) else { return nil }
+            return coordinator.parent.rewriteMenu?(record)
+        }
         context.coordinator.observe(scroll)
         return scroll
     }
@@ -660,15 +857,17 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         let navigation = old.scrollRevision != scrollRevision
         if window.matching > 0 && (initialPlacement || navigation || (following && (countChanged || !old.following))) {
             coordinator.positioned = true
-            table.layoutSubtreeIfNeeded()
-            table.scrollRowToVisible(scrollsToLatest ? window.matching - 1 : 0)
+            // A layout change creates a new table. Preserve the paused viewport
+            // instead of treating the new table as a request to jump to the end.
+            let restoringFirstRow = initialPlacement && !following ? firstVisibleRow : nil
+            coordinator.placeViewport(in: table, restoringFirstRow: restoringFirstRow)
             // SwiftUI may resize the initial clip view after this update.
             let revision = scrollRevision
             DispatchQueue.main.async { [weak table, weak coordinator] in
                 guard let table, let coordinator, coordinator.parent.scrollRevision == revision,
                       coordinator.parent.following == following, !coordinator.userPaused || !following, table.numberOfRows > 0 else { return }
                 coordinator.applying = true
-                table.layoutSubtreeIfNeeded(); table.scrollRowToVisible(scrollsToLatest ? table.numberOfRows - 1 : 0)
+                coordinator.placeViewport(in: table, restoringFirstRow: restoringFirstRow)
                 coordinator.applying = false; coordinator.reportViewport()
             }
         } else if !following, let anchor = window.anchorRow, let oldFirstID,
@@ -700,6 +899,18 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         deinit {
             if let observation { NotificationCenter.default.removeObserver(observation) }
             if let frameObservation { NotificationCenter.default.removeObserver(frameObservation) }
+        }
+        func placeViewport(in table: NSTableView, restoringFirstRow: Int?) {
+            table.layoutSubtreeIfNeeded()
+            if let restoringFirstRow, let scroll, table.numberOfRows > 0 {
+                let row = min(max(0, restoringFirstRow), table.numberOfRows - 1)
+                let maximumY = max(table.bounds.minY, table.bounds.maxY - scroll.contentView.bounds.height)
+                let y = min(table.rect(ofRow: row).minY, maximumY)
+                scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: y))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            } else {
+                table.scrollRowToVisible(parent.scrollsToLatest ? table.numberOfRows - 1 : 0)
+            }
         }
         func observe(_ scroll: NSScrollView) {
             self.scroll = scroll; scroll.contentView.postsBoundsChangedNotifications = true; scroll.contentView.postsFrameChangedNotifications = true
@@ -763,12 +974,20 @@ private struct NetworkRequestsTable: NSViewRepresentable {
                                              field.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
             }
             let value: String
+            cell.textField?.textColor = .labelColor
             if let record = parent.window.row(at: row) {
                 switch id.rawValue {
                 case "time": value = Self.formatter.string(from: record.startDate)
                 case "method": value = record.method
                 case "url": value = record.url
                 case "status": value = record.failed ? "失败" : record.status.map(String.init) ?? "Pending"
+                case "rewrite":
+                    switch record.rewriteState {
+                    case .changed: value = "已改写 · \(record.rewriteCount) 处"; cell.textField?.textColor = .systemOrange
+                    case .unchanged: value = "命中，未变化"
+                    case .skipped: value = "改写跳过"
+                    case nil: value = "—"
+                    }
                 default: value = record.durationMS.map { String(format: "%.0f ms", $0) } ?? "—"
                 }
             } else { value = id.rawValue == "url" ? "正在读取…" : "" }
@@ -793,6 +1012,13 @@ private final class NetworkRequestsScroller: NSScroller {
 }
 private final class NetworkRequestTableView: NSTableView {
     var onScrollAway: (() -> Void)?
+    var rewriteMenu: ((Int) -> NSMenu?)?
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        guard row >= 0, let menu = rewriteMenu?(row) else { return super.menu(for: event) }
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        return menu
+    }
     override func keyDown(with event: NSEvent) {
         if [115, 116, 126].contains(event.keyCode) { onScrollAway?() } // Home, Page Up, Up
         super.keyDown(with: event)
@@ -802,7 +1028,13 @@ private final class NetworkRequestTableView: NSTableView {
 struct NetworkTextView: NSViewRepresentable {
     let text: String
     let wrapsLines: Bool
-    final class Coordinator { var wrapsLines: Bool? }
+    var annotations: [ResponseRewriteAnnotation] = []
+    var rewriteTargets: [ResponseRewriteTarget] = []
+    var rewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)? = nil
+    final class Coordinator {
+        var wrapsLines: Bool?
+        var annotations: [ResponseRewriteAnnotation] = []
+    }
     func makeCoordinator() -> Coordinator { Coordinator() }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
         guard let width = proposal.width, let height = proposal.height, width.isFinite, height.isFinite else { return nil }
@@ -810,7 +1042,7 @@ struct NetworkTextView: NSViewRepresentable {
     }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.autohidesScrollers = true
-        let view = NSTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false
+        let view = RewriteNetworkTextView(); view.isEditable = false; view.isSelectable = true; view.isRichText = false
         view.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         view.isAutomaticLinkDetectionEnabled = false; view.textContainerInset = NSSize(width: 8, height: 8)
         view.isHorizontallyResizable = true; view.isVerticallyResizable = true
@@ -821,7 +1053,8 @@ struct NetworkTextView: NSViewRepresentable {
         scroll.documentView = view; return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView else { return }
+        guard let view = scroll.documentView as? RewriteNetworkTextView else { return }
+        view.rewriteTargets = rewriteTargets; view.rewriteMenu = rewriteMenu
         if context.coordinator.wrapsLines != wrapsLines {
             let origin = scroll.contentView.bounds.origin
             context.coordinator.wrapsLines = wrapsLines
@@ -833,11 +1066,88 @@ struct NetworkTextView: NSViewRepresentable {
             if wrapsLines { view.setFrameSize(NSSize(width: max(1, scroll.contentSize.width), height: max(view.frame.height, scroll.contentSize.height))) }
             scroll.contentView.scroll(to: NSPoint(x: wrapsLines ? 0 : origin.x, y: origin.y)); scroll.reflectScrolledClipView(scroll.contentView)
         }
-        if view.string != text {
+        let changedText = view.string != text
+        if changedText {
             view.string = text; view.textColor = .textColor; view.backgroundColor = .textBackgroundColor
             view.scrollRangeToVisible(NSRange(location: 0, length: 0))
         }
+        if changedText || context.coordinator.annotations != annotations {
+            (view as? RewriteNetworkTextView)?.dismissValuePopover()
+            context.coordinator.annotations = annotations
+            if let storage = view.textStorage {
+                storage.beginEditing()
+                let all = NSRange(location: 0, length: storage.length)
+                storage.removeAttribute(.backgroundColor, range: all)
+                storage.removeAttribute(.toolTip, range: all)
+                for item in annotations where item.range.location >= 0 && NSMaxRange(item.range) <= storage.length {
+                    storage.addAttribute(.backgroundColor, value: NSColor.systemOrange.withAlphaComponent(0.22), range: item.range)
+                    storage.addAttribute(.toolTip, value: item.tooltip, range: item.range)
+                }
+                storage.endEditing()
+            }
+        }
     }
+}
+
+private final class RewriteNetworkTextView: NSTextView {
+    var rewriteTargets: [ResponseRewriteTarget] = []
+    var rewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)?
+    private var valuePopover: NSPopover?
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        guard let rewriteMenu, !rewriteTargets.isEmpty, let layoutManager, let textContainer else { return menu }
+        let point = convert(event.locationInWindow, from: nil)
+        let textPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = layoutManager.glyphIndex(for: textPoint, in: textContainer)
+        guard glyph < layoutManager.numberOfGlyphs,
+              layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer).contains(textPoint) else { return menu }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        let selection = selectedRange()
+        let range = selection.length > 0 && NSLocationInRange(index, selection) ? selection : NSRange(location: index, length: 1)
+        guard let target = rewriteTargets.first(where: {
+            $0.range.location <= range.location && NSMaxRange($0.range) >= NSMaxRange(range)
+        }), let actions = rewriteMenu(target) else { return menu }
+        dismissValuePopover()
+        let hadSystemItems = !menu.items.isEmpty
+        let items = actions.items
+        for (offset, item) in items.enumerated() {
+            actions.removeItem(item); menu.insertItem(item, at: offset)
+        }
+        if hadSystemItems { menu.insertItem(.separator(), at: items.count) }
+        return menu
+    }
+    func dismissValuePopover() {
+        valuePopover?.close(); valuePopover = nil
+    }
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        dismissValuePopover()
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        guard index < storage.length, let tooltip = storage.attribute(.toolTip, at: index, effectiveRange: nil) as? String else { return }
+        let label = NSTextView(); label.isEditable = false; label.isSelectable = true; label.string = tooltip
+        label.font = .monospacedSystemFont(ofSize: 12, weight: .regular); label.textContainerInset = NSSize(width: 10, height: 10)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 380, height: 180))
+        scroll.hasVerticalScroller = true; scroll.documentView = label
+        label.frame = scroll.bounds; label.autoresizingMask = [.width]; label.textContainer?.widthTracksTextView = true
+        let controller = NSViewController(); controller.view = scroll
+        let popover = NSPopover(); popover.behavior = .transient; popover.contentViewController = controller
+        popover.show(relativeTo: NSRect(x: point.x, y: point.y, width: 1, height: 1), of: self, preferredEdge: .maxY)
+        valuePopover = popover
+    }
+}
+
+/// The menu owns the closure and its immutable request/field snapshot.
+private final class NetworkRewriteMenuItem: NSMenuItem {
+    private let handler: () -> Void
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func invoke() { handler() }
 }
 
 /// Drafts filter live; committing them as chips does not restart the same search.

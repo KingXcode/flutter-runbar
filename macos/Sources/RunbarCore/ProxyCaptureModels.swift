@@ -20,9 +20,12 @@ public struct ProxyLaunchConfiguration: Sendable {
     public let addon: URL
     public let certificateDirectory: URL
     public let decryptTLS: Bool
-    public init(executable: URL, addon: URL, certificateDirectory: URL, decryptTLS: Bool) {
+    public let rewriteSettings: ResponseRewriteSettings
+    public init(executable: URL, addon: URL, certificateDirectory: URL, decryptTLS: Bool,
+                rewriteSettings: ResponseRewriteSettings = ResponseRewriteSettings()) {
         self.executable = executable; self.addon = addon
         self.certificateDirectory = certificateDirectory; self.decryptTLS = decryptTLS
+        self.rewriteSettings = rewriteSettings
     }
     public struct BundledEngine: Sendable {
         public let executable: URL
@@ -106,6 +109,7 @@ struct ProxyHTTPRecord: Decodable {
     let complete: Bool
     let failure: String?
     let note: String
+    let rewrite: ResponseRewriteSummary?
 }
 
 public struct ProxyWebSocketEvent: Codable, Equatable, Identifiable, Sendable {

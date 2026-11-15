@@ -43,6 +43,7 @@ struct NetworkContentMatcher {
         if !hits(query.effectiveKeywords(in: .url, excluding: true), in: [record.url]).isEmpty ||
             !hits(query.effectiveKeywords(in: .headers, excluding: true), in: [record.requestHeaders, record.responseHeaders]).isEmpty { return false }
         if !query.method.isEmpty && record.method != query.method { return false }
+        if query.onlyRewritten && record.rewrite?.state != .changed { return false }
         switch query.status {
         case .all: break
         case .pending: if record.endMicros != nil || record.failure != nil { return false }

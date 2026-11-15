@@ -11,6 +11,7 @@ struct ProxyCaptureSettingsView: View {
     @State private var executable: String
     @State private var error: String?
     @State private var showingCertificateSetup = false
+    @State private var showingRewriteRules = false
     init(model: AppModel, projectID: UUID?) {
         self.model = model; self.projectID = projectID
         certificates = model.proxyCertificates
@@ -26,6 +27,7 @@ struct ProxyCaptureSettingsView: View {
                 Toggle("下次运行时开启代理抓包", isOn: $options.enabled)
                 Toggle("解密 HTTPS / WSS", isOn: $options.decryptTLS)
                     .disabled(!options.enabled)
+                Button("响应改写规则…", systemImage: "pencil.line") { showingRewriteRules = true }
             }
             Text("现有 DevTools 采集继续独立工作。代理监听本机随机端口，只为该次运行注入 HTTP_PROXY / HTTPS_PROXY 和本机绕过规则。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -92,6 +94,9 @@ struct ProxyCaptureSettingsView: View {
             .sheet(isPresented: $showingCertificateSetup) {
                 ProxyCertificateSetupView(model: model, preferredEngine: executable)
             }
+            .sheet(isPresented: $showingRewriteRules) {
+                if let projectID { ResponseRewriteRulesView(model: model, projectID: projectID) }
+            }
     }
 }
 
@@ -104,7 +109,9 @@ struct NetworkWorkspaceView: View {
     @State private var status: ProxyCaptureStatus?
     @State private var showingSettings = false
     @State private var showingCertificates = false
+    @State private var showingRewriteRules = false
     private var directory: URL? { monitor.directory(session.id)?.deletingLastPathComponent().appendingPathComponent("proxy", isDirectory: true) }
+    private var rewriteProjectID: UUID? { model.config.projects.first { $0.path == session.projectPath }?.id }
     var body: some View {
         VStack(spacing: 6) {
             ViewThatFits(in: .horizontal) {
@@ -163,6 +170,8 @@ struct NetworkWorkspaceView: View {
             ProxyCaptureSettingsView(model: model, projectID: model.selectedProject)
         }.sheet(isPresented: $showingCertificates) {
             ProxyCertificateSetupView(model: model)
+        }.sheet(isPresented: $showingRewriteRules) {
+            if let rewriteProjectID { ResponseRewriteRulesView(model: model, projectID: rewriteProjectID) }
         }
     }
     private var sourcePicker: some View {
@@ -182,6 +191,9 @@ struct NetworkWorkspaceView: View {
     @ViewBuilder private var captureActions: some View {
         if source != .devtools {
             HStack(spacing: 8) {
+                if source == .proxyHTTP, rewriteProjectID != nil {
+                    Button("响应改写…", systemImage: "pencil.line") { showingRewriteRules = true }
+                }
                 if let info = session.proxyCapture {
                     Menu {
                         Button("复制代理地址") { model.copy(info.address) }

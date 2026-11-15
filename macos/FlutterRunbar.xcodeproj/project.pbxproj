@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */; };
 		0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */; };
+		0F9FDE1EF66B0ABC829937E2 /* ResponseRewriteRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C553E7B73932BAA14A49BD /* ResponseRewriteRulesView.swift */; };
 		10C4D1895C3B2CAA0F66E7AA /* ProxyCapture in Resources */ = {isa = PBXBuildFile; fileRef = A82ED9E8049F41FA3FC23F7B /* ProxyCapture */; };
 		1611435DCCFF242E2BC1984D /* ProxyWebSocketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */; };
 		185E2F1691064BF4B56B5FD4 /* CommandTemplateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C076A609800F0FDA1D9078 /* CommandTemplateTests.swift */; };
@@ -20,12 +21,16 @@
 		286543A4D6837C33E0AE35DF /* LogToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC0C281B047474B3C8BE784 /* LogToolsView.swift */; };
 		2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */; };
 		2FD9F32F403D0A15B3323FF5 /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00F11F8B14F56EE3FC71ABC5 /* RunbarCore */; };
+		303A8714788EA201D8693470 /* ResponseRewriteConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B87876FFB362A66EAC1C86F /* ResponseRewriteConfigurationTests.swift */; };
 		30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */; };
+		32DAA46FEE114B7B04DDD290 /* ResponseRewriteTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 213E52395995E13605E144E8 /* ResponseRewriteTableView.swift */; };
 		34F9B6C645757DFEBE7BA0CF /* CommandWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A3736C08E4A75FBFA6E44B /* CommandWorkflowTests.swift */; };
 		353D314D835C4E208E2BEB89 /* ProxyCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */; };
 		401D7E552F16054EE4A4F086 /* MCPSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */; };
 		40E0446C1C3DE04FA930CF84 /* AppUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */; };
 		40F412B2C27004A0C2C9EEBF /* ApplicationAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEDC744D1665B221E74EDBA /* ApplicationAttachmentTests.swift */; };
+		418EC62F378BB8C531E355C1 /* ResponseRewriteControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E540F29C1144CD12138EED4F /* ResponseRewriteControlTests.swift */; };
+		4A9563385E82FD39344C02DB /* ResponseRewriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC85D283E3268B23D4977AF7 /* ResponseRewriteTests.swift */; };
 		4BD6F6FFC869E18D5D29F08F /* CoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */; };
 		4EDB6BE64B2DB4C3A7500F9F /* RunbarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1B09A9BEC3631911D658F3A4 /* RunbarCore */; };
 		50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF95A87D2186443FE029E19 /* ManagerView.swift */; };
@@ -66,11 +71,14 @@
 		0259B89035C845E7CB5B9EA7 /* FlutterRunbarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterRunbarApp.swift; sourceTree = "<group>"; };
 		0507F5A68FBACFD46C45EFA5 /* AppUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateTests.swift; sourceTree = "<group>"; };
 		08AD1E3D66101DD3C3D99005 /* LogResponsivenessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogResponsivenessProbe.swift; sourceTree = "<group>"; };
+		09140437B5664F2CF766D738 /* test-response-rewrite.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "test-response-rewrite.py"; sourceTree = "<group>"; };
 		0C6F66E99688501B309B2459 /* capture-real-menu.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-real-menu.sh"; sourceTree = "<group>"; };
 		1023E627F98907FA69966F18 /* capture-main-themes.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-main-themes.sh"; sourceTree = "<group>"; };
 		1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPanel.swift; sourceTree = "<group>"; };
+		1B87876FFB362A66EAC1C86F /* ResponseRewriteConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseRewriteConfigurationTests.swift; sourceTree = "<group>"; };
 		1CFFCE3C8B09DF8FCDFD0BC3 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		1E30B83948A472ACDB7F7876 /* SkillInstallationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallationTests.swift; sourceTree = "<group>"; };
+		213E52395995E13605E144E8 /* ResponseRewriteTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseRewriteTableView.swift; sourceTree = "<group>"; };
 		2DF9884D0BCE337A77F2DC2C /* GlobalShortcutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutTests.swift; sourceTree = "<group>"; };
 		2EDF9D9BCA4CF61871014EE5 /* GlobalHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKey.swift; sourceTree = "<group>"; };
 		3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateView.swift; sourceTree = "<group>"; };
@@ -106,6 +114,7 @@
 		A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsView.swift; sourceTree = "<group>"; };
 		A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRunnerTests.swift; sourceTree = "<group>"; };
 		A7944CEBCFACEF9059AFE77F /* openai.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = openai.yaml; sourceTree = "<group>"; };
+		A7C553E7B73932BAA14A49BD /* ResponseRewriteRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseRewriteRulesView.swift; sourceTree = "<group>"; };
 		A82ED9E8049F41FA3FC23F7B /* ProxyCapture */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ProxyCapture; path = Resources/ProxyCapture; sourceTree = SOURCE_ROOT; };
 		A83D3B952529FB3AA8C4D69B /* HistoryManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryManagementTests.swift; sourceTree = "<group>"; };
 		A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPLocalServer.swift; sourceTree = "<group>"; };
@@ -117,6 +126,7 @@
 		B637E5526FA142797BA3D836 /* capture-preview.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "capture-preview.sh"; sourceTree = "<group>"; };
 		B8530FA177E150F0B69BC5F6 /* attachment.test.cjs */ = {isa = PBXFileReference; path = attachment.test.cjs; sourceTree = "<group>"; };
 		B8D4FBB3FDC5553663E728E4 /* install-desktop-app.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "install-desktop-app.swift"; sourceTree = "<group>"; };
+		BC85D283E3268B23D4977AF7 /* ResponseRewriteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseRewriteTests.swift; sourceTree = "<group>"; };
 		BCEA8961B1D72C5604F4C21A /* MCPClientInstallationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClientInstallationView.swift; sourceTree = "<group>"; };
 		BEC4844EA1FB283BAA93DA69 /* test-process.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "test-process.sh"; sourceTree = "<group>"; };
 		C01778662BF30B5CB9166230 /* extension.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = extension.js; sourceTree = "<group>"; };
@@ -128,6 +138,7 @@
 		D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunbarMCPTests.swift; sourceTree = "<group>"; };
 		DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		DD340E943AAB2D530526BC21 /* CoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinatorTests.swift; sourceTree = "<group>"; };
+		E540F29C1144CD12138EED4F /* ResponseRewriteControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseRewriteControlTests.swift; sourceTree = "<group>"; };
 		E7BFEB43B6014220053D5928 /* package-proxy-engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-proxy-engine.py"; sourceTree = "<group>"; };
 		E91FD1FD1CEB678C2044E072 /* package-vscode-extension.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "package-vscode-extension.py"; sourceTree = "<group>"; };
 		E9E91A8AC78EF57630D7F63F /* LogFileReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogFileReaderTests.swift; sourceTree = "<group>"; };
@@ -191,6 +202,9 @@
 				A5EB5CC40A7AC202A1857F66 /* ParallelRunnerTests.swift */,
 				F989F55D837BC0137D8965AC /* ProjectKindTests.swift */,
 				49B04342B7829A3B452DBE4E /* ProxyCaptureTests.swift */,
+				1B87876FFB362A66EAC1C86F /* ResponseRewriteConfigurationTests.swift */,
+				E540F29C1144CD12138EED4F /* ResponseRewriteControlTests.swift */,
+				BC85D283E3268B23D4977AF7 /* ResponseRewriteTests.swift */,
 				F4167257E0AFE46828D985BB /* RunbarMCPQueueTests.swift */,
 				D8AF5C1466267B47D2A77DB2 /* RunbarMCPTests.swift */,
 				D505F3E399CD118AE9D2FCA8 /* RunnerTests.swift */,
@@ -288,6 +302,7 @@
 				B4176923BDDEAA2C43B750A0 /* proxy-engine.lock.json */,
 				876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */,
 				BEC4844EA1FB283BAA93DA69 /* test-process.sh */,
+				09140437B5664F2CF766D738 /* test-response-rewrite.py */,
 				84EF4C574DCE54515DB406A3 /* test-websocket-send.py */,
 			);
 			path = scripts;
@@ -334,6 +349,8 @@
 				4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */,
 				69EB033A63E002DAD68DC714 /* ProxyCertificateView.swift */,
 				F677F48F4E29DFA478D12C43 /* ProxyWebSocketView.swift */,
+				A7C553E7B73932BAA14A49BD /* ResponseRewriteRulesView.swift */,
+				213E52395995E13605E144E8 /* ResponseRewriteTableView.swift */,
 				7D68EEBA0F2E05E9784CDCB2 /* SandboxResetPermissionAlert.swift */,
 				7001D7B865B8FBC28CED350E /* SkillInstallationModel.swift */,
 				72B662222D3907E6DAE2ABF0 /* SkillInstallationView.swift */,
@@ -568,6 +585,8 @@
 				199BF03FDD090A2E33451B92 /* ProxyCaptureView.swift in Sources */,
 				D5E22A1C7780B655D50CCD62 /* ProxyCertificateView.swift in Sources */,
 				1611435DCCFF242E2BC1984D /* ProxyWebSocketView.swift in Sources */,
+				0F9FDE1EF66B0ABC829937E2 /* ResponseRewriteRulesView.swift in Sources */,
+				32DAA46FEE114B7B04DDD290 /* ResponseRewriteTableView.swift in Sources */,
 				5FDBEEB3FC0A3E3BBAE6B8B6 /* SandboxResetPermissionAlert.swift in Sources */,
 				2160FF7D851013281722688C /* SkillInstallationModel.swift in Sources */,
 				2E23174A7AEF2F3821B7D4F1 /* SkillInstallationView.swift in Sources */,
@@ -597,6 +616,9 @@
 				30EE754A853EA70C35337AAF /* ParallelRunnerTests.swift in Sources */,
 				E2AC6292CA7B2E26238B39C0 /* ProjectKindTests.swift in Sources */,
 				353D314D835C4E208E2BEB89 /* ProxyCaptureTests.swift in Sources */,
+				303A8714788EA201D8693470 /* ResponseRewriteConfigurationTests.swift in Sources */,
+				418EC62F378BB8C531E355C1 /* ResponseRewriteControlTests.swift in Sources */,
+				4A9563385E82FD39344C02DB /* ResponseRewriteTests.swift in Sources */,
 				22285D24A8A763BF774F25FF /* RunbarMCPQueueTests.swift in Sources */,
 				9E62AB2D1441582A0A950A36 /* RunbarMCPTests.swift in Sources */,
 				9723BBA5E7083F0F8B6A1973 /* RunnerTests.swift in Sources */,
@@ -714,7 +736,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.20.0;
+				MARKETING_VERSION = 0.21.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -797,7 +819,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.20.0;
+				MARKETING_VERSION = 0.21.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

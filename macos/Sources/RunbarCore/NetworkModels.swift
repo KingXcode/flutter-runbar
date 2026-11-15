@@ -49,6 +49,7 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
     public var timingVersion: Int?
     public var bodyState: NetworkBodyState = .pending
     public var bodyNote = ""
+    public var rewrite: ResponseRewriteSummary? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(startMicros) / 1_000_000) }
     public var durationMS: Double? { timingVersion == 2 ? endMicros.map { Double(max(0, $0 - startMicros)) / 1000 } : nil }
     public var isComplete: Bool { (timingVersion == 2 && endMicros != nil) || failure != nil }
@@ -104,6 +105,7 @@ public struct NetworkQuery: Equatable, Sendable {
     public var jsonConditions: [NetworkJSONCondition] = []
     public var method = ""
     public var status = Status.all
+    public var onlyRewritten = false
     public init() {}
     public var fieldFilterCount: Int {
         [NetworkKeywordScope.url, .headers, .request, .response].filter {
@@ -190,6 +192,11 @@ public struct NetworkRequestSummary: Identifiable, Equatable, Sendable {
     public let status: Int?
     public let failed: Bool
     public let durationMS: Double?
+    public var rewriteState: ResponseRewriteSummary.State? = nil
+    public var rewriteCount = 0
+    public var rewriteTitle: String {
+        rewriteState.map { ResponseRewriteSummary(state: $0, count: rewriteCount).title } ?? ""
+    }
     public var startDate: Date { Date(timeIntervalSince1970: Double(startMicros) / 1_000_000) }
 }
 public struct NetworkListCounts: Equatable, Sendable {
@@ -224,6 +231,9 @@ public struct NetworkBodyPage: Sendable {
     public let page: Int
     public let pages: Int
     public let bytes: Int
+    public var annotations: [ResponseRewriteAnnotation] = []
+    public var rewriteTargets: [ResponseRewriteTarget] = []
+    public var rewriteNote: String? = nil
 }
 
 /// Authentication stays in this ephemeral URL. Never encode it into the cache,

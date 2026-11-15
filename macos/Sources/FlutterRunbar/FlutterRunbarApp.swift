@@ -211,6 +211,8 @@ final class AppModel: ObservableObject {
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
+    @Published private(set) var responseRewriteStatus: [UUID: String] = [:]
+    @Published private(set) var responseRewriteSyncing = Set<UUID>()
     @Published var selectedProject: UUID?
     @Published var selectedApplication: UUID?
     @Published var applicationConnections: [UUID: ApplicationConnectionState] = [:]
@@ -558,7 +560,8 @@ final class AppModel: ObservableObject {
                 error = "抓包引擎不可用。请在「代理抓包」中恢复内置引擎或选择有效的自定义引擎；安装不完整时请重新安装 Runbar。"; return
             }
             proxy = ProxyLaunchConfiguration(executable: executable, addon: addon,
-                certificateDirectory: certificateDirectory, decryptTLS: project.proxyCapture?.decryptTLS == true)
+                certificateDirectory: certificateDirectory, decryptTLS: project.proxyCapture?.decryptTLS == true,
+                rewriteSettings: project.responseRewrite ?? ResponseRewriteSettings())
         }
         coordinator.start(project: project, preset: preset, extraPath: config.extraPath, proxy: proxy)
     }
@@ -627,6 +630,47 @@ final class AppModel: ObservableObject {
         let previous = config.projects[index].proxyCapture
         config.projects[index].proxyCapture = options
         guard persist() else { config.projects[index].proxyCapture = previous; return false }
+        return true
+    }
+    /// Persist first; an apply failure never discards the user's saved rule edits.
+    @discardableResult
+    func saveResponseRewrite(_ settings: ResponseRewriteSettings, projectID: UUID) async -> Bool {
+        guard !responseRewriteSyncing.contains(projectID),
+              let index = config.projects.firstIndex(where: { $0.id == projectID }) else { return false }
+        guard state(for: projectID).phase != .starting else {
+            responseRewriteStatus[projectID] = "代理正在启动，请稍后保存规则。"; return false
+        }
+        let previous = config.projects[index].responseRewrite
+        guard settings.revision == (previous?.revision ?? 0) else {
+            responseRewriteStatus[projectID] = "规则已在其他窗口更新，请重新选择规则后再保存。"; return false
+        }
+        var next = settings
+        next.rules = next.rules.map { rule in
+            var rule = rule; rule.name = rule.name.trimmingCharacters(in: .whitespacesAndNewlines); return rule
+        }
+        do { try ResponseRewriteEngine.validate(settings: next) }
+        catch { responseRewriteStatus[projectID] = error.localizedDescription; return false }
+        next.revision = (previous?.revision ?? 0) + 1
+        config.projects[index].responseRewrite = next
+        guard persist() else {
+            config.projects[index].responseRewrite = previous
+            responseRewriteStatus[projectID] = error ?? "规则保存失败"; return false
+        }
+        guard let session = state(for: projectID).session, session.status == .running,
+              session.proxyCapture != nil, let directory = store?.directory(session.id).appendingPathComponent("proxy", isDirectory: true) else {
+            responseRewriteStatus[projectID] = "已保存，下次开启项目代理时生效。"; return true
+        }
+        responseRewriteSyncing.insert(projectID)
+        responseRewriteStatus[projectID] = "已保存，正在应用到当前代理…"
+        defer { responseRewriteSyncing.remove(projectID) }
+        do {
+            try await ResponseRewriteControl.publish(next, directory: directory)
+            responseRewriteStatus[projectID] = state(for: projectID).session?.id == session.id && state(for: projectID).isBusy
+                ? "已保存并生效，从下一条请求使用新规则。" : "已保存，当前运行已结束；下次开启代理时生效。"
+        } catch {
+            responseRewriteStatus[projectID] = state(for: projectID).session?.id == session.id && state(for: projectID).isBusy
+                ? "已保存，但未确认当前代理生效：\(error.localizedDescription)" : "已保存，当前运行已结束；下次开启代理时生效。"
+        }
         return true
     }
     private func resetSandbox(project: Project) {

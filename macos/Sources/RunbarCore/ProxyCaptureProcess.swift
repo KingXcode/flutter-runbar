@@ -34,6 +34,7 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
             throw RunbarError.message("内置抓包引擎或组件不可用，请重新安装 Runbar，或在高级选项中指定有效的自定义引擎。")
         }
         try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try ResponseRewriteControl.write(configuration.rewriteSettings, directory: directory)
         try fm.createDirectory(at: configuration.certificateDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: configuration.certificateDirectory.path)
         // Preparing the certificate from the guide and starting another project
@@ -46,10 +47,11 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
         process.executableURL = configuration.executable
         process.arguments = ["--quiet", "--mode", "regular", "--listen-host", "127.0.0.1", "--listen-port", "0",
             "--set", "confdir=\(configuration.certificateDirectory.path)", "--set", "connection_strategy=lazy",
-            "--set", "flow_detail=0", "--set", "ssl_insecure=false", "--scripts", configuration.addon.path]
+            "--set", "flow_detail=0", "--set", "ssl_insecure=false", "--set", "stream_large_bodies=1m", "--scripts", configuration.addon.path]
         var environment = ProcessInfo.processInfo.environment
         environment["RUNBAR_PROXY_DECRYPT_TLS"] = configuration.decryptTLS ? "1" : "0"
         environment["RUNBAR_PROXY_CONTROL"] = directory.appendingPathComponent("control").path
+        environment["RUNBAR_PROXY_REWRITE_DIRECTORY"] = directory.appendingPathComponent("rewrite").path
         environment["PYTHONUNBUFFERED"] = "1"
         process.environment = environment
         let output = Pipe(), errors = Pipe()
@@ -166,12 +168,21 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
         if network == nil { network = try NetworkStore(directory: directory) }
         guard let network else { return }
         let id = NetworkRecord.identity(epoch: epoch, isolate: "proxy", request: value.flowID)
-        let record = NetworkRecord(id: id, epoch: epoch, isolateID: "proxy", requestID: value.flowID,
+        var record = NetworkRecord(id: id, epoch: epoch, isolateID: "proxy", requestID: value.flowID,
             method: value.method, url: value.url, startMicros: value.startMicros,
             endMicros: value.endMicros, status: value.status, contentType: value.contentType,
-            requestBytes: value.requestBytes, responseBytes: value.responseBytes,
+            requestBytes: value.requestBytes < 0 ? nil : value.requestBytes,
+            responseBytes: value.responseBytes < 0 ? nil : value.responseBytes,
             requestHeaders: value.requestHeaders, responseHeaders: value.responseHeaders,
             failure: value.failure, timingVersion: 2, bodyNote: value.note)
+        if let rewrite = value.rewrite {
+            guard rewrite.count >= 0, rewrite.count <= 8192,
+                  (rewrite.ruleName?.count ?? 0) <= 80, (rewrite.reason?.utf8.count ?? 0) <= 8192,
+                  rewrite.artifactID.map({ UUID(uuidString: $0) != nil }) ?? true else {
+                throw RunbarError.message("代理改写摘要格式无效。")
+            }
+            record.rewrite = rewrite
+        }
         try network.upsert([record])
         if value.complete {
             if let request = value.requestBody, let response = value.responseBody {

@@ -25,6 +25,8 @@ public struct Project: Codable, Identifiable, Equatable {
     public var networkCaptureEnabled: Bool?
     /// Opt-in proxy applies only to a newly launched command, independently of VM profiling.
     public var proxyCapture: ProxyProjectOptions?
+    /// Saved with the project, independently of captured sessions and their cache.
+    public var responseRewrite: ResponseRewriteSettings?
     // Optional preserves decoding of configurations written before per-project selection.
     public var selectedPresetID: UUID?
     // Virtual built-in keeps legacy JSON and saved custom commands untouched.
@@ -35,7 +37,7 @@ public struct Project: Codable, Identifiable, Equatable {
         self.path = path; self.presets = presets
         self.kind = kind ?? ProjectDetector.detect(at: path)
     }
-    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID, networkCaptureEnabled, proxyCapture }
+    private enum CodingKeys: String, CodingKey { case id, path, presets, kind, selectedPresetID, networkCaptureEnabled, proxyCapture, responseRewrite }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
@@ -45,6 +47,7 @@ public struct Project: Codable, Identifiable, Equatable {
         kind = try values.decodeIfPresent(ProjectKind.self, forKey: .kind) ?? ProjectDetector.detect(at: path)
         networkCaptureEnabled = try values.decodeIfPresent(Bool.self, forKey: .networkCaptureEnabled)
         proxyCapture = try values.decodeIfPresent(ProxyProjectOptions.self, forKey: .proxyCapture)
+        responseRewrite = try values.decodeIfPresent(ResponseRewriteSettings.self, forKey: .responseRewrite)
     }
 }
 public struct Configuration: Codable {

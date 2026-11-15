@@ -101,13 +101,13 @@ public enum NetworkBodyFormatter {
         return result
     }
 
-    static func page(_ data: Data, page: Int, chunk: Int) -> (text: String, page: Int, pages: Int) {
+    static func page(_ data: Data, page: Int, chunk: Int) -> (text: String, page: Int, pages: Int, range: Range<Int>) {
         let pages = max(1, (data.count + chunk - 1) / chunk), page = min(max(0, page), pages - 1)
         // Move the end back to a UTF-8 boundary. The next page starts at that
         // same boundary, so every scalar appears exactly once across pages.
         var lower = min(page * chunk, data.count), upper = min((page + 1) * chunk, data.count)
         while lower > 0 && lower < data.count && data[lower] & 0xC0 == 0x80 { lower -= 1 }
         while upper > lower && upper < data.count && data[upper] & 0xC0 == 0x80 { upper -= 1 }
-        return (String(decoding: data[lower..<upper], as: UTF8.self), page, pages)
+        return (String(decoding: data[lower..<upper], as: UTF8.self), page, pages, lower..<upper)
     }
 }

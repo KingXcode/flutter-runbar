@@ -472,7 +472,7 @@ struct ManagerView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.attachment == nil ? session.command : session.status == .running ? "本次连接" : "应用监听") .font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
-                Text(session.startedAt, format: .dateTime.month().day().hour().minute())
+                Text(session.startedAt.formatted(.dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN"))))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                 SessionBadge(status: session.status, compact: true, attachment: session.attachment != nil)
             }
@@ -506,8 +506,9 @@ struct ManagerView: View {
             }
             if let session = model.session {
                 HStack(spacing: 7) {
-                    Text(session.startedAt.formatted(date: .omitted, time: .standard)).monospacedDigit().fixedSize()
-                        .help(session.startedAt.formatted(date: .complete, time: .standard))
+                    Text(session.startedAt.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(Locale(identifier: "zh_CN"))))
+                        .monospacedDigit().fixedSize()
+                        .help(session.startedAt.formatted(Date.FormatStyle(date: .complete, time: .standard).locale(Locale(identifier: "zh_CN"))))
                     Text(session.command).font(.system(size: 10, design: .monospaced))
                         .lineLimit(1).truncationMode(.middle).help(session.command).frame(maxWidth: .infinity, alignment: .leading)
                     if !session.devToolsURLs.isEmpty {
@@ -669,8 +670,8 @@ struct ManagerView: View {
 
     @ViewBuilder
     private func sessionFacts(_ session: RunSession) -> some View {
-        Text("开始 \(session.startedAt.formatted(date: .abbreviated, time: .standard))")
-        if let end = session.endedAt { Text("结束 \(end.formatted(date: .omitted, time: .standard))") }
+        Text("开始 \(session.startedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(Locale(identifier: "zh_CN"))))")
+        if let end = session.endedAt { Text("结束 \(end.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(Locale(identifier: "zh_CN"))))") }
         if let code = session.exitCode { Text("退出码 \(code)").monospacedDigit() }
     }
 }
