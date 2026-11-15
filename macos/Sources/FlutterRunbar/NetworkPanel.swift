@@ -2,9 +2,46 @@ import SwiftUI
 import AppKit
 import RunbarCore
 
+private enum NetworkDetailTab: Hashable {
+    case section(NetworkDetailSection)
+    case both
+
+    var sections: [NetworkDetailSection] {
+        switch self {
+        case .section(let section): return [section]
+        case .both: return [.request, .response]
+        }
+    }
+
+    func selecting(_ section: NetworkDetailSection) -> Self {
+        guard section == .request || section == .response else { return .section(section) }
+        switch (self, section) {
+        case (.both, .request): return .section(.response)
+        case (.both, .response): return .section(.request)
+        case (.section(.request), .response), (.section(.response), .request): return .both
+        default: return .section(section)
+        }
+    }
+}
+
+private struct NetworkDetailContent {
+    var body: NetworkBodyPage?
+    var loadingPage: Int?
+    var message = ""
+    var formatError: String?
+    var tables: [ResponseRewriteTable] = []
+    var tableBytes = 0
+    var tableChanges: [String: [ResponseRewriteChange]] = [:]
+
+    var text: String { loading ? "正在读取内容…" : body?.text ?? message }
+    var index: Int { loadingPage ?? body?.page ?? 0 }
+    var pages: Int { body?.pages ?? 1 }
+    var bytes: Int { body?.bytes ?? tableBytes }
+    var loading: Bool { loadingPage != nil }
+}
+
 @MainActor
 private final class NetworkPanelModel: ObservableObject {
-    typealias Detail = NetworkDetailSection
     @Published var query = NetworkQuery() { didSet {
         guard !query.hasSameConditions(as: oldValue) else { return }
         scheduleFilterSave()
@@ -25,26 +62,22 @@ private final class NetworkPanelModel: ObservableObject {
             if followsOutput { scrollsToLatest = true; firstVisibleRow = nil; viewportAnchorID = nil; scrollRevision += 1; loadWindow() }
         }
     }
-    @Published var detail = Detail.overview { didSet { bodyIndex = 0; loadDetail() } }
+    @Published var detail = NetworkDetailTab.section(.overview) { didSet {
+        for section in oldValue.sections where !detail.sections.contains(section) {
+            detailTasks.removeValue(forKey: section)?.cancel()
+            detailContents.removeValue(forKey: section)
+        }
+        for section in detail.sections where !oldValue.sections.contains(section) { loadDetail(section) }
+    } }
     @Published private(set) var preferences = UserDefaults.standard.data(forKey: "networkDetailPreferences")
         .flatMap { try? JSONDecoder().decode(NetworkDetailPreferences.self, from: $0) } ?? NetworkDetailPreferences()
-    var bodyFormat: NetworkBodyFormat { preferences.format(for: detail) }
-    var showsURLParameters: Bool { detail == .request && selected?.requestBytes == 0 &&
+    var hasURLParameters: Bool { selected?.requestBytes == 0 &&
         selected.flatMap { URLComponents(string: $0.url)?.queryItems }?.isEmpty == false }
-    @Published private(set) var formatError: String?
-    @Published private(set) var bodyText = "选择一条请求查看详情"
-    @Published private(set) var bodyAnnotations: [ResponseRewriteAnnotation] = []
-    @Published var responseVersion = ResponseRewriteBodyVersion.client { didSet { bodyIndex = 0; loadDetail() } }
-    @Published var tableMode = false { didSet { bodyIndex = 0; loadDetail() } }
-    @Published private(set) var rewriteTargets: [ResponseRewriteTarget] = []
-    @Published private(set) var responseTables: [ResponseRewriteTable] = []
-    @Published private(set) var tableChanges: [String: [ResponseRewriteChange]] = [:]
+    @Published var responseVersion = ResponseRewriteBodyVersion.client { didSet { loadDetail(.response) } }
+    @Published var tableMode = false { didSet { loadDetail(.response) } }
+    @Published private var detailContents: [NetworkDetailSection: NetworkDetailContent] = [:]
     @Published var selectedTablePath = ""
-    @Published private(set) var bodyIndex = 0
-    @Published private(set) var bodyPages = 1
-    @Published private(set) var bodyBytes = 0
     @Published private(set) var error: String?
-    @Published private(set) var loading = false
     @Published private(set) var queryLoading = false
     @Published private(set) var filterPreferences = NetworkFilterPreferences()
     @Published private(set) var filterSaveError: String?
@@ -61,7 +94,7 @@ private final class NetworkPanelModel: ObservableObject {
     private var requestedRow: Int?
     private var windowTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
-    private var detailTask: Task<Void, Never>?
+    private var detailTasks: [NetworkDetailSection: Task<Void, Never>] = [:]
     private var searchRefreshTask: Task<Void, Never>?
     init() {
         guard let bytes = UserDefaults.standard.data(forKey: Self.filterPreferencesKey) else { return }
@@ -117,7 +150,7 @@ private final class NetworkPanelModel: ObservableObject {
             stop(); clearSelection(); window = .empty; visibleRow = Int.max; firstVisibleRow = nil; viewportAnchorID = nil; scrollsToLatest = true; requestedRow = nil
             countsDirty = true; scrollRevision += 1
         }
-        self.directory = directory; self.sessionID = sessionID; refresh()
+        self.directory = directory; self.sessionID = sessionID; reloadDetails(); refresh()
     }
     func refresh(delay: Bool = false) {
         countsDirty = true; loadWindow(delay: delay)
@@ -147,7 +180,7 @@ private final class NetworkPanelModel: ObservableObject {
                     self.selectedRow = window.rows.firstIndex(where: { $0.id == id }).map { window.offset + $0 }
                     let record = try await reader.request(directory: directory, id: id)
                     guard !Task.isCancelled, self.selectedID == id else { return }
-                    if self.selected != record { self.selected = record; self.loadDetail() }
+                    if self.selected != record { self.selected = record; self.reloadDetails() }
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -180,7 +213,7 @@ private final class NetworkPanelModel: ObservableObject {
     }
     func select(row: Int?) {
         selectionTask?.cancel(); selectedRow = row
-        selectedID = nil; selected = nil; bodyIndex = 0; loadDetail()
+        selectedID = nil; selected = nil; error = nil; resetDetails()
         guard let directory, let row else { return }
         let query = query, sessionID = sessionID
         let visibleID = window.row(at: row)?.id
@@ -191,16 +224,24 @@ private final class NetworkPanelModel: ObservableObject {
                 if let visibleID { record = try await reader.request(directory: directory, id: visibleID) }
                 else { record = try await reader.request(directory: directory, query: query, row: row) }
                 guard !Task.isCancelled, self.sessionID == sessionID, self.query.hasSameConditions(as: query), self.selectedRow == row else { return }
-                self.selectedID = record?.id; self.selected = record; self.loadDetail()
+                self.selectedID = record?.id; self.selected = record; self.reloadDetails()
             } catch {
                 guard !Task.isCancelled else { return }; self.error = error.localizedDescription
             }
         }
     }
     private func clearSelection() { select(row: nil) }
-    func moveBody(_ delta: Int) { bodyIndex = min(max(0, bodyIndex + delta), bodyPages - 1); loadDetail() }
-    func formatBody(_ format: NetworkBodyFormat) {
-        preferences.setFormat(format, for: detail); savePreferences(); bodyIndex = 0; loadDetail()
+    func content(for section: NetworkDetailSection) -> NetworkDetailContent {
+        detailContents[section] ?? NetworkDetailContent()
+    }
+    func moveBody(_ delta: Int, in section: NetworkDetailSection) {
+        let current = content(for: section)
+        guard !current.loading else { return }
+        let page = min(max(0, current.index + delta), current.pages - 1)
+        if page != current.index { loadDetail(section, page: page) }
+    }
+    func formatBody(_ format: NetworkBodyFormat, in section: NetworkDetailSection) {
+        preferences.setFormat(format, for: section); savePreferences(); loadDetail(section)
     }
     func setWrapsLines(_ value: Bool) { preferences.wrapsLines = value; savePreferences() }
     private func savePreferences() {
@@ -209,16 +250,21 @@ private final class NetworkPanelModel: ObservableObject {
     func clearFieldFilters() {
         var value = query; value.clearFieldFilters(); query = value
     }
-    private func loadDetail() {
-        detailTask?.cancel(); loading = false; error = nil; formatError = nil
-        bodyAnnotations = []; responseTables = []; tableChanges = [:]; rewriteTargets = []
-        guard let record = selected else { bodyText = "选择一条请求查看详情"; bodyPages = 1; bodyBytes = 0; return }
-        bodyPages = 1; bodyBytes = 0
-        guard let directory else { return }
-        loading = true; bodyText = "正在读取内容…"
-        let section = detail, index = bodyIndex, format = bodyFormat, parameters = showsURLParameters
+    private func resetDetails() {
+        for task in detailTasks.values { task.cancel() }
+        detailTasks.removeAll(); detailContents.removeAll()
+    }
+    private func reloadDetails() {
+        for section in detail.sections { loadDetail(section, page: content(for: section).index) }
+    }
+    private func loadDetail(_ section: NetworkDetailSection, page index: Int = 0) {
+        guard detail.sections.contains(section) else { return }
+        detailTasks.removeValue(forKey: section)?.cancel()
+        guard let record = selected, let directory else { detailContents.removeValue(forKey: section); return }
+        detailContents[section] = NetworkDetailContent(loadingPage: index)
+        let format = preferences.format(for: section), parameters = section == .request && hasURLParameters
         let version = responseVersion, wantsTable = tableMode && section == .response && version != .changes
-        detailTask = Task { [weak self] in
+        detailTasks[section] = Task { [weak self] in
             guard let self else { return }
             func read(_ format: NetworkBodyFormat) async throws -> NetworkBodyPage {
                 if section == .overview || section == .headers || parameters {
@@ -227,14 +273,16 @@ private final class NetworkPanelModel: ObservableObject {
                 return try await reader.body(directory: directory, record: record, response: section == .response, page: index,
                                              format: format, version: section == .response ? version : .client)
             }
+            var content = NetworkDetailContent()
             do {
                 if wantsTable {
                     let bytes = try await reader.bodyData(directory: directory, record: record, response: true, version: version)
+                    try Task.checkCancellation()
                     let tables = try await Task.detached(priority: .utility) { try ResponseRewritePresentation.tables(in: bytes) }.value
-                    var changesByCell: [String: [ResponseRewriteChange]] = [:]
+                    try Task.checkCancellation()
                     do {
                         if version == .client, let artifact = try await reader.rewriteArtifact(directory: directory, record: record) {
-                            changesByCell = try await Task.detached(priority: .utility) {
+                            content.tableChanges = try await Task.detached(priority: .utility) {
                                 try ResponseRewritePresentation.tableChanges(in: bytes, artifact: artifact)
                             }.value
                         }
@@ -242,13 +290,15 @@ private final class NetworkPanelModel: ObservableObject {
                     catch {
                         guard !Task.isCancelled else { return }
                         guard version == .client else { throw error }
-                        self.formatError = "改写记录未完整缓存：\(error.localizedDescription)"
+                        content.formatError = "改写记录未完整缓存：\(error.localizedDescription)"
                     }
                     guard !Task.isCancelled else { return }
-                    self.responseTables = tables; self.tableChanges = changesByCell
+                    content.tables = tables
                     if !tables.contains(where: { $0.path == self.selectedTablePath }) { self.selectedTablePath = tables.first?.path ?? "" }
-                    self.bodyBytes = bytes.count; self.bodyText = tables.isEmpty ? "未识别到表头数组，请切换 JSON 查看。" : ""
-                    self.loading = false; return
+                    content.message = tables.isEmpty ? "未识别到表头数组，请切换 JSON 查看。" : ""
+                    content.tableBytes = bytes.count
+                    self.detailContents[section] = content
+                    return
                 }
                 let page: NetworkBodyPage
                 do { page = try await read(format) }
@@ -258,17 +308,16 @@ private final class NetworkPanelModel: ObservableObject {
                     let reason = error.localizedDescription
                     page = try await read(.raw)
                     guard !Task.isCancelled else { return }
-                    self.formatError = reason + " 当前按原始内容显示，格式偏好保持不变。"
+                    content.formatError = reason + " 当前按原始内容显示，格式偏好保持不变。"
                 }
                 guard !Task.isCancelled else { return }
-                self.bodyText = page.text; self.bodyIndex = page.page; self.bodyPages = page.pages; self.bodyBytes = page.bytes; self.loading = false
-                self.bodyAnnotations = page.annotations
-                self.rewriteTargets = section == .response ? page.rewriteTargets : []
-                if let note = page.rewriteNote { self.formatError = [self.formatError, note].compactMap { $0 }.joined(separator: " ") }
+                content.body = page
+                if let note = page.rewriteNote { content.formatError = [content.formatError, note].compactMap { $0 }.joined(separator: " ") }
             } catch {
                 guard !Task.isCancelled else { return }
-                self.bodyText = error.localizedDescription; self.loading = false
+                content.message = error.localizedDescription
             }
+            self.detailContents[section] = content
         }
     }
     func rewriteSample(recordID: String, showError: Bool = true) async -> ResponseRewriteSample? {
@@ -296,7 +345,7 @@ private final class NetworkPanelModel: ObservableObject {
     }
     func stop() {
         filterSaveTask?.cancel(); filterSaveTask = nil; savePendingFilters()
-        windowTask?.cancel(); selectionTask?.cancel(); detailTask?.cancel(); searchRefreshTask?.cancel()
+        windowTask?.cancel(); selectionTask?.cancel(); searchRefreshTask?.cancel(); resetDetails()
         let directory = directory
         Task { await reader.cancelContentSearch(directory: directory) }
     }
@@ -304,6 +353,47 @@ private final class NetworkPanelModel: ObservableObject {
 
 private enum NetworkPanelLayout: String {
     case horizontal, vertical
+}
+
+/// The native segmented control allows Request and Response to stay selected together.
+private struct NetworkDetailPicker: NSViewRepresentable {
+    @Binding var selection: NetworkDetailTab
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(labels: NetworkDetailSection.allCases.map(\.title), trackingMode: .selectAny,
+                                         target: context.coordinator, action: #selector(Coordinator.selectSegment(_:)))
+        control.controlSize = .small
+        control.setAccessibilityLabel("网络请求详情")
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        Self.updateSelection(control, selection: selection)
+    }
+
+    private static func updateSelection(_ control: NSSegmentedControl, selection: NetworkDetailTab) {
+        for (index, section) in NetworkDetailSection.allCases.enumerated() {
+            control.setSelected(selection.sections.contains(section), forSegment: index)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<NetworkDetailTab>
+        init(selection: Binding<NetworkDetailTab>) { self.selection = selection }
+
+        @objc func selectSegment(_ control: NSSegmentedControl) {
+            let current = selection.wrappedValue
+            guard let changed = NetworkDetailSection.allCases.enumerated().first(where: { index, section in
+                control.isSelected(forSegment: index) != current.sections.contains(section)
+            }) else { return }
+            let next = current.selecting(changed.element)
+            if next != current { selection.wrappedValue = next }
+            updateSelection(control, selection: next)
+        }
+    }
 }
 
 private struct NetworkRewriteEditorRequest: Identifiable {
@@ -326,6 +416,7 @@ struct NetworkPanel: View {
     }
     @StateObject private var data = NetworkPanelModel()
     @AppStorage("networkPanelLayout") private var panelLayout = NetworkPanelLayout.horizontal
+    @AppStorage("networkBodiesLayout") private var bodiesLayout = NetworkPanelLayout.horizontal
     @State private var confirmingClear = false
     @State private var showingFieldFilters = false
     @State private var showingFilterPresets = false
@@ -409,7 +500,8 @@ struct NetworkPanel: View {
                     VSplitView {
                         requests.frame(maxWidth: .infinity, minHeight: 110,
                                        idealHeight: geometry.size.height * 0.55, maxHeight: .infinity)
-                        details.frame(maxWidth: .infinity, minHeight: 120,
+                        details.frame(maxWidth: .infinity, minHeight: data.detail == .both
+                                       ? min(220, max(120, geometry.size.height - 111)) : 120,
                                       idealHeight: geometry.size.height * 0.45, maxHeight: .infinity)
                     }
                 }
@@ -505,7 +597,7 @@ struct NetworkPanel: View {
     }
     private var responseExportItem: (() -> NSMenuItem)? {
         let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client
-        guard data.detail == .response, version != .changes, let record = data.selected,
+        guard version != .changes, let record = data.selected,
               let directory = captureDirectory else { return nil }
         return { exportItem(directory: directory, id: record.id, version: version) }
     }
@@ -545,8 +637,8 @@ struct NetworkPanel: View {
         return menu
     }
     private var responseRewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)? {
-        guard proxyMode, rewriteProjectID != nil, data.detail == .response,
-              data.responseVersion != .changes, !data.loading, let record = data.selected else { return nil }
+        guard proxyMode, rewriteProjectID != nil,
+              data.responseVersion != .changes, !data.content(for: .response).loading, let record = data.selected else { return nil }
         return { target in rewriteMenu(recordID: record.id, method: record.method, url: record.url, target: target) }
     }
     private var contentSearch: some View {
@@ -748,9 +840,7 @@ struct NetworkPanel: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var selectedDetails: some View {
-        let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client
-        let media = data.detail == .response && version != .changes ? data.selected.flatMap(NetworkMediaPreview.Kind.init) : nil
-        return VStack(spacing: 5) {
+        VStack(spacing: 5) {
             if proxyMode {
                 HStack(spacing: 6) {
                     if let rewrite = data.selected?.rewrite {
@@ -763,14 +853,53 @@ struct NetworkPanel: View {
                     }.disabled(rewriteProjectID == nil || data.selected?.bodyState != .saved || loadingRewriteSample)
                 }.font(.caption)
             }
-            Picker("请求详情", selection: $data.detail) {
-                ForEach(NetworkPanelModel.Detail.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("网络请求详情")
-            if proxyMode, data.detail == .response {
+            NetworkDetailPicker(selection: $data.detail).fixedSize()
+                .help("可同时选中 Request 和 Response；再次点击可收起其中一侧")
+            switch data.detail {
+            case .both: combinedDetails
+            case .section(.response): responseDetails
+            case .section(let section): bodyDetails(section)
+            }
+        }.padding(.top, 5)
+    }
+    private var combinedDetails: some View {
+        let layout = bodiesLayout == .horizontal ? AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
+        return VStack(spacing: 5) {
+            HStack(spacing: 6) {
+                wrapToggle
+                Spacer(minLength: 0)
+                Picker("正文布局", selection: $bodiesLayout) {
+                    Text("左右排列").tag(NetworkPanelLayout.horizontal)
+                    Text("上下排列").tag(NetworkPanelLayout.vertical)
+                }.labelsHidden().frame(width: 88)
+                    .accessibilityLabel("请求与响应正文布局")
+                    .help("调整 Request 和 Response 的排列，不影响请求列表的位置")
+            }
+            layout {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("请求 Request", systemImage: "arrow.up.right").font(.caption.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
+                    bodyDetails(.request)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("响应 Response", systemImage: "arrow.down.left").font(.caption.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
+                    responseDetails
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+    private var responseDetails: some View {
+        let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client
+        let media = version != .changes ? data.selected.flatMap(NetworkMediaPreview.Kind.init) : nil
+        return VStack(spacing: 5) {
+            if proxyMode {
                 HStack(spacing: 6) {
-                    Picker("响应版本", selection: $data.responseVersion) {
+                    adaptivePicker("响应版本", selection: $data.responseVersion) {
                         ForEach(ResponseRewriteBodyVersion.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }.pickerStyle(.segmented).labelsHidden()
+                    }
                     Toggle("表格", isOn: $data.tableMode).toggleStyle(.checkbox).fixedSize()
                         .disabled(data.responseVersion == .changes || (media != nil && previewsMedia))
                         .help("将首行表头的二维数组显示为表格")
@@ -781,14 +910,17 @@ struct NetworkPanel: View {
             }
             if let media, let record = data.selected, let directory = captureDirectory {
                 HStack(spacing: 6) {
-                    Picker("响应显示方式", selection: $previewsMedia) {
+                    adaptivePicker("响应显示方式", selection: $previewsMedia) {
                         Text("预览").tag(true)
                         Text("正文").tag(false)
-                    }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                    }
                     Spacer()
-                    Button("导出…", systemImage: "square.and.arrow.down") {
+                    Button {
                         exportResponse(directory: directory, id: record.id, version: version)
-                    }.disabled(exportingResponse)
+                    } label: {
+                        Label("导出…", systemImage: "square.and.arrow.down")
+                            .labelStyle(.iconOnly)
+                    }.disabled(exportingResponse).help("导出响应文件")
                 }
                 if previewsMedia {
                     NetworkMediaPreview(kind: media, record: record) {
@@ -798,62 +930,79 @@ struct NetworkPanel: View {
                             .disabled(exportingResponse)
                     }
                 } else {
-                    bodyDetails
+                    bodyDetails(.response)
                 }
             } else {
-                bodyDetails
+                bodyDetails(.response)
             }
-        }.padding(.top, 5)
+        }
     }
-    private var bodyDetails: some View {
-        VStack(spacing: 5) {
+    private func adaptivePicker<Value: Hashable, Options: View>(
+        _ title: String, selection: Binding<Value>, @ViewBuilder options: () -> Options
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            Picker(title, selection: selection, content: options).pickerStyle(.segmented).labelsHidden().fixedSize()
+            Picker(title, selection: selection, content: options).labelsHidden()
+        }
+    }
+    private var wrapToggle: some View {
+        Toggle("自动换行", isOn: Binding(get: { data.preferences.wrapsLines }, set: data.setWrapsLines))
+            .toggleStyle(.checkbox).fixedSize()
+            .help("同时影响请求和响应的文本显示；关闭时可横向滚动长行")
+    }
+    private func bodyDetails(_ section: NetworkDetailSection) -> some View {
+        let content = data.content(for: section)
+        let response = section == .response
+        let showTable = response && proxyMode && data.tableMode && data.responseVersion != .changes
+        let urlParameters = section == .request && data.hasURLParameters
+        return VStack(spacing: 5) {
             HStack(spacing: 6) {
-                Picker("显示格式", selection: Binding(get: { data.bodyFormat }, set: data.formatBody)) {
+                adaptivePicker("\(section.title) 显示格式", selection: Binding(get: { data.preferences.format(for: section) },
+                                                                               set: { data.formatBody($0, in: section) })) {
                     ForEach([NetworkBodyFormat.json, .xml, .raw], id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
-                    .disabled(data.selected == nil || (data.detail == .response && (data.tableMode || data.responseVersion == .changes)))
-                    .accessibilityLabel("网络正文显示格式")
-                    .help("默认 JSON；按当前详情标签记住选择，内容不符合格式时显示原始内容")
+                }.frame(maxWidth: 160, alignment: .leading)
+                    .disabled(data.selected == nil || showTable || (response && data.responseVersion == .changes))
+                    .help("默认 JSON；分别记住各自格式，内容不符合格式时显示原始内容")
                 Spacer(minLength: 0)
-                Toggle("自动换行", isOn: Binding(get: { data.preferences.wrapsLines }, set: data.setWrapsLines))
-                    .toggleStyle(.checkbox).fixedSize().help("记住换行设置；关闭时可横向滚动长行")
-                    .disabled(data.detail == .response && data.tableMode && data.responseVersion != .changes)
+                if data.detail != .both { wrapToggle.disabled(showTable) }
             }
-            if let error = data.formatError { Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(error) }
-            if proxyMode, data.detail == .response, data.tableMode, data.responseVersion != .changes,
-               let table = data.responseTables.first(where: { $0.path == data.selectedTablePath }) {
-                if data.responseTables.count > 1 {
+            if let error = content.formatError { Text(error).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(error) }
+            if showTable, let table = content.tables.first(where: { $0.path == data.selectedTablePath }) {
+                if content.tables.count > 1 {
                     Picker("表格位置", selection: $data.selectedTablePath) {
-                        ForEach(data.responseTables, id: \.path) { Text($0.path).tag($0.path) }
+                        ForEach(content.tables, id: \.path) { Text($0.path).tag($0.path) }
                     }.font(.caption)
                 }
                 ResponseRewriteTableView(table: table,
-                    changesByCell: data.responseVersion == .client ? data.tableChanges : [:],
+                    changesByCell: data.responseVersion == .client ? content.tableChanges : [:],
                     ruleName: data.selected?.rewrite?.ruleName ?? "", rewriteMenu: responseRewriteMenu)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-            NetworkTextView(text: data.bodyText, wrapsLines: data.preferences.wrapsLines, annotations: data.bodyAnnotations,
-                            rewriteTargets: data.rewriteTargets, rewriteMenu: responseRewriteMenu, exportItem: responseExportItem)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+                NetworkTextView(text: content.text, wrapsLines: data.preferences.wrapsLines, annotations: content.body?.annotations ?? [],
+                                rewriteTargets: response ? content.body?.rewriteTargets ?? [] : [],
+                                rewriteMenu: response ? responseRewriteMenu : nil, exportItem: response ? responseExportItem : nil)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
             }
-            if let selected = data.selected, data.detail == .request || data.detail == .response || data.bodyPages > 1 {
+            if let selected = data.selected, section == .request || response || content.pages > 1 {
                 HStack(spacing: 6) {
-                    if data.loading { ProgressView().controlSize(.mini) }
-                    if data.showsURLParameters { Text("URL 参数") }
-                    else if data.detail == .overview || data.detail == .headers { Text("详情") }
+                    if content.loading { ProgressView().controlSize(.mini) }
+                    if urlParameters { Text("URL 参数") }
+                    else if section == .overview || section == .headers { Text("详情") }
                     else if selected.bodyState == .saved {
-                        Text(data.bodyBytes == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: Int64(data.bodyBytes), countStyle: .file))
+                        Text(content.bytes == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: Int64(content.bytes), countStyle: .file))
                     } else if let error = monitor.bodyErrors[selected.id] {
                         Text(error).lineLimit(1).help(error)
                     } else {
                         Text(selected.bodyState == .pending ? (proxyMode ? "等待请求完成后缓存正文" : "等待正文，选中后优先加载") : selected.bodyState.title)
                     }
                     Spacer()
-                    if selected.bodyState == .saved || data.showsURLParameters || data.detail == .overview || data.detail == .headers {
-                        Button { data.moveBody(-1) } label: { Image(systemName: "chevron.left") }.disabled(data.bodyIndex == 0)
-                        Text("\(data.bodyIndex + 1) / \(data.bodyPages)")
-                        Button { data.moveBody(1) } label: { Image(systemName: "chevron.right") }.disabled(data.bodyIndex + 1 >= data.bodyPages)
+                    if selected.bodyState == .saved || urlParameters || section == .overview || section == .headers {
+                        Button { data.moveBody(-1, in: section) } label: { Image(systemName: "chevron.left") }
+                            .accessibilityLabel("\(section.title) 上一页").disabled(content.loading || content.index == 0)
+                        Text(content.loading ? "—" : "\(content.index + 1) / \(content.pages)").monospacedDigit()
+                        Button { data.moveBody(1, in: section) } label: { Image(systemName: "chevron.right") }
+                            .accessibilityLabel("\(section.title) 下一页").disabled(content.loading || content.index + 1 >= content.pages)
                     } else if !proxyMode, monitor.hasConnection(session.id), enabled {
                         Button("重新获取") { monitor.prioritizeBody(selected.id, sessionID: session.id) }
                             .disabled(monitor.loadingBodies.contains(selected.id))
