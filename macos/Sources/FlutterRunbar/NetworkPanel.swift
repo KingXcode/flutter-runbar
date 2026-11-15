@@ -806,7 +806,11 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         scroll.verticalScroller = verticalScroller
         let table = NetworkRequestTableView()
         table.setAccessibilityLabel("网络请求列表（完整历史，从旧到新）")
-        table.rowHeight = 23; table.usesAlternatingRowBackgroundColors = true
+        table.rowHeight = 23
+        // Older matches can be prepended while the viewport stays anchored to
+        // the same request. Row-number striping would flip at an odd shift.
+        table.gridStyleMask = .solidHorizontalGridLineMask
+        table.gridColor = .separatorColor
         table.allowsEmptySelection = true; table.allowsMultipleSelection = false
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         var columns = [("time", "时间", 100.0), ("method", "方法", 60.0), ("url", "地址", 260.0),
@@ -841,14 +845,23 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         let firstOffset = oldFirst.map { scroll.contentView.bounds.minY - table.rect(ofRow: $0).minY } ?? 0
         let initialPlacement = window.matching > 0 && !coordinator.positioned
         if window.matching == 0 { coordinator.positioned = false }
-        let countChanged = !coordinator.initialized || table.numberOfRows != window.matching
-        coordinator.initialized = true
-        if countChanged { table.reloadData() }
-        else if old.window != window {
-            let rows = table.rows(in: scroll.documentVisibleRect)
-            if rows.location != NSNotFound, rows.length > 0 {
-                table.reloadData(forRowIndexes: IndexSet(integersIn: rows.location..<min(window.matching, NSMaxRange(rows))),
-                                 columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+        let countChanged = table.numberOfRows != window.matching
+        if countChanged {
+            NSAnimationContext.runAnimationGroup { animation in
+                animation.duration = 0
+                table.noteNumberOfRowsChanged()
+            }
+        }
+        if old.window.offset != window.offset || old.window.rows != window.rows {
+            // Limit comparisons to the two cached windows. Rows outside them
+            // still show the same placeholder, even when the total grows.
+            var candidates = IndexSet(integersIn: window.offset..<(window.offset + window.rows.count))
+            candidates.insert(integersIn: old.window.offset..<(old.window.offset + old.window.rows.count))
+            let changedRows = IndexSet(candidates.filter {
+                $0 < window.matching && old.window.row(at: $0) != window.row(at: $0)
+            })
+            if !changedRows.isEmpty {
+                table.reloadData(forRowIndexes: changedRows, columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
             }
         }
         if let selection, selection >= 0, selection < window.matching {
@@ -883,7 +896,6 @@ private struct NetworkRequestsTable: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource {
         var parent: NetworkRequestsTable
         var applying = false
-        var initialized = false
         var positioned = false
         var userPaused = false
         private weak var scroll: NSScrollView?

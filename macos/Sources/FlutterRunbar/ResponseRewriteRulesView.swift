@@ -275,25 +275,15 @@ struct ResponseRewriteRulesView: View {
                 Text(quickEntryMessage).font(.caption).foregroundStyle(.secondary)
             }
             ForEach(field(\.actions, fallback: [])) { $action in
-                VStack(alignment: .leading, spacing: 10) {
-                    if targetActionID == action.id {
-                        Label("快捷定位：" + Self.targetDescription(action), systemImage: "scope")
-                            .font(.headline).textSelection(.enabled)
-                        if let quickEntryMessage {
-                            Text(quickEntryMessage).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    RewriteActionEditor(action: $action, sample: suppliedSample,
-                        canDelete: (draft?.actions.count ?? 0) > 1,
-                        onDelete: {
-                            draft?.actions.removeAll { $0.id == action.id }
-                            if targetActionID == action.id { targetActionID = nil; quickEntryMessage = nil }
-                        })
-                }.padding(targetActionID == action.id ? 10 : 0)
-                    .background(targetActionID == action.id ? Color.accentColor.opacity(0.07) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 6))
+                RewriteActionEditor(action: $action, sample: suppliedSample,
+                    isQuickTarget: targetActionID == action.id,
+                    quickEntryMessage: targetActionID == action.id ? quickEntryMessage : nil,
+                    canDelete: (draft?.actions.count ?? 0) > 1,
+                    onDelete: {
+                        draft?.actions.removeAll { $0.id == action.id }
+                        if targetActionID == action.id { targetActionID = nil; quickEntryMessage = nil }
+                    })
                     .id(action.id)
-                if action.id != draft?.actions.last?.id { Divider() }
             }
             Text("仅替换现有值。所有替换项验证成功后一起应用；表头行保持不变。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -461,9 +451,6 @@ struct ResponseRewriteRulesView: View {
         if lhs.kind == .json { return ResponseRewriteEngine.pathsMatch(lhs.path, rhs.path) }
         return ResponseRewriteEngine.pathsEqual(lhs.path, rhs.path) && lhs.column == rhs.column && lhs.headerRow == rhs.headerRow
     }
-    private static func targetDescription(_ action: ResponseRewriteAction) -> String {
-        action.kind == .table ? "\(action.path) · 列「\(action.column)」· 表头第 \(action.headerRow + 1) 行" : action.path
-    }
 }
 
 private struct RewriteJSONEditor: View {
@@ -485,21 +472,88 @@ private struct RewriteJSONEditor: View {
 private struct RewriteActionEditor: View {
     @Binding var action: ResponseRewriteAction
     let sample: ResponseRewriteSample?
+    let isQuickTarget: Bool
+    let quickEntryMessage: String?
     let canDelete: Bool
     let onDelete: () -> Void
     @State private var fields = RewriteSampleFields(data: Data())
+
+    private var targetTitle: String {
+        if action.kind == .table {
+            return action.column.isEmpty ? "未选择表格列" : "\(action.path) · 列「\(action.column)」"
+        }
+        return action.path.isEmpty ? "未填写字段路径" : action.path
+    }
+    private var valuePreview: String {
+        let preview = action.valueJSON.prefix(121)
+        let prefix = String(preview.prefix(120)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prefix.isEmpty else { return "未填写新值" }
+        let singleLine = prefix.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+        return preview.count > 120 ? singleLine + "…" : singleLine
+    }
+    private var cardHeader: some View {
+        HStack(spacing: 9) {
+            Image(systemName: isQuickTarget ? "scope" : action.kind == .table ? "tablecells" : "curlybraces")
+                .foregroundStyle(isQuickTarget ? Color.accentColor : Color.secondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(targetTitle).font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                .lineLimit(1).truncationMode(.head).help(targetTitle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(valuePreview).font(.system(.subheadline, design: .monospaced))
+                .foregroundStyle(.secondary).lineLimit(1)
+                .frame(width: 142, alignment: .leading)
+                .help(valuePreview)
+                .accessibilityLabel("替换为 \(valuePreview)")
+            Button(action: onDelete) { Image(systemName: "minus.circle") }
+                .accessibilityLabel("删除替换项").help("删除此替换项").disabled(!canDelete)
+        }.padding(.horizontal, 12).padding(.vertical, 9)
+            .background(isQuickTarget ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+    }
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader
+            Divider()
+            editor.padding(12)
+        }
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isQuickTarget ? Color.accentColor.opacity(0.55) : Color(nsColor: .separatorColor))
+                .allowsHitTesting(false)
+        }
+        .task(id: sample?.responseBody) {
+            let bytes = sample?.responseBody ?? Data()
+            let suggestions = await Task.detached(priority: .utility) { RewriteSampleFields(data: bytes) }.value
+            guard !Task.isCancelled else { return }
+            fields = suggestions
+        }
+        .onChange(of: action.kind) { _, kind in
+            if kind == .table, let table = fields.tables.first { action.path = table.path; action.column = ""; action.headerRow = 0 }
+        }
+    }
+    private var editor: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let quickEntryMessage {
+                Label(quickEntryMessage, systemImage: "scope")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
+                Text("响应结构").font(.subheadline.weight(.semibold))
                 Picker("响应结构", selection: $action.kind) {
                     ForEach(ResponseRewriteAction.Kind.allCases, id: \.self) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 330)
-                Spacer()
-                Button(action: onDelete) { Image(systemName: "minus.circle") }.help("删除替换项").disabled(!canDelete)
+                }.pickerStyle(.segmented).labelsHidden().fixedSize()
             }
+            Text(action.kind == .table ? "表格路径" : "字段路径").font(.subheadline.weight(.semibold))
             HStack {
                 TextField(action.kind == .table ? "表格路径，例如 $.body.symbols" : "字段路径，例如 $.body.items[*].isClearing", text: $action.path)
                     .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced))
+                    .accessibilityLabel(action.kind == .table ? "表格路径" : "字段路径")
+                    .help(action.kind == .table ? "指向带表头的二维数组。" : "支持 .字段、[下标]、[\"含特殊字符的字段\"] 和 [*]。")
                 if sample != nil {
                     Menu("从样本选择") {
                         if action.kind == .table {
@@ -526,20 +580,8 @@ private struct RewriteActionEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
                 RewriteJSONEditor(title: "仅修改满足条件的数据行（可空）", text: $action.rowConditionsJSON,
                     placeholder: "留空修改全部数据行；例如 {\"code\":\"600000\"}")
-            } else {
-                Text("支持 .字段、[下标]、[\"含特殊字符的字段\"] 和 [*]；只替换已有值。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             RewriteValueEditor(valueJSON: $action.valueJSON)
-        }
-        .task(id: sample?.responseBody) {
-            let bytes = sample?.responseBody ?? Data()
-            let suggestions = await Task.detached(priority: .utility) { RewriteSampleFields(data: bytes) }.value
-            guard !Task.isCancelled else { return }
-            fields = suggestions
-        }
-        .onChange(of: action.kind) { _, kind in
-            if kind == .table, let table = fields.tables.first { action.path = table.path; action.column = ""; action.headerRow = 0 }
         }
     }
 }
@@ -582,7 +624,7 @@ private struct RewriteValueEditor: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("替换成")
+            Text("替换为").font(.subheadline.weight(.semibold))
             HStack(alignment: .top, spacing: 12) {
                 Picker("新值类型", selection: Binding(get: { kind }, set: { next in
                     guard next != kind else { return }
@@ -596,7 +638,8 @@ private struct RewriteValueEditor: View {
                     }
                 })) {
                     ForEach(Kind.allCases, id: \.self) { Text($0.title).tag($0) }
-                }.labelsHidden().frame(width: 170)
+                }.labelsHidden().frame(width: 170, alignment: .leading)
+                    .help("类型会保留：布尔 true 与字符串 \"true\" 不同。")
                 switch kind {
                 case .boolean:
                     Picker("布尔值", selection: $valueJSON) { Text("true").tag("true"); Text("false").tag("false") }
@@ -614,8 +657,6 @@ private struct RewriteValueEditor: View {
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.2)))
                 }
             }
-            Text("类型会保留：布尔 true 与字符串 \"true\" 不同。")
-                .font(.caption).foregroundStyle(.secondary)
         }.onChange(of: valueJSON) { _, value in if !editing { kind = Kind.infer(value) } }
     }
 }
