@@ -52,6 +52,7 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
         environment["RUNBAR_PROXY_DECRYPT_TLS"] = configuration.decryptTLS ? "1" : "0"
         environment["RUNBAR_PROXY_CONTROL"] = directory.appendingPathComponent("control").path
         environment["RUNBAR_PROXY_REWRITE_DIRECTORY"] = directory.appendingPathComponent("rewrite").path
+        environment["RUNBAR_PROXY_DOWNLOAD_DIRECTORY"] = directory.appendingPathComponent("files").path
         environment["PYTHONUNBUFFERED"] = "1"
         process.environment = environment
         let output = Pipe(), errors = Pipe()
@@ -175,6 +176,9 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
             responseBytes: value.responseBytes < 0 ? nil : value.responseBytes,
             requestHeaders: value.requestHeaders, responseHeaders: value.responseHeaders,
             failure: value.failure, timingVersion: 2, bodyNote: value.note)
+        if value.complete, value.failure == nil, let file = value.responseFile, file.isValid {
+            record.responseFile = file
+        }
         if let rewrite = value.rewrite {
             guard rewrite.count >= 0, rewrite.count <= 8192,
                   (rewrite.ruleName?.count ?? 0) <= 80, (rewrite.reason?.utf8.count ?? 0) <= 8192,
@@ -186,8 +190,7 @@ public final class ProxyCaptureProcess: @unchecked Sendable {
         try network.upsert([record])
         if value.complete {
             if let request = value.requestBody, let response = value.responseBody {
-                try network.saveBodies(id, request: request, response: response)
-                if !value.note.isEmpty { try network.markBody(id, state: .saved, note: value.note) }
+                try network.saveBodies(id, request: request, response: response, note: value.note)
             } else { try network.markBody(id, state: .unavailable, note: value.note.isEmpty ? "该请求仅保存连接摘要" : value.note) }
         }
     }

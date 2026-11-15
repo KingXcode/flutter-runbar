@@ -21,6 +21,61 @@ private func sampleRecord(_ id: String, start: Int64 = 1_000_000, end: Bool = tr
 }
 
 final class NetworkStoreTests: XCTestCase {
+    func testResponseExportUsesCompleteFileInsteadOfTruncatedPreview() throws {
+        try networkFixture { root, store in
+            let file = NetworkResponseFile(id: String(repeating: "a", count: 32), bytes: 2 * 1024 * 1024 + 17)
+            let payload = Data(repeating: 87, count: file.bytes)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("files"), withIntermediateDirectories: false)
+            let cachedFile = try file.url(in: root)
+            try payload.write(to: cachedFile)
+            var record = try sampleRecord("archive", url: "http://example.test/download", method: "GET")
+            record.contentType = "application/zip"
+            record.responseHeaders = #"{"Content-Disposition":["attachment; filename*=UTF-8''%E8%B5%84%E6%96%99.zip"]}"#
+            record.responseBytes = Int64(payload.count)
+            record.responseFile = file
+            try store.upsert([record])
+            try store.saveBodies(record.id, request: Data(), response: payload.prefix(1024 * 1024),
+                                 note: "response 正文仅保留部分内容")
+            let saved = try XCTUnwrap(try store.request(record.id))
+            let export = try NetworkResponseExport.prepare(record: saved, directory: root, version: .client) {
+                XCTFail("Should export the full file instead of reading the preview")
+                return Data()
+            }
+            XCTAssertEqual(export.filename, "资料.zip")
+            let destination = root.appendingPathComponent(export.filename)
+            try export.write(to: destination)
+            XCTAssertEqual(try Data(contentsOf: destination), payload)
+            try Data([0]).write(to: cachedFile)
+            XCTAssertThrowsError(try export.write(to: destination))
+            XCTAssertEqual(try Data(contentsOf: destination), payload)
+        }
+    }
+
+    func testResponseExportKeepsLegacyCompleteBytesAndRejectsIncompleteResponses() throws {
+        try networkFixture { root, store in
+            let payload = Data([0x89, 0x50, 0x4e, 0x47])
+            var record = try sampleRecord("legacy-image", url: "http://example.test/image?token=private", method: "GET")
+            record.contentType = "image/png; charset=utf-8"
+            record.responseBytes = Int64(payload.count)
+            try store.upsert([record])
+            try store.saveBodies(record.id, request: Data(), response: payload, note: "request 正文仅保留部分内容")
+            record = try XCTUnwrap(try store.request(record.id))
+            let export = try NetworkResponseExport.prepare(record: record, directory: root, version: .client) { payload }
+            XCTAssertEqual(export.filename, "image.png")
+            let destination = root.appendingPathComponent(export.filename)
+            try export.write(to: destination)
+            XCTAssertEqual(try Data(contentsOf: destination), payload)
+            record.bodyNote = "request 正文仅保留部分内容; response 正文仅保留部分内容"
+            XCTAssertThrowsError(try NetworkResponseExport.prepare(record: record, directory: root, version: .client) { payload })
+            record.bodyNote = ""
+            record.responseBytes = Int64(payload.count + 1)
+            XCTAssertThrowsError(try NetworkResponseExport.prepare(record: record, directory: root, version: .client) { payload })
+            record.responseBytes = Int64(payload.count)
+            record.status = 206
+            XCTAssertThrowsError(try NetworkResponseExport.prepare(record: record, directory: root, version: .client) { payload })
+        }
+    }
+
     func testChronologicalPagesAndFollowingLatestAcrossBoundary() throws {
         try networkFixture { _, store in
             try store.upsert((0..<250).map { try sampleRecord(String($0), start: Int64($0)) })

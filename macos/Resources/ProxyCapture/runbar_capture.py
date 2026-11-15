@@ -20,6 +20,7 @@ from mitmproxy import ctx
 # mitmdump loads addons by filename; the sibling module is bundled with this one.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from runbar_rewrite import JSONDocument, RewriteError, Settings, bounded_decode, bounded_encode, save_artifact
+from runbar_download import DownloadStore
 
 BODY_LIMIT = 1024 * 1024
 PREVIEW_BUDGET = 16 * 1024 * 1024
@@ -59,6 +60,8 @@ class Capture:
         self.decrypt_tls = os.environ.get("RUNBAR_PROXY_DECRYPT_TLS") == "1"
         rewrite_path = os.environ.get("RUNBAR_PROXY_REWRITE_DIRECTORY")
         self.rewrite_directory = Path(rewrite_path) if rewrite_path else (self.control.parent / "rewrite" if self.control else None)
+        download_path = os.environ.get("RUNBAR_PROXY_DOWNLOAD_DIRECTORY")
+        self.downloads = DownloadStore(Path(download_path) if download_path else None)
         self.rewrite_settings = Settings()
         self.rewrite_signature = None
         self.active_rewrites = 0
@@ -79,13 +82,14 @@ class Capture:
         encoded = PREFIX + json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
         with self.condition:
             if self.stopping:
-                return
+                return False
             if len(encoded) > LINE_LIMIT or self.pending_bytes + len(encoded) > QUEUE_BUDGET or len(self.pending) >= 2048:
                 self.dropped += 1
-                return
+                return False
             self.pending.append(encoded)
             self.pending_bytes += len(encoded)
             self.condition.notify()
+            return True
 
     def write_events(self):
         def write(data):
@@ -208,6 +212,7 @@ class Capture:
                 return
 
     def done(self):
+        self.downloads.close()
         if hasattr(self, "watchdog"):
             self.watchdog.cancel()
         if hasattr(self, "commands"):
@@ -254,6 +259,13 @@ class Capture:
     def tee(self, state, side):
         def stream(chunk):
             state[side + "_bytes"] += len(chunk)
+            if side == "response" and chunk and (download := state.get("download")) is not None:
+                try:
+                    download.write(chunk)
+                except (OSError, ValueError, zlib.error) as error:
+                    download.discard()
+                    state.pop("download", None)
+                    state["download_note"] = str(error) if isinstance(error, ValueError) else "文件缓存写入或解压失败"
             if side == "request" and state.get("rewrite_slot") and state.get("rewrite_request_needed"):
                 request = state["rewrite_request"]
                 request.extend(chunk[:max(0, BODY_LIMIT - len(request))])
@@ -331,6 +343,7 @@ class Capture:
                     state["rewrite_buffered"] = True
                     response.stream = False
                     return
+            state["download"], state["download_note"] = self.downloads.start(flow.request, flow.response)
             flow.response.stream = self.tee(state, "response")
 
     async def response(self, flow):
@@ -424,9 +437,12 @@ class Capture:
         encoding = message.headers.get("content-encoding", "").lower().strip() if message else ""
         if encoding in ("gzip", "deflate") and data:
             try:
-                decoded = zlib.decompressobj(31 if encoding == "gzip" else 15).decompress(data, BODY_LIMIT + 1)
+                decoder = zlib.decompressobj(31 if encoding == "gzip" else 15)
+                decoded = decoder.decompress(data, BODY_LIMIT + 1)
                 if len(decoded) > BODY_LIMIT:
                     notes.append(side + " 解压正文超过 1 MB，仅保留前缀")
+                elif not decoder.eof or decoder.unused_data:
+                    notes.append(side + " 压缩正文未完整解码，仅保留已解压部分")
                 data = decoded[:BODY_LIMIT]
             except zlib.error:
                 notes.append(side + " 压缩正文不完整，保留压缩原文")
@@ -440,6 +456,8 @@ class Capture:
         if state is None:
             return
         req, resp, notes = None, None, []
+        attachment = None
+        download = None
         if complete:
             if flow.request.stream is True:
                 state["request_unavailable"] = True
@@ -447,8 +465,22 @@ class Capture:
             req, req_notes = self.body(state, "request", request)
             resp, resp_notes = self.body(state, "response", response)
             notes = req_notes + resp_notes
+            download = state.pop("download", None)
+            if download is not None:
+                if flow.error or state.get("response_unavailable"):
+                    download.discard()
+                else:
+                    try:
+                        attachment = download.finish()
+                    except (OSError, ValueError):
+                        download.discard()
+                        state["download_note"] = "未完整缓存下载文件"
+            if attachment is not None and resp_notes:
+                notes.append("完整文件已缓存，可右键导出")
+            elif state.get("download_note") and resp_notes:
+                notes.append(state["download_note"])
         error = limited_text(flow.error.msg, 2048) if flow.error else None
-        self.emit({"type": "http", "record": {
+        enqueued = self.emit({"type": "http", "record": {
             "flowID": flow.id, "method": limited_text(request.method, 64), "url": limited_text(request.pretty_url, 16_384),
             "startMicros": micros(request.timestamp_start),
             "endMicros": micros(response.timestamp_end) if complete and response and response.timestamp_end else (micros() if complete else None),
@@ -457,7 +489,12 @@ class Capture:
             "requestHeaders": headers(request.headers), "responseHeaders": headers(response.headers if response else None),
             "requestBytes": state["request_bytes"], "responseBytes": state["response_bytes"],
             "requestBody": req, "responseBody": resp, "complete": complete, "failure": error, "note": "; ".join(notes),
-            "rewrite": state.get("rewrite")}})
+            "rewrite": state.get("rewrite"), "responseFile": attachment}})
+        if attachment is not None:
+            if enqueued:
+                download.retained()
+            else:
+                download.discard()
         if complete and not state["released"]:
             self.preview_bytes -= len(state["request"]) + len(state["response"])
             state["request"].clear(); state["response"].clear()

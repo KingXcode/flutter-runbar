@@ -149,10 +149,12 @@ def integration(sample_only=False):
         control = directory / "control"
         control.mkdir()
         artifacts = directory / "rewrite"
+        downloads = directory / "files"
         events, diagnostics = [], []
         latch = threading.Event()
         arrivals = []
         large = b'{"padding":"' + b"x" * BODY_LIMIT + b'","isClearing":false}'
+        download = b"PK\x03\x04" + bytes(range(256)) * 8192
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -172,16 +174,19 @@ def integration(sample_only=False):
                     arrivals.append(self.path)
                     latch.wait(15)
                 raw = large if self.path.startswith("/large") or self.path.startswith("/gzip-bomb") else SAMPLE
+                binary = self.path.startswith("/file-")
+                if binary:
+                    raw = download
                 if self.path.startswith("/invalid"):
                     raw = b'{"broken":}'
                 encoding = None
-                if self.path.startswith("/gzip"):
+                if self.path.startswith(("/gzip", "/file-gzip")):
                     raw, encoding = gzip.compress(raw), "gzip"
                 elif self.path.startswith("/deflate"):
                     raw, encoding = zlib.compress(raw), "deflate"
                 chunked = "chunked" in self.path
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_response(206 if self.path.startswith("/file-range") else 200)
+                self.send_header("Content-Type", "application/zip" if binary else "application/json; charset=utf-8")
                 self.send_header("ETag", '"original-tag"')
                 self.send_header("Content-MD5", "original-digest")
                 if encoding:
@@ -189,7 +194,7 @@ def integration(sample_only=False):
                 self.send_header("Connection", "close")
                 self.send_header("Transfer-Encoding", "chunked") if chunked else self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
-                if self.path.startswith("/abort"):
+                if self.path.startswith(("/abort", "/file-abort")):
                     self.wfile.write(raw[:32])
                     self.wfile.flush()
                     self.connection.shutdown(socket.SHUT_WR)
@@ -223,7 +228,7 @@ def integration(sample_only=False):
             temporary.replace(path)
 
         write_rules(1, [rule()])
-        process = subprocess.Popen([str(engine), "--quiet", "--listen-host", "127.0.0.1", "--listen-port", "0", "--set", "stream_large_bodies=1m", "--set", "confdir=" + str(directory / "cert"), "--set", "ssl_verify_upstream_trusted_ca=" + str(cert), "-s", str(ROOT / "Resources/ProxyCapture/runbar_capture.py")], env={**os.environ, "RUNBAR_PROXY_CONTROL": str(control), "RUNBAR_PROXY_REWRITE_DIRECTORY": str(artifacts), "RUNBAR_PROXY_DECRYPT_TLS": "1"}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen([str(engine), "--quiet", "--listen-host", "127.0.0.1", "--listen-port", "0", "--set", "stream_large_bodies=1m", "--set", "confdir=" + str(directory / "cert"), "--set", "ssl_verify_upstream_trusted_ca=" + str(cert), "-s", str(ROOT / "Resources/ProxyCapture/runbar_capture.py")], env={**os.environ, "RUNBAR_PROXY_CONTROL": str(control), "RUNBAR_PROXY_REWRITE_DIRECTORY": str(artifacts), "RUNBAR_PROXY_DOWNLOAD_DIRECTORY": str(downloads), "RUNBAR_PROXY_DECRYPT_TLS": "1"}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         def read_events():
             for line in process.stdout:
@@ -269,7 +274,12 @@ def integration(sample_only=False):
                     body = raw_body
                 connection.request(method, target, body=body, headers={"Content-Type": "application/json"})
                 response = connection.getresponse()
-                payload = response.read()
+                try:
+                    payload = response.read()
+                except http.client.IncompleteRead as error:
+                    if not path.startswith("/file-abort"):
+                        raise
+                    payload = error.partial
                 response_headers = dict(response.getheaders())
                 connection.close()
                 record = until(lambda: next((item["record"] for item in events if item["type"] == "http" and item["record"]["complete"] and identifier in item["record"]["url"]), None), "captured response")
@@ -298,6 +308,19 @@ def integration(sample_only=False):
             if sample_only:
                 print("PASS supplied sample: all 40 清盘中 cells changed; all other original bytes remain identical")
                 return
+
+            for path, secure in [("/file-zip", False), ("/file-chunked", False), ("/file-gzip", True)]:
+                payload, _, record = request(path, method="GET", secure=secure)
+                assert payload == download
+                assert len(base64.b64decode(record["responseBody"])) == BODY_LIMIT
+                file = record["responseFile"]
+                assert file and file["bytes"] == len(download), (path, record.get("note"))
+                assert (downloads / (file["id"] + ".body")).read_bytes() == download
+            for path in ("/file-abort", "/file-range"):
+                _, _, record = request(path, method="GET")
+                assert record["responseFile"] is None
+            assert len(list(downloads.iterdir())) == 3
+            print("PASS integration: complete ZIP files for plain, chunked and compressed HTTPS responses; incomplete and range responses are excluded")
 
             for blocks in [[3000], [2000, 2001], ["2000"]]:
                 payload, response_headers, record = request("/quotes", blocks=blocks)

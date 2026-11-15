@@ -291,6 +291,9 @@ private final class NetworkPanelModel: ObservableObject {
             return nil
         }
     }
+    func responseExport(directory: URL, id: String, version: ResponseRewriteBodyVersion) async throws -> NetworkResponseExport {
+        try await reader.responseExport(directory: directory, id: id, version: version)
+    }
     func stop() {
         filterSaveTask?.cancel(); filterSaveTask = nil; savePendingFilters()
         windowTask?.cancel(); selectionTask?.cancel(); detailTask?.cancel(); searchRefreshTask?.cancel()
@@ -336,6 +339,9 @@ struct NetworkPanel: View {
     @State private var rewriteEditor: NetworkRewriteEditorRequest?
     @State private var rewriteTask: Task<Void, Never>?
     @State private var loadingRewriteSample = false
+    @State private var exportingResponse = false
+    @State private var exportError: String?
+    @State private var previewsMedia = true
     private var rewriteProjectID: UUID? { model.config.projects.first { $0.path == session.projectPath }?.id }
     private var enabled: Bool { model.networkCaptureEnabled(for: session) }
     private var sourceExists: Bool {
@@ -418,9 +424,9 @@ struct NetworkPanel: View {
                 Button("最新") { data.latest() }.disabled(data.window.matching == 0)
                     .accessibilityLabel("最新的网络请求")
             }.font(.caption).foregroundStyle(.secondary)
-            Text(proxyMode ? "代理记录按需读取 · 每个请求 / 响应正文最多保留 1 MB；截断情况见概览" : "完整列表按需读取 · 磁盘自动增长 · 每个请求 / 响应正文最多 1 MB")
+            Text(proxyMode ? "请求和响应预览最多 1 MB · 完整文件可右键导出" : "完整列表按需读取 · 磁盘自动增长 · 每个请求 / 响应正文最多 1 MB")
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                .help(proxyMode ? "只读取经过本次代理的请求。列表最多保留 256 条摘要；选中后读取详情，每个正文最多保留 1 MB，截断和压缩编码说明见概览。TLS 透传只记录 CONNECT；开启解密并信任证书后才能读取 HTTPS 内容。" : "请求摘要和正文按需保存在磁盘。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。DevTools 支持 Dart VM 的 HTTP / HTTPS；WebSocket 请使用独立代理抓包模式。")
+                .help(proxyMode ? "选中后读取预览。新抓取的文件最多完整缓存 64 MB，右键可导出；截断情况见概览。TLS 透传只记录 CONNECT，开启解密并信任证书后才能读取 HTTPS 内容。" : "请求摘要和正文按需保存在磁盘。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。DevTools 支持 Dart VM 的 HTTP / HTTPS；WebSocket 请使用独立代理抓包模式。")
         }.controlSize(.small)
             .task(id: session.id) {
                 if !proxyMode { data.query.onlyRewritten = false }
@@ -435,6 +441,11 @@ struct NetworkPanel: View {
             .sheet(item: $rewriteEditor) { request in
                 ResponseRewriteRulesView(model: model, projectID: request.projectID, sample: request.sample,
                                          initialAction: request.action, editingRuleID: request.ruleID)
+            }
+            .alert("无法导出响应文件", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+                Button("好", role: .cancel) { exportError = nil }
+            } message: {
+                Text(exportError ?? "")
             }
             .confirmationDialog("清理目标采集缓冲？", isPresented: $confirmingClear) {
                 Button("清理目标缓冲", role: .destructive) { monitor.clearTargetBuffer(session.id) }
@@ -455,6 +466,49 @@ struct NetworkPanel: View {
             }
         }
     }
+    private func exportItem(directory: URL, id: String, version: ResponseRewriteBodyVersion = .client) -> NSMenuItem {
+        let item = NetworkContextMenuItem(title: "导出响应文件…") {
+            exportResponse(directory: directory, id: id, version: version)
+        }
+        item.isEnabled = !exportingResponse
+        return item
+    }
+    private func exportResponse(directory: URL, id: String, version: ResponseRewriteBodyVersion) {
+        guard !exportingResponse else { return }
+        exportingResponse = true
+        Task {
+            defer { exportingResponse = false }
+            do {
+                let file = try await data.responseExport(directory: directory, id: id, version: version)
+                let panel = NSSavePanel()
+                panel.title = "导出响应文件"
+                panel.prompt = "导出"
+                panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                panel.nameFieldStringValue = file.filename
+                panel.canCreateDirectories = true
+                guard await panel.begin() == .OK, let destination = panel.url else { return }
+                try await Task.detached(priority: .utility) { try file.write(to: destination) }.value
+            } catch {
+                exportError = error.localizedDescription
+            }
+        }
+    }
+    private func requestMenu(for record: NetworkRequestSummary) -> NSMenu? {
+        let rewrite = rewriteMenu(recordID: record.id, method: record.method, url: record.url)
+        guard let directory = captureDirectory, record.method.uppercased() != "HEAD",
+              let status = record.status, status >= 200, ![204, 205, 304].contains(status) else { return rewrite }
+        let menu = rewrite ?? NSMenu()
+        menu.autoenablesItems = false
+        menu.insertItem(exportItem(directory: directory, id: record.id), at: 0)
+        if rewrite != nil { menu.insertItem(.separator(), at: 1) }
+        return menu
+    }
+    private var responseExportItem: (() -> NSMenuItem)? {
+        let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client
+        guard data.detail == .response, version != .changes, let record = data.selected,
+              let directory = captureDirectory else { return nil }
+        return { exportItem(directory: directory, id: record.id, version: version) }
+    }
     private func rewriteMenu(recordID: String, method: String, url: String, target: ResponseRewriteTarget? = nil) -> NSMenu? {
         guard proxyMode, let projectID = rewriteProjectID else { return nil }
         let menu = NSMenu(); menu.autoenablesItems = false
@@ -464,7 +518,7 @@ struct NetworkPanel: View {
             label.isEnabled = false; label.toolTip = title; menu.addItem(label)
         }
         let title = target.map { $0.action.kind == .table ? "新建整列改写规则…" : "新建字段改写规则…" } ?? "响应改写…"
-        menu.addItem(NetworkRewriteMenuItem(title: title) { openRewrite(recordID: recordID, action: target?.action) })
+        menu.addItem(NetworkContextMenuItem(title: title) { openRewrite(recordID: recordID, action: target?.action) })
         let rules = model.config.projects.first { $0.id == projectID }?.responseRewrite?.rules.filter { rule in
             guard rule.method.isEmpty || rule.method.uppercased() == method.uppercased() else { return false }
             let pattern = rule.urlPattern.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -480,7 +534,7 @@ struct NetworkPanel: View {
             let item = NSMenuItem(title: target == nil ? "编辑此接口的规则" : "编辑或添加到已有规则", action: nil, keyEquivalent: "")
             let submenu = NSMenu(); submenu.autoenablesItems = false
             for rule in rules {
-                let option = NetworkRewriteMenuItem(title: rule.name) {
+                let option = NetworkContextMenuItem(title: rule.name) {
                     openRewrite(recordID: recordID, action: target?.action, ruleID: rule.id)
                 }
                 option.toolTip = "保留此规则的请求条件和备注；保存后应用到后续请求。"
@@ -664,7 +718,7 @@ struct NetworkPanel: View {
         NetworkRequestsTable(window: data.window, selection: data.selectedRow, showsRewrite: proxyMode,
                              following: data.followsOutput, scrollRevision: data.scrollRevision, scrollsToLatest: data.scrollsToLatest,
                              firstVisibleRow: data.firstVisibleRow,
-                             rewriteMenu: { record in rewriteMenu(recordID: record.id, method: record.method, url: record.url) },
+                             requestMenu: requestMenu,
                              onSelection: data.select, onViewport: data.viewportChanged) {
             data.followsOutput = false
         }
@@ -694,7 +748,9 @@ struct NetworkPanel: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var selectedDetails: some View {
-        VStack(spacing: 5) {
+        let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client
+        let media = data.detail == .response && version != .changes ? data.selected.flatMap(NetworkMediaPreview.Kind.init) : nil
+        return VStack(spacing: 5) {
             if proxyMode {
                 HStack(spacing: 6) {
                     if let rewrite = data.selected?.rewrite {
@@ -716,12 +772,41 @@ struct NetworkPanel: View {
                         ForEach(ResponseRewriteBodyVersion.allCases, id: \.self) { Text($0.title).tag($0) }
                     }.pickerStyle(.segmented).labelsHidden()
                     Toggle("表格", isOn: $data.tableMode).toggleStyle(.checkbox).fixedSize()
-                        .disabled(data.responseVersion == .changes).help("将首行表头的二维数组显示为表格")
+                        .disabled(data.responseVersion == .changes || (media != nil && previewsMedia))
+                        .help("将首行表头的二维数组显示为表格")
                 }
                 if let rewrite = data.selected?.rewrite, let reason = rewrite.reason, !reason.isEmpty {
                     Text(reason).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            if let media, let record = data.selected, let directory = captureDirectory {
+                HStack(spacing: 6) {
+                    Picker("响应显示方式", selection: $previewsMedia) {
+                        Text("预览").tag(true)
+                        Text("正文").tag(false)
+                    }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Spacer()
+                    Button("导出…", systemImage: "square.and.arrow.down") {
+                        exportResponse(directory: directory, id: record.id, version: version)
+                    }.disabled(exportingResponse)
+                }
+                if previewsMedia {
+                    NetworkMediaPreview(kind: media, record: record) {
+                        try await data.responseExport(directory: directory, id: record.id, version: version)
+                    }.id(version).contextMenu {
+                        Button("导出响应文件…") { exportResponse(directory: directory, id: record.id, version: version) }
+                            .disabled(exportingResponse)
+                    }
+                } else {
+                    bodyDetails
+                }
+            } else {
+                bodyDetails
+            }
+        }.padding(.top, 5)
+    }
+    private var bodyDetails: some View {
+        VStack(spacing: 5) {
             HStack(spacing: 6) {
                 Picker("显示格式", selection: Binding(get: { data.bodyFormat }, set: data.formatBody)) {
                     ForEach([NetworkBodyFormat.json, .xml, .raw], id: \.self) { Text($0.title).tag($0) }
@@ -748,7 +833,7 @@ struct NetworkPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
             NetworkTextView(text: data.bodyText, wrapsLines: data.preferences.wrapsLines, annotations: data.bodyAnnotations,
-                            rewriteTargets: data.rewriteTargets, rewriteMenu: responseRewriteMenu)
+                            rewriteTargets: data.rewriteTargets, rewriteMenu: responseRewriteMenu, exportItem: responseExportItem)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
             }
@@ -775,7 +860,7 @@ struct NetworkPanel: View {
                     }
                 }.font(.caption).foregroundStyle(.secondary)
             }
-        }.padding(.top, 5)
+        }
     }
 }
 
@@ -789,7 +874,7 @@ private struct NetworkRequestsTable: NSViewRepresentable {
     let scrollRevision: Int
     let scrollsToLatest: Bool
     let firstVisibleRow: Int?
-    var rewriteMenu: ((NetworkRequestSummary) -> NSMenu?)? = nil
+    var requestMenu: ((NetworkRequestSummary) -> NSMenu?)? = nil
     let onSelection: (Int?) -> Void
     let onViewport: (Int, Int, Double) -> Void
     let onScrollAway: () -> Void
@@ -827,9 +912,9 @@ private struct NetworkRequestsTable: NSViewRepresentable {
         scroll.onScrollAway = { [weak coordinator = context.coordinator] in coordinator?.pauseFollowing() }
         verticalScroller.onInteraction = scroll.onScrollAway
         table.onScrollAway = scroll.onScrollAway
-        table.rewriteMenu = { [weak coordinator = context.coordinator] row in
+        table.requestMenu = { [weak coordinator = context.coordinator] row in
             guard let coordinator, let record = coordinator.parent.window.row(at: row) else { return nil }
-            return coordinator.parent.rewriteMenu?(record)
+            return coordinator.parent.requestMenu?(record)
         }
         context.coordinator.observe(scroll)
         return scroll
@@ -1024,10 +1109,10 @@ private final class NetworkRequestsScroller: NSScroller {
 }
 private final class NetworkRequestTableView: NSTableView {
     var onScrollAway: (() -> Void)?
-    var rewriteMenu: ((Int) -> NSMenu?)?
+    var requestMenu: ((Int) -> NSMenu?)?
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = row(at: convert(event.locationInWindow, from: nil))
-        guard row >= 0, let menu = rewriteMenu?(row) else { return super.menu(for: event) }
+        guard row >= 0, let menu = requestMenu?(row) else { return super.menu(for: event) }
         selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         return menu
     }
@@ -1043,6 +1128,7 @@ struct NetworkTextView: NSViewRepresentable {
     var annotations: [ResponseRewriteAnnotation] = []
     var rewriteTargets: [ResponseRewriteTarget] = []
     var rewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)? = nil
+    var exportItem: (() -> NSMenuItem)? = nil
     final class Coordinator {
         var wrapsLines: Bool?
         var annotations: [ResponseRewriteAnnotation] = []
@@ -1067,6 +1153,7 @@ struct NetworkTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? RewriteNetworkTextView else { return }
         view.rewriteTargets = rewriteTargets; view.rewriteMenu = rewriteMenu
+        view.exportItem = exportItem
         if context.coordinator.wrapsLines != wrapsLines {
             let origin = scroll.contentView.bounds.origin
             context.coordinator.wrapsLines = wrapsLines
@@ -1104,9 +1191,14 @@ struct NetworkTextView: NSViewRepresentable {
 private final class RewriteNetworkTextView: NSTextView {
     var rewriteTargets: [ResponseRewriteTarget] = []
     var rewriteMenu: ((ResponseRewriteTarget) -> NSMenu?)?
+    var exportItem: (() -> NSMenuItem)?
     private var valuePopover: NSPopover?
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
+        if let item = exportItem?() {
+            if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+            menu.insertItem(item, at: 0)
+        }
         guard let rewriteMenu, !rewriteTargets.isEmpty, let layoutManager, let textContainer else { return menu }
         let point = convert(event.locationInWindow, from: nil)
         let textPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
@@ -1151,7 +1243,7 @@ private final class RewriteNetworkTextView: NSTextView {
 }
 
 /// The menu owns the closure and its immutable request/field snapshot.
-private final class NetworkRewriteMenuItem: NSMenuItem {
+private final class NetworkContextMenuItem: NSMenuItem {
     private let handler: () -> Void
     init(title: String, handler: @escaping () -> Void) {
         self.handler = handler

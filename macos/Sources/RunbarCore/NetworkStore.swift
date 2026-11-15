@@ -369,7 +369,7 @@ public final class NetworkStore {
         let stmt = try statement("UPDATE requests SET body_state='unavailable',body_note=? WHERE body_state='pending'", [note])
         defer { sqlite3_finalize(stmt) }; guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
     }
-    public func saveBodies(_ id: String, request: Data, response: Data) throws {
+    public func saveBodies(_ id: String, request: Data, response: Data, note: String = "") throws {
         try acquireAccess(); defer { access.release() }
         guard id.count == 64, id.allSatisfy({ $0.isHexDigit }) else { throw RunbarError.message("网络请求身份无效。") }
         let state = try statement("SELECT body_state FROM requests WHERE id=?", [id])
@@ -400,7 +400,7 @@ public final class NetworkStore {
             try response.write(to: responseURL, options: .atomic)
             for url in [requestURL, responseURL] { try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
             try execute("BEGIN IMMEDIATE")
-            try markBody(id, state: .saved)
+            try markBody(id, state: .saved, note: note)
             let stmt = try statement("UPDATE cache_info SET value=value+? WHERE key='body_bytes'", [String(added)])
             defer { sqlite3_finalize(stmt) }; guard sqlite3_step(stmt) == SQLITE_DONE else { throw storageError() }
             try execute("COMMIT")
@@ -648,6 +648,14 @@ public actor NetworkCacheReader {
     }
     public func bodyData(directory: URL, record: NetworkRecord, response: Bool, version: ResponseRewriteBodyVersion = .client) async throws -> Data {
         try await read(directory: directory) { try $0.bodyData(record, response: response, version: version) }
+    }
+    public func responseExport(directory: URL, id: String, version: ResponseRewriteBodyVersion = .client) async throws -> NetworkResponseExport {
+        try await read(directory: directory) { store in
+            guard let record = try store.request(id) else { throw RunbarError.message("该请求已不存在。") }
+            return try NetworkResponseExport.prepare(record: record, directory: directory, version: version) {
+                try store.bodyData(record, response: true, version: version)
+            }
+        }
     }
     public func rewriteArtifact(directory: URL, record: NetworkRecord) throws -> ResponseRewriteArtifact? {
         try ResponseRewritePresentation.artifact(directory: directory, summary: record.rewrite)

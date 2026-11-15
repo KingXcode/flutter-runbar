@@ -110,6 +110,7 @@ struct ProxyHTTPRecord: Decodable {
     let failure: String?
     let note: String
     let rewrite: ResponseRewriteSummary?
+    let responseFile: NetworkResponseFile?
 }
 
 public struct ProxyWebSocketEvent: Codable, Equatable, Identifiable, Sendable {

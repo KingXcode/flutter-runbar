@@ -50,6 +50,7 @@ public struct NetworkRecord: Codable, Identifiable, Equatable, Sendable {
     public var bodyState: NetworkBodyState = .pending
     public var bodyNote = ""
     public var rewrite: ResponseRewriteSummary? = nil
+    var responseFile: NetworkResponseFile? = nil
     public var startDate: Date { Date(timeIntervalSince1970: Double(startMicros) / 1_000_000) }
     public var durationMS: Double? { timingVersion == 2 ? endMicros.map { Double(max(0, $0 - startMicros)) / 1000 } : nil }
     public var isComplete: Bool { (timingVersion == 2 && endMicros != nil) || failure != nil }

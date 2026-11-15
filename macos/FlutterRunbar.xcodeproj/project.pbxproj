@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0691ECF909C8AE428C243D21 /* MCPLocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B0744909F9BD2F4FDDC068 /* MCPLocalServer.swift */; };
+		0B4AF7BD239AC14186E060EE /* NetworkMediaPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DBD935E9F4678D5065CA1E /* NetworkMediaPreview.swift */; };
 		0BA28088E2A4DC61840AF3B4 /* AppUpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3165CA42F39340F2B9F16FE1 /* AppUpdateView.swift */; };
 		0F9FDE1EF66B0ABC829937E2 /* ResponseRewriteRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C553E7B73932BAA14A49BD /* ResponseRewriteRulesView.swift */; };
 		10C4D1895C3B2CAA0F66E7AA /* ProxyCapture in Resources */ = {isa = PBXBuildFile; fileRef = A82ED9E8049F41FA3FC23F7B /* ProxyCapture */; };
@@ -103,6 +104,7 @@
 		857823E6D9B2D5CC6A3209DB /* bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = bridge.js; sourceTree = "<group>"; };
 		876D042C06443A65BD0DD6BF /* seed-screenshot-fixture.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "seed-screenshot-fixture.py"; sourceTree = "<group>"; };
 		87CF72BAC6136E6DD121D077 /* RunbarCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunbarCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		89DBD935E9F4678D5065CA1E /* NetworkMediaPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMediaPreview.swift; sourceTree = "<group>"; };
 		8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPRuntimeSnapshot.swift; sourceTree = "<group>"; };
 		8BA286984BB626AF54E8C607 /* process-tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "process-tests.c"; sourceTree = "<group>"; };
 		8EF7440DBC0CD62873333078 /* LogTailReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTailReaderTests.swift; sourceTree = "<group>"; };
@@ -344,6 +346,7 @@
 				8B5B5EDF002F1D69825DC285 /* MCPRuntimeSnapshot.swift */,
 				CDEEDF7BE6DC4444CF921D99 /* MCPServiceController.swift */,
 				A5041F14CB8C891C9D81D658 /* MCPSettingsView.swift */,
+				89DBD935E9F4678D5065CA1E /* NetworkMediaPreview.swift */,
 				DB6D58D3A811CCFCE4396CBA /* NetworkMonitor.swift */,
 				1856310BB7A9DB08CA2E4342 /* NetworkPanel.swift */,
 				4086E8F787F3056B2DF25114 /* ProxyCaptureView.swift */,
@@ -580,6 +583,7 @@
 				8F4E93AE6DAC2ADFB05333AD /* MCPServiceController.swift in Sources */,
 				401D7E552F16054EE4A4F086 /* MCPSettingsView.swift in Sources */,
 				50382C0B198BA3C1DF95820C /* ManagerView.swift in Sources */,
+				0B4AF7BD239AC14186E060EE /* NetworkMediaPreview.swift in Sources */,
 				F94B7599735EBF43C68AA773 /* NetworkMonitor.swift in Sources */,
 				861AA78755C541A336D5936A /* NetworkPanel.swift in Sources */,
 				199BF03FDD090A2E33451B92 /* ProxyCaptureView.swift in Sources */,
@@ -736,7 +740,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.21.1;
+				MARKETING_VERSION = 0.22.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -819,7 +823,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.21.1;
+				MARKETING_VERSION = 0.22.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
