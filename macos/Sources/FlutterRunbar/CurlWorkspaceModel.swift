@@ -28,11 +28,28 @@ final class CurlWorkspaceModel: ObservableObject {
 
     func project(_ id: UUID) -> CurlProject? { projects.first { $0.id == id } }
 
-    func create(name: String) throws -> UUID {
-        let project = CurlProject(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+    func create(name: String, text: String = "") throws -> UUID {
+        let project = CurlProject(name: name.trimmingCharacters(in: .whitespacesAndNewlines), text: text)
         try storage().save(project)
         projects.append(project)
         return project.id
+    }
+
+    func saveCapturedRequest(_ request: CurlRequest, to id: UUID) throws -> Int {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else {
+            throw RunbarError.message("这个 cURL 项目已被移除。")
+        }
+        var project = projects[index]
+        let separator = project.text.isEmpty ? "" : "\n\n"
+        project.text += separator + request.projectBlock
+        let document = CurlDocument(project.text)
+        guard let block = document.blocks.last, block.request == request else {
+            throw RunbarError.message(document.error ?? document.blocks.last?.error ?? "无法把请求追加到项目。")
+        }
+        try storage().save(project)
+        projects[index] = project
+        dirty.remove(id)
+        return block.range.location
     }
 
     func rename(_ id: UUID, to name: String) throws {

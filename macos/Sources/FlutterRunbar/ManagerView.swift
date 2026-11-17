@@ -115,6 +115,7 @@ struct ManagerView: View {
             VStack(spacing: 0) {
                 if let id = model.selectedCurlProject {
                     CurlWorkspaceView(workspace: model.curlWorkspace, projectID: id,
+                                      initialRequestOffset: model.curlProjectRequestOffset,
                                       rename: { curlProjectSheet = CurlProjectSheet(project: $0) }).id(id)
                 } else {
                     if model.application != nil { applicationHeader } else { projectHeader }

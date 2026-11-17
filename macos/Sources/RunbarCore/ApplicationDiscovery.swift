@@ -12,19 +12,27 @@ public struct RunningApplicationCandidate: Identifiable, Sendable {
     }
 }
 
+public enum ApplicationServiceAvailability: Sendable {
+    case available(VMServiceEndpoint)
+    case authenticationRequired
+    case unavailable
+}
+
 public enum ApplicationDiscovery {
+    static func isFlutterBundle(_ url: URL) -> Bool {
+        let frameworks = url.appendingPathComponent("Contents/Frameworks")
+        return ["FlutterMacOS.framework", "Flutter.framework"].contains {
+            FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
+        }
+    }
+
     @MainActor public static func running() -> [RunningApplicationCandidate] {
         NSWorkspace.shared.runningApplications.compactMap { app in
             guard !app.isTerminated, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-                  let url = app.bundleURL, let name = app.localizedName else { return nil }
-            let frameworks = url.appendingPathComponent("Contents/Frameworks")
-            let flutter = ["FlutterMacOS.framework", "Flutter.framework"].contains {
-                FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
-            }
-            guard flutter else { return nil }
+                  let url = app.bundleURL, let name = app.localizedName, isFlutterBundle(url) else { return nil }
             return RunningApplicationCandidate(processID: app.processIdentifier,
                 application: ApplicationTarget(name: name, bundleIdentifier: app.bundleIdentifier, bundlePath: url.path),
-                launchedAt: app.launchDate, flutterDetected: flutter)
+                launchedAt: app.launchDate, flutterDetected: true)
         }.sorted { $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending }
     }
     @MainActor public static func isCurrent(_ candidate: RunningApplicationCandidate) -> Bool {
@@ -64,30 +72,45 @@ public enum ApplicationDiscovery {
 
     /// Race known addresses, local announcements and this app launcher's DDS
     /// helper. Authentication is preserved and every result is PID-validated.
-    public static func serviceEndpoint(for candidate: RunningApplicationCandidate, known: [VMServiceEndpoint]) async throws -> VMServiceEndpoint? {
+    public static func serviceAvailability(for candidate: RunningApplicationCandidate, known: [VMServiceEndpoint]) async throws
+        -> ApplicationServiceAvailability {
         let ports = await listeningPorts(processID: candidate.processID)
         try Task.checkCancellation()
         let probe = ApplicationServiceProbe()
-        return try await withThrowingTaskGroup(of: VMServiceEndpoint?.self) { group in
+        return try await withThrowingTaskGroup(of: ApplicationServiceAvailability.self) { group in
             group.addTask {
-                try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: known, ports: ports)
+                try await probe.availability(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: known, ports: ports)
             }
             group.addTask {
                 let advertised = await LocalDartVMServices.endpoints(ports: ports)
                 try Task.checkCancellation()
-                return try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: advertised, ports: [])
+                return try await probe.availability(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: advertised)
             }
             group.addTask {
                 let helpers = await LocalFlutterToolServices.endpoints(processID: candidate.processID, ports: ports)
                 try Task.checkCancellation()
-                return try await probe.discover(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: helpers, ports: [])
+                return try await probe.availability(processID: candidate.processID, flutterDetected: candidate.flutterDetected, known: helpers)
             }
-            for try await result in group {
-                if let result { group.cancelAll(); return result }
-            }
-            return nil
+            return try await firstAvailable(in: &group)
         }
     }
+}
+
+private func firstAvailable(in group: inout ThrowingTaskGroup<ApplicationServiceAvailability, any Error>) async throws
+    -> ApplicationServiceAvailability {
+    var fallback = ApplicationServiceAvailability.unavailable
+    for try await result in group {
+        switch result {
+        case .available:
+            group.cancelAll()
+            return result
+        case .authenticationRequired:
+            fallback = result
+        case .unavailable:
+            break
+        }
+    }
+    return fallback
 }
 
 public struct ApplicationServiceProbe: Sendable {
@@ -109,7 +132,14 @@ public struct ApplicationServiceProbe: Sendable {
         }
         try Task.checkCancellation()
     }
-    public func discover(processID: Int32, flutterDetected: Bool, known: [VMServiceEndpoint] = [], ports: [Int]) async throws -> VMServiceEndpoint? {
+    public func discover(processID: Int32, flutterDetected: Bool, known: [VMServiceEndpoint] = [], ports: [Int] = []) async throws -> VMServiceEndpoint? {
+        if case .available(let endpoint) = try await availability(processID: processID, flutterDetected: flutterDetected, known: known, ports: ports) {
+            return endpoint
+        }
+        return nil
+    }
+    func availability(processID: Int32, flutterDetected: Bool, known: [VMServiceEndpoint], ports: [Int] = []) async throws
+        -> ApplicationServiceAvailability {
         var endpoints: [VMServiceEndpoint] = []
         // A valid DDS endpoint may be owned by a separate tool process. Ports
         // are a ranking hint, never a reason to discard an authenticated URI.
@@ -119,16 +149,16 @@ public struct ApplicationServiceProbe: Sendable {
         for endpoint in preferred + local + remaining where !endpoints.contains(endpoint) {
             endpoints.append(endpoint); if endpoints.count == 16 { break }
         }
-        return try await withThrowingTaskGroup(of: VMServiceEndpoint?.self) { group in
+        return try await withThrowingTaskGroup(of: ApplicationServiceAvailability.self) { group in
             for endpoint in endpoints {
                 group.addTask {
-                    do { return try await connectionEndpoint(endpoint, processID: processID, flutterDetected: flutterDetected) }
+                    do { return .available(try await connectionEndpoint(endpoint, processID: processID, flutterDetected: flutterDetected)) }
                     catch is CancellationError { throw CancellationError() }
-                    catch { return nil }
+                    catch VMServiceError.authenticationRequired where local.contains(endpoint) { return .authenticationRequired }
+                    catch { return .unavailable }
                 }
             }
-            for try await endpoint in group { if let endpoint { group.cancelAll(); return endpoint } }
-            return nil
+            return try await firstAvailable(in: &group)
         }
     }
     public func connectionEndpoint(_ endpoint: VMServiceEndpoint, processID: Int32, flutterDetected: Bool) async throws -> VMServiceEndpoint {

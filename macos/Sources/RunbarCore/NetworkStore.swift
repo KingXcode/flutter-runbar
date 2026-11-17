@@ -649,6 +649,14 @@ public actor NetworkCacheReader {
     public func bodyData(directory: URL, record: NetworkRecord, response: Bool, version: ResponseRewriteBodyVersion = .client) async throws -> Data {
         try await read(directory: directory) { try $0.bodyData(record, response: response, version: version) }
     }
+    public func curlRequest(directory: URL, id: String) async throws -> CurlRequest {
+        try await read(directory: directory) { store in
+            guard let record = try store.request(id) else { throw RunbarError.message("该请求已不存在。") }
+            return try CurlDocument.capturedRequest(record) {
+                try store.bodyData(record, response: false)
+            }
+        }
+    }
     public func responseExport(directory: URL, id: String, version: ResponseRewriteBodyVersion = .client) async throws -> NetworkResponseExport {
         try await read(directory: directory) { store in
             guard let record = try store.request(id) else { throw RunbarError.message("该请求已不存在。") }

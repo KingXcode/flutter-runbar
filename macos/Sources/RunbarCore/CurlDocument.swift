@@ -15,7 +15,7 @@ public struct CurlRequest: Codable, Equatable, Sendable {
 
     public var curlText: String {
         func quote(_ value: String) -> String {
-            if value.contains("\n") || value.contains("\r") {
+            if value.utf8.contains(10) || value.utf8.contains(13) {
                 return "$'" + value.replacingOccurrences(of: "\\", with: "\\\\")
                     .replacingOccurrences(of: "'", with: "\\'")
                     .replacingOccurrences(of: "\r", with: "\\r")
@@ -27,6 +27,17 @@ public struct CurlRequest: Codable, Equatable, Sendable {
             "--" + $0.name + ($0.value.map { " " + quote($0) } ?? "")
         }
         return parts.joined(separator: " \\\n  ")
+    }
+
+    public var curlEditorText: String {
+        let text = curlText
+        return text.contains("{{") ? "# @literal\n" + text : text
+    }
+
+    public var projectBlock: String {
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? ""
+        let title = "\(method) \(url.host ?? "")\(path.isEmpty ? "/" : path)"
+        return "### " + String(title.prefix(180)) + "\n" + curlEditorText
     }
 
     func validatedForSending() throws -> Self {
@@ -54,13 +65,14 @@ public struct CurlDocument: Sendable {
         let source = text as NSString
         let separator = try! NSRegularExpression(pattern: #"(?m)^\h*#{3,}(?:\h[^\r\n]*)?\h*(?:\r?\n|$)"#)
         let delimiters = separator.matches(in: text, range: NSRange(location: 0, length: source.length))
-        var pieces: [(NSRange, String, [String])] = []
+        var pieces: [(range: NSRange, title: String, lines: [String], expandsVariables: Bool)] = []
         var variables: [String: String] = [:]
         var start = 0, title = ""
         let declaration = try! NSRegularExpression(pattern: #"^@([a-zA-Z_][\w.-]*)\h*=\h*(.*)$"#)
         for delimiter in delimiters.map(\.range) + [NSRange(location: source.length, length: 0)] {
             let range = NSRange(location: start, length: delimiter.location - start)
             var lines = source.substring(with: range).replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")[...]
+            var expandsVariables = true
             // Recognize declarations and comments only before the request.
             while let first = lines.first {
                 let line = first.trimmingCharacters(in: .whitespaces)
@@ -69,13 +81,15 @@ public struct CurlDocument: Sendable {
                     variables[string.substring(with: match.range(at: 1))] = string.substring(with: match.range(at: 2))
                 } else if line.hasPrefix("# @name ") {
                     if title.isEmpty { title = String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces) }
+                } else if line == "# @literal" {
+                    expandsVariables = false
                 } else if !line.isEmpty && !line.hasPrefix("#") && !line.hasPrefix("//") {
                     break
                 }
                 lines.removeFirst()
             }
             if lines.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                pieces.append((range, title, Array(lines)))
+                pieces.append((range, title, Array(lines), expandsVariables))
             }
             if pieces.count > 100 {
                 blocks = []; error = "一个项目最多保存 100 段请求。"; return
@@ -86,7 +100,7 @@ public struct CurlDocument: Sendable {
         error = nil
         blocks = pieces.enumerated().map { index, piece in
             do {
-                var lines = piece.2
+                var lines = piece.lines
                 while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
                 if lines.first?.hasPrefix("```") == true, lines.last == "```", lines.count > 2 {
                     lines.removeFirst(); lines.removeLast()
@@ -94,19 +108,94 @@ public struct CurlDocument: Sendable {
                 let first = lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
                 let request: CurlRequest
                 if first.lowercased().hasPrefix("curl ") || first.lowercased().hasPrefix("curl\t") || first.lowercased() == "curl" {
-                    request = try Self.parseCurl(lines.joined(separator: "\n"), variables: variables)
+                    request = try Self.parseCurl(lines.joined(separator: "\n"), variables: variables, expands: piece.expandsVariables)
                 } else {
                     request = try Self.parseHTTP(lines, variables: variables)
                 }
-                return Block(id: index, range: piece.0, title: piece.1, request: request, error: nil)
+                return Block(id: index, range: piece.range, title: piece.title, request: request, error: nil)
             } catch {
-                return Block(id: index, range: piece.0, title: piece.1, request: nil, error: error.localizedDescription)
+                return Block(id: index, range: piece.range, title: piece.title, request: nil, error: error.localizedDescription)
             }
         }
     }
 
     public func block(at caret: Int) -> Block? {
         blocks.last { $0.range.location <= caret } ?? blocks.first
+    }
+
+    static func capturedRequest(_ record: NetworkRecord, loadBody: () throws -> Data) throws -> CurlRequest {
+        let method = record.method
+        try validateMethod(method)
+        guard method != "CONNECT" else { throw RunbarError.message("CONNECT 隧道不能保存为 cURL 请求。") }
+        let url = try httpURL(record.url)
+        let headers = try capturedHeaders(record.requestHeaders)
+        func values(_ name: String) -> [String] {
+            headers.filter { $0.name.lowercased() == name }.flatMap(\.values)
+        }
+
+        let bodyError = RunbarError.message("请求正文未完整缓存，无法保存为可重发的 cURL。")
+        let contentLength = values("content-length").compactMap { Int64($0.trimmingCharacters(in: .whitespaces)) }.max()
+        let hasTransferEncoding = !values("transfer-encoding").isEmpty
+        let encoding = values("content-encoding").joined(separator: ",").trimmingCharacters(in: .whitespaces).lowercased()
+        let decodedByProxy = record.isolateID == "proxy" && ["gzip", "deflate"].contains(encoding)
+        guard !record.bodyNote.split(separator: ";").contains(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("request ")
+        }) else { throw bodyError }
+
+        let data: Data
+        let capturedLength = record.requestBytes.flatMap { $0 >= 0 ? $0 : nil }
+        if record.bodyState == .saved {
+            data = try loadBody()
+            if !decodedByProxy, let length = capturedLength ?? contentLength, length >= 0, length != Int64(data.count) {
+                throw bodyError
+            }
+        } else if record.isComplete, capturedLength == 0, (contentLength ?? 0) == 0, !hasTransferEncoding {
+            data = Data()
+        } else if record.bodyState == .pending {
+            throw RunbarError.message("请等请求正文缓存完成后再试。")
+        } else {
+            throw bodyError
+        }
+        guard data.isEmpty || encoding.isEmpty || encoding == "identity" || decodedByProxy,
+              let body = String(data: data, encoding: .utf8), !data.contains(0) else {
+            throw RunbarError.message("当前只支持保存 UTF-8 文本正文，无法保存二进制或未解码的压缩正文。")
+        }
+
+        var excluded: Set<String> = [
+            "connection", "proxy-connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade",
+            "content-length", "proxy-authenticate", "proxy-authorization", "expect", "accept-encoding"
+        ]
+        for value in values("connection") {
+            excluded.formUnion(value.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        }
+        if decodedByProxy { excluded.insert("content-encoding") }
+        let keptHeaders = headers.filter { !$0.name.hasPrefix(":") && !excluded.contains($0.name.lowercased()) }
+        var options: [CurlRequest.Option] = method == "HEAD" ? [.init("head")] : [.init("request", method)]
+        for (name, values) in keptHeaders {
+            options.append(contentsOf: values.map { .init("header", $0.isEmpty ? "\(name);" : "\(name): \($0)") })
+        }
+        if !values("accept-encoding").isEmpty { options.append(.init("compressed")) }
+        // Preserve percent-encoded paths and dot segments from the capture.
+        options.append(.init("path-as-is"))
+        if !body.isEmpty {
+            guard method != "HEAD" else { throw RunbarError.message("HEAD 请求不能附带正文。") }
+            if !keptHeaders.contains(where: { $0.name.lowercased() == "content-type" }) {
+                options.append(.init("header", "Content-Type:"))
+            }
+            options.append(.init("data-raw", body))
+        }
+        return try makeRequest(method: method, url: url, options: options).validatedForSending()
+    }
+
+    private static func capturedHeaders(_ text: String) throws -> [(name: String, values: [String])] {
+        let error = RunbarError.message("请求头未完整缓存，无法保存为可重发的 cURL。")
+        if text.isEmpty { return [] }
+        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw error }
+        return try object.sorted(by: { $0.key < $1.key }).map { name, value in
+            if let values = value as? [String] { return (name, values) }
+            if let value = value as? String { return (name, [value]) }
+            throw error
+        }
     }
 
     private static func substitute(_ value: String, variables: [String: String], visited: Set<String> = []) throws -> String {

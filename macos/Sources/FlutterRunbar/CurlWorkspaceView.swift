@@ -81,6 +81,7 @@ struct CurlProjectNameView: View {
 struct CurlWorkspaceView: View {
     @ObservedObject var workspace: CurlWorkspaceModel
     let projectID: UUID
+    let initialRequestOffset: Int?
     let rename: (CurlProject) -> Void
 
     @State private var parsed = CurlDocument("")
@@ -118,7 +119,7 @@ struct CurlWorkspaceView: View {
                         Button("复制为 cURL") { copy(request.curlText) }
                     }
                     if let selectedRun {
-                        Button("将所选请求追加到编辑区") { append(selectedRun.request.curlText) }
+                        Button("将所选请求追加到编辑区") { append(selectedRun.request.curlEditorText) }
                     }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .fixedSize().accessibilityLabel("cURL 项目操作")
@@ -142,6 +143,12 @@ struct CurlWorkspaceView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.background(Color(nsColor: .windowBackgroundColor))
             .controlSize(.small)
+            .onAppear {
+                if let initialRequestOffset {
+                    caret = initialRequestOffset
+                    jump = .init(offset: caret)
+                }
+            }
             .task(id: text) {
                 let current = text
                 do {

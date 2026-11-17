@@ -154,6 +154,40 @@ final class ApplicationAttachmentTests: XCTestCase {
         let methods = await vm.methods
         XCTAssertTrue(methods.allSatisfy { ["getVM", "_flutter.listViews"].contains($0) })
     }
+    func testBuiltAppStartupFindsAuthenticatedEndpointAndClosingOutputKeepsChildAlive() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", """
+            printf 'unrelated http://127.0.0.1:9999/\n'
+            printf 'The Dart VM service is listening on '
+            printf 'http://127.0.0.1:34567/secret=/\n'
+            read line
+            printf 'later output\n'
+            exit 42
+            """]
+        let input = Pipe()
+        process.standardInput = input
+        let output = try ApplicationLaunchOutput()
+        try output.start(process)
+        defer {
+            try? input.fileHandleForWriting.close()
+            if process.isRunning { process.terminate() }
+            process.waitUntilExit()
+        }
+        var endpoints = [VMServiceEndpoint]()
+        for _ in 0..<50 {
+            endpoints = output.takeEndpoints()
+            if !endpoints.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(endpoints, [try XCTUnwrap(VMServiceEndpoint("http://127.0.0.1:34567/secret=/"))])
+
+        output.close()
+        try input.fileHandleForWriting.write(contentsOf: Data("continue\n".utf8))
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationReason, .exit)
+        XCTAssertEqual(process.terminationStatus, 42)
+    }
     func testDisconnectPersistsStreamsAndNeverControlsTarget() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -206,7 +240,11 @@ final class ApplicationAttachmentTests: XCTestCase {
             }
             throw VMServiceError.invalidResponse
         }.value
-        try await ApplicationServiceProbe().validate(connection.0, processID: process.processIdentifier, flutterDetected: true)
+        let probe = ApplicationServiceProbe()
+        let listeningPort = try XCTUnwrap(connection.0.url.port)
+        let availability = try await probe.availability(processID: process.processIdentifier, flutterDetected: true, known: [], ports: [listeningPort])
+        if case .authenticationRequired = availability {} else { XCTFail("A Dart VM rejecting the bare URL should report a missing authentication address") }
+        try await probe.validate(connection.0, processID: process.processIdentifier, flutterDetected: true)
         let target = ApplicationTarget(name: "Local fixture", bundleIdentifier: "test.fixture", bundlePath: "/tmp/Fixture.app")
         let recorder = AttachmentRecorder(), ready = expectation(description: "real VM streams")
         let monitor = ApplicationLogSession(root: root, endpoint: connection.0, attachment: ApplicationAttachment(application: target, processID: process.processIdentifier)) { event in

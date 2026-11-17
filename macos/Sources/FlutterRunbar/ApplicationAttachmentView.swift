@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import RunbarCore
+import UniformTypeIdentifiers
 
 struct ApplicationConnectionState {
     let generation = UUID()
@@ -29,6 +30,8 @@ struct ApplicationPickerView: View {
     @State private var manual = false
     @State private var checking = false
     @State private var connecting = false
+    @State private var launching = false
+    @State private var needsAuthentication = false
     @State private var message: String?
     @State private var operation: Task<Void, Never>?
     private var selected: RunningApplicationCandidate? { candidates.first { $0.processID == selectedPID } }
@@ -40,13 +43,17 @@ struct ApplicationPickerView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("连接正在运行的 Flutter App").font(.title2)
-                    Text("仅显示 Flutter 应用；选择后自动识别调试地址，无需源码目录。") .font(.caption).foregroundStyle(.secondary)
+                    Text("连接 Flutter App").font(.title2)
+                    Text("选择正在运行的 App，或直接启动已构建的 .app。").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button { refresh() } label: { Image(systemName: "arrow.clockwise") }.help("刷新运行中的应用").disabled(connecting)
             }
-            TextField("搜索 Flutter 应用名称或 PID", text: $search).textFieldStyle(.roundedBorder).accessibilityLabel("搜索运行中的 Flutter App")
+            HStack {
+                TextField("搜索 Flutter 应用名称或 PID", text: $search).textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("搜索运行中的 Flutter App")
+                Button("启动已构建的 App…", action: chooseBuiltApplication)
+            }.disabled(connecting)
             List(selection: $selectedPID) {
                 ForEach(filtered) { candidate in
                     HStack(spacing: 9) {
@@ -59,7 +66,9 @@ struct ApplicationPickerView: View {
                         if model.connectedApplication(for: candidate) != nil { Text("已连接").font(.caption).foregroundStyle(.secondary) }
                         else if candidate.processID == selectedPID {
                             if checking { ProgressView().controlSize(.mini) }
-                            else { Text(endpoint != nil ? "可直接连接" : "需完整调试地址").font(.caption).foregroundStyle(.secondary) }
+                            else if endpoint != nil { Text("可直接连接").font(.caption).foregroundStyle(.secondary) }
+                            else if needsAuthentication { Text("缺少认证地址").font(.caption).foregroundStyle(.secondary) }
+                            else { Text("未发现调试服务").font(.caption).foregroundStyle(.secondary) }
                         }
                     }.padding(.vertical, 3).tag(Optional(candidate.processID))
                 }
@@ -74,7 +83,7 @@ struct ApplicationPickerView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     TextField("粘贴完整的 DevTools 或 VM Service 链接", text: $address)
                         .textFieldStyle(.roundedBorder).accessibilityLabel("DevTools 或 VM Service 地址")
-                    Text("通常无需填写。未发现服务时，可从 IDE 控制台复制完整链接；Release 包通常无法连接。")
+                    Text("可粘贴本次运行的完整调试链接。Release 构建不提供 Dart VM Service。")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(.top, 6)
             }.disabled(connecting)
@@ -86,7 +95,10 @@ struct ApplicationPickerView: View {
             Text("从连接时开始缓存日志和网络请求；断开连接不会退出 App。") .font(.caption).foregroundStyle(.secondary)
             Divider()
             HStack {
-                if connecting { ProgressView().controlSize(.small); Text("正在连接…").font(.caption) }
+                if connecting {
+                    ProgressView().controlSize(.small)
+                    Text(launching ? "正在启动 App 并等待调试地址…" : "正在连接…").font(.caption)
+                }
                 Spacer()
                 Button("取消") { operation?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
                 Button(existing == nil ? "连接" : "查看") { connect() }
@@ -115,19 +127,60 @@ struct ApplicationPickerView: View {
     }
     private func detect() {
         operation?.cancel(); endpoint = nil; message = nil; address = ""; manual = false
+        needsAuthentication = false
         guard let candidate = selected else { checking = false; return }
         guard existing == nil else { checking = false; return }
         checking = true
         let known = model.knownApplicationEndpoints
         operation = Task {
             do {
-                let result = try await ApplicationDiscovery.serviceEndpoint(for: candidate, known: known)
+                let result = try await ApplicationDiscovery.serviceAvailability(for: candidate, known: known)
                 guard !Task.isCancelled, selectedPID == candidate.processID else { return }
                 guard ApplicationDiscovery.isCurrent(candidate) else { checking = false; message = "所选 App 已退出，请刷新列表。"; return }
-                endpoint = result; manual = manual || result == nil; checking = false
-                if result == nil { message = "未能自动取得完整调试地址，可能缺少认证信息或服务公告。可重新识别，或粘贴 IDE / Flutter 控制台中当前运行的完整链接。" }
+                checking = false
+                switch result {
+                case .available(let found):
+                    endpoint = found
+                case .authenticationRequired:
+                    needsAuthentication = true
+                    manual = true
+                    message = "已发现调试服务，但缺少认证地址。请粘贴本次运行的完整链接，或退出 App 后选择「启动已构建的 App」。"
+                case .unavailable:
+                    manual = true
+                    message = "未发现可用的调试服务。请确认 App 使用 Debug 或 Profile 构建，或粘贴本次运行的完整链接。"
+                }
             } catch {
                 guard !Task.isCancelled else { return }; checking = false; manual = true
+            }
+        }
+    }
+    private func chooseBuiltApplication() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "启动并连接"
+        if let path = selected?.application.bundlePath ?? preferredApplication?.bundlePath {
+            panel.directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        operation?.cancel()
+        checking = false
+        launching = true
+        connecting = true
+        message = nil
+        operation = Task {
+            do {
+                let (candidate, endpoint) = try await ApplicationLaunch.connectableApplication(at: url)
+                launching = false
+                try await model.connectApplication(candidate, endpoint: endpoint, enteredAddress: "")
+                operation = nil
+                dismiss()
+            } catch {
+                guard !Task.isCancelled else { return }
+                launching = false
+                connecting = false
+                message = error.localizedDescription
             }
         }
     }

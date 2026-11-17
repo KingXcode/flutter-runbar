@@ -222,6 +222,7 @@ final class AppModel: ObservableObject {
     @Published var selectedProject: UUID?
     @Published var selectedApplication: UUID?
     @Published private(set) var selectedCurlProject: UUID?
+    private(set) var curlProjectRequestOffset: Int?
     @Published var applicationConnections: [UUID: ApplicationConnectionState] = [:]
     private var applicationLoggers: [UUID: ApplicationLogSession] = [:]
     private var applicationWatchers: [UUID: Task<Void, Never>] = [:]
@@ -470,10 +471,11 @@ final class AppModel: ObservableObject {
         selectedSession = records.first(where: { $0.id == state(for: project.id).session?.id })?.id ?? records.first?.id
         loadLog()
     }
-    func selectCurlProject(_ id: UUID) {
+    func selectCurlProject(_ id: UUID, requestOffset: Int? = nil) {
         guard curlWorkspace.project(id) != nil else { return }
         curlWorkspace.flush()
         selectedProject = nil; selectedApplication = nil; selectedSession = nil
+        curlProjectRequestOffset = requestOffset
         selectedCurlProject = id
         UserDefaults.standard.set(id.uuidString, forKey: "selectedCurlProject")
         loadLog()
@@ -490,6 +492,7 @@ final class AppModel: ObservableObject {
     private func closeCurlProject() {
         guard selectedCurlProject != nil else { return }
         curlWorkspace.flush()
+        curlProjectRequestOffset = nil
         selectedCurlProject = nil
         UserDefaults.standard.removeObject(forKey: "selectedCurlProject")
     }

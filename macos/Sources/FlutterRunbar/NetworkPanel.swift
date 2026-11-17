@@ -343,6 +343,9 @@ private final class NetworkPanelModel: ObservableObject {
     func responseExport(directory: URL, id: String, version: ResponseRewriteBodyVersion) async throws -> NetworkResponseExport {
         try await reader.responseExport(directory: directory, id: id, version: version)
     }
+    func curlRequest(directory: URL, id: String) async throws -> CurlRequest {
+        try await reader.curlRequest(directory: directory, id: id)
+    }
     func stop() {
         filterSaveTask?.cancel(); filterSaveTask = nil; savePendingFilters()
         windowTask?.cancel(); selectionTask?.cancel(); searchRefreshTask?.cancel(); resetDetails()
@@ -404,6 +407,17 @@ private struct NetworkRewriteEditorRequest: Identifiable {
     let ruleID: UUID?
 }
 
+private struct NetworkCurlProjectDraft: Identifiable {
+    let id = UUID()
+    let request: CurlRequest
+}
+
+private struct NetworkSavedCurlRequest {
+    let projectID: UUID
+    let projectName: String
+    let offset: Int
+}
+
 struct NetworkPanel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var monitor: NetworkMonitor
@@ -432,6 +446,10 @@ struct NetworkPanel: View {
     @State private var loadingRewriteSample = false
     @State private var exportingResponse = false
     @State private var exportError: String?
+    @State private var curlSaveTask: Task<Void, Never>?
+    @State private var curlSaveError: String?
+    @State private var curlProjectDraft: NetworkCurlProjectDraft?
+    @State private var savedCurlRequest: NetworkSavedCurlRequest?
     @State private var previewsMedia = true
     private var rewriteProjectID: UUID? { model.config.projects.first { $0.path == session.projectPath }?.id }
     private var enabled: Bool { model.networkCaptureEnabled(for: session) }
@@ -520,6 +538,9 @@ struct NetworkPanel: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 .help(proxyMode ? "选中后读取预览。新抓取的文件最多完整缓存 64 MB，右键可导出；截断情况见概览。TLS 透传只记录 CONNECT，开启解密并信任证书后才能读取 HTTPS 内容。" : "请求摘要和正文按需保存在磁盘。为系统保留 512 MiB 可用空间，并预留本次写入及回滚日志所需空间；不足时暂停，释放空间后点击继续。内存只保留最多 256 条摘要与当前正文页，单次服务返回最多 8 MB。DevTools 支持 Dart VM 的 HTTP / HTTPS；WebSocket 请使用独立代理抓包模式。")
         }.controlSize(.small)
+            .overlay(alignment: .bottomTrailing) {
+                if let savedCurlRequest { curlSaveNotice(savedCurlRequest).padding(.bottom, 38) }
+            }
             .task(id: session.id) {
                 if !proxyMode { data.query.onlyRewritten = false }
                 data.configure(directory: captureDirectory, sessionID: session.id)
@@ -529,10 +550,26 @@ struct NetworkPanel: View {
             .onChange(of: data.selectedID) { _, id in
                 if !proxyMode, let id { monitor.prioritizeBody(id, sessionID: session.id) }
             }
-            .onDisappear { rewriteTask?.cancel(); loadingRewriteSample = false; data.stop() }
+            .onChange(of: session.id) { _, _ in clearCurlSaveState() }
+            .onDisappear {
+                rewriteTask?.cancel(); loadingRewriteSample = false
+                clearCurlSaveState()
+                data.stop()
+            }
             .sheet(item: $rewriteEditor) { request in
                 ResponseRewriteRulesView(model: model, projectID: request.projectID, sample: request.sample,
                                          initialAction: request.action, editingRuleID: request.ruleID)
+            }
+            .sheet(item: $curlProjectDraft) { draft in
+                CurlProjectNameView(title: "新建 cURL 项目", name: "") { name in
+                    let id = try model.curlWorkspace.create(name: name, text: draft.request.projectBlock)
+                    showCurlSaved(projectID: id, offset: 0)
+                }
+            }
+            .alert("无法保存为 cURL", isPresented: Binding(get: { curlSaveError != nil }, set: { if !$0 { curlSaveError = nil } })) {
+                Button("好", role: .cancel) { curlSaveError = nil }
+            } message: {
+                Text(curlSaveError ?? "")
             }
             .alert("无法导出响应文件", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
                 Button("好", role: .cancel) { exportError = nil }
@@ -587,13 +624,81 @@ struct NetworkPanel: View {
     }
     private func requestMenu(for record: NetworkRequestSummary) -> NSMenu? {
         let rewrite = rewriteMenu(recordID: record.id, method: record.method, url: record.url)
-        guard let directory = captureDirectory, record.method.uppercased() != "HEAD",
-              let status = record.status, status >= 200, ![204, 205, 304].contains(status) else { return rewrite }
+        guard let directory = captureDirectory else { return rewrite }
         let menu = rewrite ?? NSMenu()
         menu.autoenablesItems = false
-        menu.insertItem(exportItem(directory: directory, id: record.id), at: 0)
-        if rewrite != nil { menu.insertItem(.separator(), at: 1) }
-        return menu
+        var index = 0
+        if record.method.uppercased() != "HEAD", let status = record.status,
+           status >= 200, ![204, 205, 304].contains(status) {
+            menu.insertItem(exportItem(directory: directory, id: record.id), at: index)
+            index += 1
+        }
+        if record.method.uppercased() != "CONNECT", let scheme = URL(string: record.url)?.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            menu.insertItem(curlProjectMenuItem(directory: directory, recordID: record.id), at: index)
+            index += 1
+        }
+        if index > 0, rewrite != nil { menu.insertItem(.separator(), at: index) }
+        return menu.items.isEmpty ? nil : menu
+    }
+    private func curlProjectMenuItem(directory: URL, recordID: String) -> NSMenuItem {
+        let item = NSMenuItem(title: "保存到 cURL 项目", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for project in model.curlWorkspace.projects {
+            submenu.addItem(NetworkContextMenuItem(title: project.name) {
+                saveCurl(directory: directory, recordID: recordID, projectID: project.id)
+            })
+        }
+        if !submenu.items.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(NetworkContextMenuItem(title: "新建 cURL 项目…") {
+            saveCurl(directory: directory, recordID: recordID, projectID: nil)
+        })
+        item.submenu = submenu
+        item.isEnabled = curlSaveTask == nil
+        return item
+    }
+    private func saveCurl(directory: URL, recordID: String, projectID: UUID?) {
+        guard curlSaveTask == nil else { return }
+        curlSaveTask = Task { @MainActor in
+            defer { curlSaveTask = nil }
+            do {
+                let request = try await data.curlRequest(directory: directory, id: recordID)
+                try Task.checkCancellation()
+                if let projectID {
+                    let offset = try model.curlWorkspace.saveCapturedRequest(request, to: projectID)
+                    showCurlSaved(projectID: projectID, offset: offset)
+                } else {
+                    curlProjectDraft = NetworkCurlProjectDraft(request: request)
+                }
+            } catch is CancellationError {
+            } catch {
+                if !Task.isCancelled { curlSaveError = error.localizedDescription }
+            }
+        }
+    }
+    private func showCurlSaved(projectID: UUID, offset: Int) {
+        guard let project = model.curlWorkspace.project(projectID) else { return }
+        savedCurlRequest = NetworkSavedCurlRequest(projectID: projectID, projectName: project.name, offset: offset)
+    }
+    private func clearCurlSaveState() {
+        curlSaveTask?.cancel()
+        curlProjectDraft = nil
+        curlSaveError = nil
+        savedCurlRequest = nil
+    }
+    private func curlSaveNotice(_ saved: NetworkSavedCurlRequest) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("已保存到「\(saved.projectName)」").lineLimit(1)
+            Button("打开项目") { model.selectCurlProject(saved.projectID, requestOffset: saved.offset) }
+            Button { savedCurlRequest = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).accessibilityLabel("关闭保存提示")
+        }
+        .font(.caption).padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.separator) }
+        .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
     }
     private var responseExportItem: (() -> NSMenuItem)? {
         let version: ResponseRewriteBodyVersion = proxyMode ? data.responseVersion : .client

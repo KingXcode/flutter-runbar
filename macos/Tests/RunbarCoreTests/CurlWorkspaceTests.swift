@@ -92,6 +92,80 @@ final class CurlWorkspaceTests: XCTestCase {
         XCTAssertEqual(object["method"], "PATCH")
     }
 
+    func testCapturedRequestCanBeSavedInProjectAndReplayedWithOriginalBytes() async throws {
+        let server = try HTTPFixture()
+        defer { server.stop() }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = root.appendingPathComponent("capture")
+        let network = try NetworkStore(directory: capture)
+        let body = "@start\r\n### {{item}}\r\n中文 'name'"
+        let record = capturedRequest(url: server.url + "/echo?symbol=600000&market=1", bytes: Int64(body.utf8.count),
+                                     headers: #"{"Content-Type":"text/plain","X-Runbar-Test":["one","two"],"Cookie":["sid=fixture"],"Authorization":"Bearer fixture","Connection":"X-Hop","X-Hop":"old","Content-Length":"999","Proxy-Authorization":"Basic fixture"}"#)
+        try network.upsert([record])
+        try network.saveBodies(record.id, request: Data(body.utf8), response: Data())
+
+        let imported = try await NetworkCacheReader().curlRequest(directory: capture, id: record.id)
+        let workspace = CurlWorkspaceStore(root: root.appendingPathComponent("workspace"))
+        let project = CurlProject(name: "请求回放", text: "@item = replaced\n\nGET \(server.url)/json\n\n" + imported.projectBlock)
+        try workspace.save(project)
+        let reopened = try XCTUnwrap(workspace.projects().first)
+        let document = CurlDocument(reopened.text)
+        XCTAssertEqual(document.blocks.count, 2)
+        let request = try XCTUnwrap(document.blocks.last?.request, document.blocks.last?.error ?? "")
+        XCTAssertEqual(request.url.query, "symbol=600000&market=1")
+        XCTAssertEqual(request.options.filter { $0.value?.hasPrefix("X-Runbar-Test: ") == true }.compactMap(\.value),
+                       ["X-Runbar-Test: one", "X-Runbar-Test: two"])
+        XCTAssertFalse(request.curlText.contains("Proxy-Authorization"))
+        XCTAssertFalse(request.curlText.contains("X-Hop"))
+        XCTAssertTrue(request.curlText.contains("Authorization: Bearer fixture"))
+        XCTAssertTrue(request.curlText.contains("Cookie: sid=fixture"))
+        let result = try await CurlClient.send(request)
+        XCTAssertEqual(result.head.status, 418)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: result.body) as? [String: String])
+        XCTAssertEqual(decoded["method"], "PATCH")
+        XCTAssertEqual(decoded["data"], body)
+    }
+
+    func testCapturedRequestImportRejectsTruncatedBodyAndAllowsBodylessRequestWithoutResponseCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let network = try NetworkStore(directory: root)
+        var incomplete = capturedRequest(url: "https://example.test/patch", bytes: 10)
+        let empty = capturedRequest(url: "https://example.test/health", bytes: 0, method: "GET")
+        try network.upsert([incomplete, empty])
+        try network.saveBodies(incomplete.id, request: Data("abc".utf8), response: Data(),
+                               note: "request 正文仅保留部分内容（单正文 1 MB / 全局预览预算）")
+        try network.markBody(empty.id, state: .unavailable, note: "response 未缓存")
+        let reader = NetworkCacheReader()
+        do {
+            _ = try await reader.curlRequest(directory: root, id: incomplete.id)
+            XCTFail("Truncated requests must not produce replayable text")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("正文"), error.localizedDescription)
+        }
+        let imported = try await reader.curlRequest(directory: root, id: empty.id)
+        XCTAssertEqual(imported.method, "GET")
+        XCTAssertFalse(imported.curlText.contains("--data"))
+
+        incomplete.id = NetworkRecord.identity(epoch: "fixture", isolate: "proxy", request: "gzip")
+        incomplete.requestBytes = 31
+        incomplete.requestHeaders = #"{"Content-Encoding":["gzip"],"Content-Type":["application/json"]}"#
+        try network.upsert([incomplete])
+        try network.saveBodies(incomplete.id, request: Data("{}".utf8), response: Data(), note: "response 仅保留部分内容")
+        let decoded = try await reader.curlRequest(directory: root, id: incomplete.id)
+        XCTAssertFalse(decoded.curlText.contains("Content-Encoding"))
+        XCTAssertEqual(decoded.options.last?.value, "{}")
+    }
+
+    private func capturedRequest(url: String, bytes: Int64, method: String = "PATCH", headers: String = "{}") -> NetworkRecord {
+        let id = NetworkRecord.identity(epoch: "fixture", isolate: "proxy", request: url)
+        return NetworkRecord(id: id, epoch: "fixture", isolateID: "proxy", requestID: url, method: method, url: url,
+                             startMicros: 1, endMicros: 2, status: 200, contentType: "",
+                             requestBytes: bytes, responseBytes: 0, requestHeaders: headers, responseHeaders: "{}",
+                             failure: nil, timingVersion: 2)
+    }
+
     func testRedirectsAndSizeLimitAndCancellation() async throws {
         let server = try HTTPFixture()
         defer { server.stop() }
