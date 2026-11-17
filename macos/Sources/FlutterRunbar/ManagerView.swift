@@ -16,6 +16,8 @@ struct ManagerView: View {
     @State private var pendingSessionDeletion = Set<UUID>()
     @State private var showingSessionDeletion = false
     @State private var pendingProjectRemoval: Project?
+    @State private var curlProjectSheet: CurlProjectSheet?
+    @State private var pendingCurlRemoval: CurlProject?
     @State private var expandedLog = false
     @State private var showingNetwork = false
     @State private var showingProxySettings = false
@@ -98,6 +100,10 @@ struct ManagerView: View {
                     } header: {
                         HStack { Text("应用监听"); Spacer(); Text("\(model.applications.count)").monospacedDigit() }
                     }
+                    CurlProjectSection(model: model, workspace: model.curlWorkspace,
+                                       add: { curlProjectSheet = CurlProjectSheet(project: nil) },
+                                       rename: { curlProjectSheet = CurlProjectSheet(project: $0) },
+                                       remove: { pendingCurlRemoval = $0 })
                 }.listStyle(.sidebar)
                 Divider()
                 HStack {
@@ -107,11 +113,16 @@ struct ManagerView: View {
             }.navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
             VStack(spacing: 0) {
-                if model.application != nil { applicationHeader } else { projectHeader }
-                Divider()
-                HSplitView {
-                    if !expandedLog { historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300) }
-                    logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                if let id = model.selectedCurlProject {
+                    CurlWorkspaceView(workspace: model.curlWorkspace, projectID: id,
+                                      rename: { curlProjectSheet = CurlProjectSheet(project: $0) }).id(id)
+                } else {
+                    if model.application != nil { applicationHeader } else { projectHeader }
+                    Divider()
+                    HSplitView {
+                        if !expandedLog { historyPane.frame(minWidth: 180, idealWidth: 220, maxWidth: 300) }
+                        logPane.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }.background(Color(nsColor: .windowBackgroundColor))
             #if SCREENSHOT_PREVIEW
@@ -153,6 +164,13 @@ struct ManagerView: View {
         }
         .sheet(item: $vsCodeConnection) { request in
             VSCodeConnectionView(model: model, request: request)
+        }
+        .sheet(item: $curlProjectSheet) { sheet in
+            CurlProjectNameView(title: sheet.project == nil ? "新建 cURL 项目" : "重命名 cURL 项目",
+                                name: sheet.project?.name ?? "") { name in
+                if let project = sheet.project { try model.curlWorkspace.rename(project.id, to: name) }
+                else { model.selectCurlProject(try model.curlWorkspace.create(name: name)) }
+            }
         }
         .sheet(isPresented: $showingSettings) {
             VStack(alignment: .leading, spacing: 16) {
@@ -218,6 +236,17 @@ struct ManagerView: View {
             }
             Button("取消", role: .cancel) { pendingProjectRemoval = nil }
         } message: { Text("仅移除应用内的项目配置和命令，不删除磁盘上的项目文件或运行记录。") }
+        .confirmationDialog("移除 cURL 项目“\(pendingCurlRemoval?.name ?? "")”？", isPresented: Binding(
+            get: { pendingCurlRemoval != nil }, set: { if !$0 { pendingCurlRemoval = nil } }
+        ), titleVisibility: .visible) {
+            if let project = pendingCurlRemoval {
+                Button("移到废纸篓", role: .destructive) {
+                    do { try model.removeCurlProject(project.id) }
+                    catch { model.error = error.localizedDescription }
+                    pendingCurlRemoval = nil
+                }
+            }
+        } message: { Text("该项目的请求文本和发送历史会一起移到废纸篓。") }
     }
 
     private var applicationHeader: some View {
@@ -486,6 +515,10 @@ struct ManagerView: View {
         }.buttonStyle(.plain).help("\(session.projectPath)\n\(session.command)")
             .accessibilityAddTraits(model.historySelection.ids.contains(session.id) ? .isSelected : [])
             .contextMenu {
+                if FlutterMacOSLaunch.canRevealBuild(for: session) {
+                    Button("打开构建产物目录", systemImage: "folder") { model.revealFlutterBuild(for: session) }
+                    Divider()
+                }
                 let ids = model.deletionIDs(for: session)
                 Button(ids.count > 1 ? "删除所选 \(ids.count) 条记录…" : "删除记录…", role: .destructive) {
                     pendingSessionDeletion = ids
@@ -729,4 +762,9 @@ private struct StatusTag: View {
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             .fixedSize().accessibilityLabel(title)
     }
+}
+
+private struct CurlProjectSheet: Identifiable {
+    let id = UUID()
+    let project: CurlProject?
 }

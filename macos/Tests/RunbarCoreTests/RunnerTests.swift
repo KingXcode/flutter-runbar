@@ -5,6 +5,40 @@ final class RunnerTests: XCTestCase {
     private func temporaryStore() throws -> SessionStore {
         try SessionStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("Runbar tests \(UUID().uuidString)"))
     }
+    func testFlutterBuildProductUsesTheSelectedRunsLoggedPath() throws {
+        let store = try temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.root) }
+        let debug = store.root.appendingPathComponent("build/macos/Build/Products/Debug/默认.app", isDirectory: true)
+        let release = store.root.appendingPathComponent("custom output/macos/Build/Products/Release-uat/运行 (UAT).app", isDirectory: true)
+        for app in [debug, release] {
+            let contents = app.appendingPathComponent("Contents", isDirectory: true)
+            try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+            try Data().write(to: contents.appendingPathComponent("Info.plist"))
+        }
+        var session = RunSession(projectPath: store.root.path, command: "fvm flutter run -d macos --release --flavor uat")
+        session.status = .succeeded
+        try store.save(session)
+        let log = store.directory(session.id).appendingPathComponent("output.raw")
+        let output = String(repeating: "x", count: 32_762) + "\r\n[  +2 ms] \u{1b}[32m✓ Built \(release.path) (42.0MB)\u{1b}[0m"
+        try Data(output.utf8).write(to: log)
+        XCTAssertTrue(FlutterMacOSLaunch.canRevealBuild(for: session))
+        XCTAssertEqual(try FlutterMacOSLaunch.buildProduct(for: session, log: try store.outputFile(for: session.id)).path, release.path)
+
+        try FileManager.default.removeItem(at: release)
+        XCTAssertThrowsError(try FlutterMacOSLaunch.buildProduct(for: session, log: log)) { error in
+            XCTAssertTrue(error.localizedDescription.contains(release.path))
+        }
+        session.command = "flutter run"
+        XCTAssertTrue(FlutterMacOSLaunch.canRevealBuild(for: session))
+        session.status = .running
+        let relative = "[        ] ✓ Built build/macos/Build/Products/Debug/默认.app\r\n"
+        try Data(relative.utf8).write(to: log)
+        XCTAssertEqual(try FlutterMacOSLaunch.buildProduct(for: session, log: log).path, debug.path)
+        for command in ["flutter run -d chrome", "flutter attach -d macos", "flutter build macos"] {
+            session.command = command
+            XCTAssertFalse(FlutterMacOSLaunch.canRevealBuild(for: session))
+        }
+    }
     func testGenericProjectRunsCustomCommandWithoutFlutterOnPath() throws {
         let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
         var project = Project(path: store.root.path)

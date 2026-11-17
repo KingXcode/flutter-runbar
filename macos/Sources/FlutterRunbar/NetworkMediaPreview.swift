@@ -9,10 +9,14 @@ struct NetworkMediaPreview: View {
         case image, video
 
         init?(record: NetworkRecord) {
-            let mime = Self.mime(record.contentType)
+            self.init(contentType: record.contentType, filename: NetworkResponseExport.suggestedFilename(for: record))
+        }
+
+        init?(contentType: String, filename: String) {
+            let mime = Self.mime(contentType)
             if mime.hasPrefix("image/") { self = .image; return }
             if mime.hasPrefix("video/") { self = .video; return }
-            let ext = (NetworkResponseExport.suggestedFilename(for: record) as NSString).pathExtension
+            let ext = (filename as NSString).pathExtension
             if let type = UTType(filenameExtension: ext) {
                 if type.conforms(to: .image) { self = .image; return }
                 if type.conforms(to: .movie) || type.conforms(to: .video) { self = .video; return }
@@ -25,8 +29,14 @@ struct NetworkMediaPreview: View {
         }
     }
 
+    private enum Identity: Equatable {
+        case captured(NetworkRecord)
+        case request(UUID)
+    }
+
     let kind: Kind
-    let record: NetworkRecord
+    private let identity: Identity
+    private let contentType: String
     let load: () async throws -> NetworkResponseExport
     @State private var content: Content?
     @State private var error: String?
@@ -34,6 +44,16 @@ struct NetworkMediaPreview: View {
     private enum Content {
         case image(CGImage)
         case video(AVPlayer, PreviewFile)
+    }
+
+    init(kind: Kind, record: NetworkRecord, load: @escaping () async throws -> NetworkResponseExport) {
+        self.kind = kind; self.load = load
+        identity = .captured(record); contentType = record.contentType
+    }
+
+    init(kind: Kind, requestID: UUID, contentType: String, load: @escaping () async throws -> NetworkResponseExport) {
+        self.kind = kind; self.load = load
+        identity = .request(requestID); self.contentType = contentType
     }
 
     var body: some View {
@@ -57,7 +77,7 @@ struct NetworkMediaPreview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(nsColor: .separatorColor)).allowsHitTesting(false))
-        .task(id: record) { await loadPreview() }
+        .task(id: identity) { await loadPreview() }
         .onDisappear { clear() }
     }
 
@@ -74,7 +94,7 @@ struct NetworkMediaPreview: View {
         clear()
         do {
             let export = try await load()
-            let kind = kind, mime = Kind.mime(record.contentType)
+            let kind = kind, mime = Kind.mime(contentType)
             let file = try await Task.detached(priority: .utility) {
                 try PreviewFile(export: export, mime: mime)
             }.value

@@ -179,6 +179,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared.showManagerWindow()
         return true
     }
+    func applicationWillTerminate(_ notification: Notification) {
+        let workspace = AppModel.shared.curlWorkspace
+        workspace.flush()
+        if let id = workspace.sendingProject { workspace.cancel(id) }
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         #if SCREENSHOT_PREVIEW
         return .terminateNow
@@ -208,6 +213,7 @@ final class AppModel: ObservableObject {
     let mcp = MCPServiceController()
     let skillInstaller = SkillInstallationModel()
     let proxyCertificates = ProxyCertificateModel()
+    let curlWorkspace = CurlWorkspaceModel()
     @Published var config = Configuration()
     @Published var history: [RunSession] = []
     @Published var projectRuns: [UUID: ProjectRunState] = [:]
@@ -215,6 +221,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var responseRewriteSyncing = Set<UUID>()
     @Published var selectedProject: UUID?
     @Published var selectedApplication: UUID?
+    @Published private(set) var selectedCurlProject: UUID?
     @Published var applicationConnections: [UUID: ApplicationConnectionState] = [:]
     private var applicationLoggers: [UUID: ApplicationLogSession] = [:]
     private var applicationWatchers: [UUID: Task<Void, Never>] = [:]
@@ -299,6 +306,7 @@ final class AppModel: ObservableObject {
             let store = try SessionStore()
             config = try store.loadConfiguration(); try store.recoverInterrupted(); history = try store.sessions()
             self.store = store
+            curlWorkspace.configure(root: store.root)
             network.configure(root: store.root)
             proxyCertificates.configure(directory: store.root.appendingPathComponent("proxy-certificates", isDirectory: true))
             skillInstaller.configure(root: store.root)
@@ -310,7 +318,10 @@ final class AppModel: ObservableObject {
             let coordinator = ProjectRunCoordinator(store: store)
             coordinator.onEvent = { [weak self] event in self?.handle(event) }
             self.coordinator = coordinator
-            if selectedProject == nil, let first = config.applications?.first { selectApplication(first) }
+            if let raw = UserDefaults.standard.string(forKey: "selectedCurlProject"),
+               let id = UUID(uuidString: raw), curlWorkspace.project(id) != nil {
+                selectCurlProject(id)
+            } else if selectedProject == nil, let first = config.applications?.first { selectApplication(first) }
             if !store.warnings.isEmpty { error = store.warnings.joined(separator: "\n") }
             #if SCREENSHOT_PREVIEW
             selectedSession = history.first?.id
@@ -453,10 +464,34 @@ final class AppModel: ObservableObject {
         let project = Project(path: path); config.projects.append(project); select(project); persist()
     }
     func select(_ project: Project) {
+        closeCurlProject()
         selectedApplication = nil; selectedProject = project.id
         let records = history.filter { $0.attachment == nil && $0.projectPath == project.path }
         selectedSession = records.first(where: { $0.id == state(for: project.id).session?.id })?.id ?? records.first?.id
         loadLog()
+    }
+    func selectCurlProject(_ id: UUID) {
+        guard curlWorkspace.project(id) != nil else { return }
+        curlWorkspace.flush()
+        selectedProject = nil; selectedApplication = nil; selectedSession = nil
+        selectedCurlProject = id
+        UserDefaults.standard.set(id.uuidString, forKey: "selectedCurlProject")
+        loadLog()
+    }
+    func removeCurlProject(_ id: UUID) throws {
+        try curlWorkspace.remove(id)
+        if selectedCurlProject == id {
+            closeCurlProject()
+            if let next = curlWorkspace.projects.first { selectCurlProject(next.id) }
+            else if let project = config.projects.first { select(project) }
+            else if let application = applications.first { selectApplication(application) }
+        }
+    }
+    private func closeCurlProject() {
+        guard selectedCurlProject != nil else { return }
+        curlWorkspace.flush()
+        selectedCurlProject = nil
+        UserDefaults.standard.removeObject(forKey: "selectedCurlProject")
     }
     func setProjectKind(_ kind: ProjectKind, for id: UUID) {
         guard !state(for: id).isBusy, let index = config.projects.firstIndex(where: { $0.id == id }) else { return }
@@ -469,6 +504,7 @@ final class AppModel: ObservableObject {
         if !persist() { config.projects[index] = original }
     }
     func toggleSession(_ session: RunSession, mode: HistorySelection.Mode = .single) {
+        closeCurlProject()
         selectedApplication = session.attachment?.application.id
         selectedProject = session.attachment == nil ? config.projects.first(where: { $0.path == session.projectPath })?.id : nil
         historySelection.select(session.id, visible: visibleHistory.map(\.id), mode: mode)
@@ -756,6 +792,7 @@ final class AppModel: ObservableObject {
     }
     func run() { if let id = selectedProject { run(projectID: id) } }
     func selectApplication(_ target: ApplicationTarget) {
+        closeCurlProject()
         selectedProject = nil; selectedApplication = target.id
         let current = applicationConnections[target.id]?.sessionID
         selectedSession = history.first { $0.id == current }?.id ?? history.first { $0.belongs(to: target) }?.id
@@ -1340,6 +1377,18 @@ final class AppModel: ObservableObject {
         guard let id = selectedSession, let store else { return }
         do { NSWorkspace.shared.activateFileViewerSelecting([try store.outputFile(for: id)]) }
         catch { self.error = error.localizedDescription }
+    }
+    func revealFlutterBuild(for session: RunSession) {
+        guard let store else { return }
+        Task {
+            do {
+                let log = try store.outputFile(for: session.id)
+                let app = try await Task.detached(priority: .userInitiated) {
+                    try FlutterMacOSLaunch.buildProduct(for: session, log: log)
+                }.value
+                NSWorkspace.shared.activateFileViewerSelecting([app])
+            } catch { self.error = error.localizedDescription }
+        }
     }
     func showFiles() { guard let id = selectedSession, let store else { return }; NSWorkspace.shared.open(store.directory(id)) }
     func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
