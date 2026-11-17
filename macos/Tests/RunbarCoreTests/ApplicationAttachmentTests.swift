@@ -154,6 +154,18 @@ final class ApplicationAttachmentTests: XCTestCase {
         let methods = await vm.methods
         XCTAssertTrue(methods.allSatisfy { ["getVM", "_flutter.listViews"].contains($0) })
     }
+    @MainActor
+    func testRestartRejectsStaleSelectionBeforeLaunching() async throws {
+        let target = ApplicationTarget(name: "Fixture", bundleIdentifier: "test.fixture", bundlePath: "/tmp/Fixture.app")
+        let stale = RunningApplicationCandidate(processID: ProcessInfo.processInfo.processIdentifier,
+                                               application: target, launchedAt: .distantPast, flutterDetected: true)
+        do {
+            _ = try await ApplicationLaunch.restartAndConnect(stale)
+            XCTFail("A reused PID must not allow a restart")
+        } catch let error as RunbarError {
+            XCTAssertEqual(error.localizedDescription, "所选 App 已退出或发生变化，请刷新列表后重试。")
+        }
+    }
     func testBuiltAppStartupFindsAuthenticatedEndpointAndClosingOutputKeepsChildAlive() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")

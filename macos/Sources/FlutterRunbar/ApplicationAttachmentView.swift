@@ -30,8 +30,9 @@ struct ApplicationPickerView: View {
     @State private var manual = false
     @State private var checking = false
     @State private var connecting = false
-    @State private var launching = false
+    @State private var launchStatus: String?
     @State private var needsAuthentication = false
+    @State private var restartCandidate: RunningApplicationCandidate?
     @State private var message: String?
     @State private var operation: Task<Void, Never>?
     private var selected: RunningApplicationCandidate? { candidates.first { $0.processID == selectedPID } }
@@ -67,7 +68,11 @@ struct ApplicationPickerView: View {
                         else if candidate.processID == selectedPID {
                             if checking { ProgressView().controlSize(.mini) }
                             else if endpoint != nil { Text("可直接连接").font(.caption).foregroundStyle(.secondary) }
-                            else if needsAuthentication { Text("缺少认证地址").font(.caption).foregroundStyle(.secondary) }
+                            else if needsAuthentication {
+                                Text("缺少认证地址").font(.caption).foregroundStyle(.secondary)
+                                Button("重新启动并连接…") { restartCandidate = candidate }
+                                    .buttonStyle(.borderless).font(.caption)
+                            }
                             else { Text("未发现调试服务").font(.caption).foregroundStyle(.secondary) }
                         }
                     }.padding(.vertical, 3).tag(Optional(candidate.processID))
@@ -97,7 +102,7 @@ struct ApplicationPickerView: View {
             HStack {
                 if connecting {
                     ProgressView().controlSize(.small)
-                    Text(launching ? "正在启动 App 并等待调试地址…" : "正在连接…").font(.caption)
+                    Text(launchStatus ?? "正在连接…").font(.caption)
                 }
                 Spacer()
                 Button("取消") { operation?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
@@ -106,6 +111,19 @@ struct ApplicationPickerView: View {
                     .disabled(connecting || selected == nil || (existing == nil && endpoint == nil && VMServiceEndpoint(address) == nil))
             }
         }.padding(20).frame(width: 540)
+            .alert("重新启动并连接？", isPresented: Binding(
+                get: { restartCandidate != nil },
+                set: { if !$0 { restartCandidate = nil } }
+            ), presenting: restartCandidate) { candidate in
+                Button("取消", role: .cancel) {}
+                Button("重新启动并连接", role: .destructive) {
+                    launchAndConnect(status: "正在重新启动 App 并等待调试地址…") {
+                        try await ApplicationLaunch.restartAndConnect(candidate)
+                    }
+                }
+            } message: { candidate in
+                Text("Runbar 会退出「\(candidate.application.name)」并从同一构建产物启动。若 App 提示保存，请先处理。")
+            }
             .task { refresh() }
             .onChange(of: selectedPID) { _, _ in detect() }
             .onChange(of: search) { _, _ in
@@ -144,7 +162,7 @@ struct ApplicationPickerView: View {
                 case .authenticationRequired:
                     needsAuthentication = true
                     manual = true
-                    message = "已发现调试服务，但缺少认证地址。请粘贴本次运行的完整链接，或退出 App 后选择「启动已构建的 App」。"
+                    message = "已发现调试服务，但缺少认证地址。可选择「重新启动并连接」，或粘贴本次运行的完整链接。"
                 case .unavailable:
                     manual = true
                     message = "未发现可用的调试服务。请确认 App 使用 Debug 或 Profile 构建，或粘贴本次运行的完整链接。"
@@ -164,21 +182,28 @@ struct ApplicationPickerView: View {
             panel.directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        launchAndConnect(status: "正在启动 App 并等待调试地址…") {
+            try await ApplicationLaunch.connectableApplication(at: url)
+        }
+    }
+    private func launchAndConnect(status: String,
+                                  launch: @escaping @MainActor () async throws -> (RunningApplicationCandidate, VMServiceEndpoint)) {
         operation?.cancel()
         checking = false
-        launching = true
+        launchStatus = status
         connecting = true
         message = nil
         operation = Task {
             do {
-                let (candidate, endpoint) = try await ApplicationLaunch.connectableApplication(at: url)
-                launching = false
+                let (candidate, endpoint) = try await launch()
+                launchStatus = nil
                 try await model.connectApplication(candidate, endpoint: endpoint, enteredAddress: "")
                 operation = nil
                 dismiss()
             } catch {
                 guard !Task.isCancelled else { return }
-                launching = false
+                candidates = ApplicationDiscovery.running()
+                launchStatus = nil
                 connecting = false
                 message = error.localizedDescription
             }

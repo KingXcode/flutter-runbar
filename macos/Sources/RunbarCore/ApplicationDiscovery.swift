@@ -36,11 +36,15 @@ public enum ApplicationDiscovery {
         }.sorted { $0.application.name.localizedStandardCompare($1.application.name) == .orderedAscending }
     }
     @MainActor public static func isCurrent(_ candidate: RunningApplicationCandidate) -> Bool {
+        currentApplication(candidate) != nil
+    }
+    @MainActor static func currentApplication(_ candidate: RunningApplicationCandidate) -> NSRunningApplication? {
         guard let app = NSRunningApplication(processIdentifier: candidate.processID), !app.isTerminated,
               let url = app.bundleURL,
               url.standardizedFileURL.resolvingSymlinksInPath().path == candidate.application.bundlePath,
-              app.bundleIdentifier == candidate.application.bundleIdentifier else { return false }
-        return candidate.launchedAt == app.launchDate
+              app.bundleIdentifier == candidate.application.bundleIdentifier,
+              candidate.launchedAt == app.launchDate else { return nil }
+        return app
     }
 
     /// Only the selected process's listeners; never scan the machine's port range.

@@ -3,22 +3,35 @@ import Darwin
 import Foundation
 
 public struct ApplicationLaunch {
+    @MainActor public static func restartAndConnect(_ candidate: RunningApplicationCandidate) async throws
+        -> (RunningApplicationCandidate, VMServiceEndpoint) {
+        try Task.checkCancellation()
+        guard let app = ApplicationDiscovery.currentApplication(candidate) else {
+            throw RunbarError.message("所选 App 已退出或发生变化，请刷新列表后重试。")
+        }
+        let url = URL(fileURLWithPath: candidate.application.bundlePath)
+        _ = try executableForLaunch(at: url, excluding: candidate.processID)
+        guard app.terminate() || app.isTerminated else {
+            throw RunbarError.message("无法请求退出「\(candidate.application.name)」。请先在 App 中退出。")
+        }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while !app.isTerminated {
+            guard ContinuousClock.now < deadline else {
+                throw RunbarError.message("App 尚未退出。请完成保存或退出提示后重试。")
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try Task.checkCancellation()
+        return try await connectableApplication(at: url)
+    }
+
     /// Launch an existing bundle directly, using only the startup announcement
     /// for discovery. The running app belongs to the user, even after timeout.
     @MainActor public static func connectableApplication(at location: URL) async throws
         -> (RunningApplicationCandidate, VMServiceEndpoint) {
         let url = location.standardizedFileURL.resolvingSymlinksInPath()
-        guard url.pathExtension.lowercased() == "app", ApplicationDiscovery.isFlutterBundle(url),
-              let bundle = Bundle(url: url), let executable = bundle.executableURL,
-              FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw RunbarError.message("请选择一个有效的 macOS Flutter .app 构建产物。")
-        }
-        if ApplicationDiscovery.running().contains(where: { $0.application.bundlePath == url.path }) {
-            throw RunbarError.message("这个 App 正在运行。可直接选择它，或退出该 App 后再用这个入口启动。")
-        }
-
         let process = Process()
-        process.executableURL = executable
+        process.executableURL = try executableForLaunch(at: url)
         process.currentDirectoryURL = url.deletingLastPathComponent()
         process.standardInput = FileHandle.nullDevice
         let output = try ApplicationLaunchOutput()
@@ -53,6 +66,18 @@ public struct ApplicationLaunch {
             try await Task.sleep(for: .milliseconds(100))
         }
         throw RunbarError.message("App 已启动，但未取得调试地址。请确认是提供 Dart VM Service 的 Debug 或 Profile 构建。")
+    }
+
+    @MainActor private static func executableForLaunch(at url: URL, excluding processID: Int32? = nil) throws -> URL {
+        guard url.pathExtension.lowercased() == "app", ApplicationDiscovery.isFlutterBundle(url),
+              let executable = Bundle(url: url)?.executableURL,
+              FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw RunbarError.message("请选择一个有效的 macOS Flutter .app 构建产物。")
+        }
+        if ApplicationDiscovery.running().contains(where: { $0.application.bundlePath == url.path && $0.processID != processID }) {
+            throw RunbarError.message("同一路径的 App 实例仍在运行。可直接选择它，或退出后再启动。")
+        }
+        return executable
     }
 }
 
